@@ -181,7 +181,7 @@ $$(".tabs button").forEach((b) =>
 async function render() {
   $$(".tabs button").forEach((b) => b.classList.toggle("on", b.dataset.tab === state.tab));
   $$(".tab").forEach((s) => s.classList.toggle("hidden", s.id !== "tab-" + state.tab));
-  if (state.tab !== "upload") await loadDogs();
+  await loadDogs();
   ({ upload: renderUpload, view: renderView, review: renderReview, admin: renderAdmin })[state.tab]();
   updateReviewBadge();
 }
@@ -205,10 +205,43 @@ async function renderUpload() {
     else c.review++;
   });
   $("#stats").innerHTML = [
-    ["전체", c.total], ["분류 완료", c.done], ["확인 필요", c.review], ["대기", c.pending],
-  ].map(([k, v]) => `<div class="stat"><b>${v}</b><span>${k}</span></div>`).join("");
+    ["전체", c.total, ""], ["분류 완료", c.done, "view"], ["확인 필요", c.review, "review"], ["대기", c.pending, "pending"],
+  ].map(([k, v, go]) => `<div class="stat ${go && v ? "link" : ""}" data-go="${go}"><b>${v}</b><span>${k}${go && v ? " ›" : ""}</span></div>`).join("");
+  $$("#stats .stat.link").forEach((el) => el.addEventListener("click", () => {
+    const go = el.dataset.go;
+    if (go === "pending") { $("#retry-pending").click(); return; }
+    if (go === "view") { state.viewTeacher = ""; lsSet("viewTeacher", ""); }
+    state.tab = go;
+    render();
+    scrollTo(0, 0);
+  }));
   $("#retry-pending").classList.toggle("hidden", !c.pending);
+  renderRecent();
 }
+
+// 올리기 탭: 분류 결과 바로 확인
+async function renderRecent() {
+  const box = $("#recent");
+  const { data: photos } = await sb.from("photos")
+    .select("id, path, thumb_path, dog_ids, status, created_at")
+    .eq("day", state.day).in("status", ["done", "review"])
+    .order("created_at", { ascending: false }).limit(60);
+  $("#recent-card").classList.toggle("hidden", !photos?.length);
+  if (!photos?.length) return;
+  const thumbUrl = await signed("photos", photos.map((p) => p.thumb_path));
+  box.innerHTML = photos.map((p) => {
+    const names = p.dog_ids.map((id) => dogById(id)?.name).filter(Boolean);
+    const label = p.status === "review"
+      ? `<em class="cap warn">확인 필요</em>`
+      : `<em class="cap">${esc(names.join(", ") || "강아지 없음")}</em>`;
+    return `<figure><img loading="lazy" src="${thumbUrl(p.thumb_path)}" data-full="${p.path}" alt="">${label}</figure>`;
+  }).join("");
+  bindViewer(box);
+}
+$("#recent-all").addEventListener("click", () => {
+  state.viewTeacher = ""; lsSet("viewTeacher", "");
+  state.tab = "view"; render(); scrollTo(0, 0);
+});
 $("#refresh-stats").addEventListener("click", renderUpload);
 
 let lastClassifyError = "";

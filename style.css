@@ -150,3 +150,16 @@ main { max-width: 760px; margin: 0 auto; padding: 16px; padding-bottom: 60px; }
   .stats { grid-template-columns: repeat(2, 1fr); }
   .grid { grid-template-columns: repeat(3, 1fr); }
 }
+
+/* 올리기 탭 분류 결과 */
+.stat.link { cursor: pointer; outline: 1px solid transparent; transition: outline-color .15s; }
+.stat.link:hover { outline-color: var(--navy); }
+.recent { margin-top: 10px; grid-template-columns: repeat(auto-fill, minmax(120px, 1fr)); gap: 8px; }
+.recent figure { margin: 0; position: relative; }
+.recent .cap {
+  position: absolute; left: 4px; right: 4px; bottom: 4px; font-style: normal; font-size: 12px; font-weight: 700;
+  background: rgba(0, 59, 137, .88); color: #fff; border-radius: 6px; padding: 2px 6px;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.recent .cap.warn { background: var(--yellow); color: var(--navy); }
+@media (max-width: 420px) { .recent { grid-template-columns: repeat(3, 1fr); } }
