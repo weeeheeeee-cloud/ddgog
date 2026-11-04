@@ -259,3 +259,10 @@ h3.sec small { display: block; font-weight: 400; font-size: 12px; margin-top: 2p
 /* 출석 명단: 처음 보는 이름 */
 .tag-new { font-style: normal; font-size: 11px; font-weight: 700; background: #dbeafe; color: var(--navy); border-radius: 999px; padding: 1px 7px; margin-left: 4px; }
 .roll-chips span.new { border-color: #93c5fd; }
+
+/* 명단 현황 */
+.roster-stats { display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px; margin-bottom: 14px; }
+.roster-stats .stat { background: #fff; border: 1px solid var(--line); }
+.roster-stats .stat.warn b { color: var(--danger); }
+.roster-stats .stats-note { grid-column: 1 / -1; margin: 0; font-size: 12px; color: #b7791f; }
+@media (max-width: 420px) { .roster-stats { grid-template-columns: repeat(2, 1fr); } }

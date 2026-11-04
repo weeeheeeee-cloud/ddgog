@@ -845,6 +845,19 @@ async function renderRoster() {
     </div>`;
   };
 
+  // 명단 현황 (검색과 상관없이 전체 기준)
+  const allNamed = state.dogs.filter((d) => !d.auto);
+  const totalRefs = allNamed.reduce((a, d) => a + refCount(d), 0);
+  const noPhoto = allNamed.filter((d) => !refCount(d)).length;
+  const fewPhoto = allNamed.filter((d) => refCount(d) > 0 && refCount(d) < 3).length;
+  const autoCount = state.dogs.filter((d) => d.auto && d.active).length;
+  $("#roster-stats").innerHTML = `
+    <div class="stat"><b>${allNamed.length}</b><span>등록된 강아지</span></div>
+    <div class="stat"><b>${totalRefs}</b><span>대표 사진</span></div>
+    <div class="stat ${noPhoto ? "warn" : ""}"><b>${noPhoto}</b><span>사진 없음</span></div>
+    <div class="stat ${autoCount ? "warn" : ""}"><b>${autoCount}</b><span>이름 없는 그룹</span></div>
+    ${fewPhoto ? `<p class="stats-note">사진이 3장 미만인 아이가 ${fewPhoto}마리 있어요. 더 올리면 정확해져요.</p>` : ""}`;
+
   $("#roster-list").innerHTML = named.length
     ? `<h3 class="sec">명단 ${named.length}마리</h3>` + named.map(card).join("")
     : `<div class="empty">${q ? "찾는 이름이 없어요." : "아직 명단이 없어요. 위에서 등록하거나, 사진 탭에서 출석 보드를 올려 보세요."}</div>`;
