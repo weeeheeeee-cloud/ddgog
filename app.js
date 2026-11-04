@@ -201,8 +201,8 @@ async function renderPhotos() {
   }).join("") +
   (unsorted.length ? `<div class="dog-group unsorted" data-list="unsorted">
       <div class="dog-head"><span class="avatar q">?</span>
-        <div class="grow"><b>분류 안 된 사진</b><small class="muted">사진을 눌러 강아지를 골라 주세요</small></div>
-        <small class="muted">${unsorted.length}장</small></div>
+        <div class="grow"><b>분류 안 된 사진 ${unsorted.length}장</b><small class="muted">사진을 눌러 직접 고르거나, AI에게 다시 맡겨 보세요</small></div>
+        ${state.busy ? "" : `<button id="reclassify" class="btn ghost sm">AI로 다시 분류</button>`}</div>
       <div class="grid">${unsorted.map(img).join("")}</div>
     </div>` : "") +
   (!dogIds.length && !unsorted.length ? `<div class="empty">분류를 기다리는 사진이 있어요.</div>` : "");
@@ -214,6 +214,14 @@ async function renderPhotos() {
     const key = el.closest("[data-list]")?.dataset.list;
     openSheet(el.dataset.photo, lists.get(key) || [el.dataset.photo]);
   }));
+  // 그룹이 늘어난 뒤 다시 돌리면 대부분 자리를 찾아감
+  $("#reclassify")?.addEventListener("click", async () => {
+    const ids = unsorted.map((p) => p.id);
+    for (let i = 0; i < ids.length; i += 200) {
+      await sb.from("photos").update({ status: "pending", dog_ids: [], ai_note: null }).in("id", ids.slice(i, i + 200));
+    }
+    classifyPending();
+  });
   $$("[data-rename]", box).forEach((b) => b.addEventListener("click", async () => {
     if (await renameDog(dogById(b.dataset.rename))) renderPhotos();
   }));

@@ -38,12 +38,13 @@ The photos are sent to each dog's owner, so decide who the photo is ABOUT.
   e.g. posing or playing together), they are ALL main dogs.
 
 Reply with JSON only, no other text:
-{"dogs":[<reference numbers of MAIN dogs>],"new_dog":true|false,"unknown_main":<number>,"confidence":"high"|"low","note":"<짧은 한국어 메모: 무엇으로 판단했는지>"}
+{"dogs":[<reference numbers of MAIN dogs>],"new_dog":true|false,"unknown_main":<number>,"confidence":"high"|"low","note":"<한국어 30자 이내: 판단 근거>"}
+Keep "note" very short (under 30 Korean characters).
 - "dogs": the known dogs that are MAIN dogs in the new photo ([] if none).
 - "unknown_main": how many MAIN dogs match none of the known dogs.
-- "new_dog": true ONLY if the photo has exactly one MAIN dog, it matches none of the known dogs,
-  and enough of it is visible (face, or clear body/coat/clothes) to recognize it again later.
-  Then "dogs" must be [].
+- "new_dog": true if the photo has exactly one MAIN dog and you are fairly sure it is none of the
+  known dogs (e.g. clearly different coat color, size or breed type), even if its face is hidden.
+  Then "dogs" must be []. Do not set it when the dog could plausibly be one of the known dogs.
 - "confidence": "high" when the clues clearly point to one dog. "low" if the dog is blurry or
   mostly hidden, if two known dogs fit about equally, or if it is unclear which dogs are main.`;
 
@@ -57,6 +58,26 @@ function json(body: unknown, status = 200) {
 }
 
 type Supa = ReturnType<typeof createClient>;
+
+// 응답이 길어 잘리거나 코드블록으로 감싸져도 최대한 읽어냄
+function parseReply(text: string) {
+  const m = text.match(/\{[\s\S]*\}/);
+  if (m) {
+    try { return JSON.parse(m[0]); } catch { /* 아래에서 필드별로 시도 */ }
+  }
+  const dogs = text.match(/"dogs"\s*:\s*\[([^\]]*)\]/);
+  const conf = text.match(/"confidence"\s*:\s*"(high|low)"/);
+  const nd = text.match(/"new_dog"\s*:\s*(true|false)/);
+  const um = text.match(/"unknown_main"\s*:\s*(\d+)/);
+  if (!dogs) return { dogs: [], confidence: "low", note: "응답 해석 실패" };
+  return {
+    dogs: dogs[1].split(",").map((x) => Number(x.trim())).filter((n) => n > 0),
+    confidence: conf ? conf[1] : "low",
+    new_dog: nd ? nd[1] === "true" : false,
+    unknown_main: um ? Number(um[1]) : 0,
+    note: null,
+  };
+}
 
 async function download(supa: Supa, bucket: string, path: string) {
   const { data, error } = await supa.storage.from(bucket).download(path);
@@ -155,7 +176,7 @@ Deno.serve(async (req) => {
       },
       body: JSON.stringify({
         model: MODEL,
-        max_tokens: 300,
+        max_tokens: 800,
         system: SYSTEM,
         messages: [{ role: "user", content }],
       }),
@@ -168,8 +189,7 @@ Deno.serve(async (req) => {
 
     const out = await res.json();
     const text: string = (out.content ?? []).map((c: { text?: string }) => c.text ?? "").join("");
-    const m = text.match(/\{[\s\S]*\}/);
-    const parsed = m ? JSON.parse(m[0]) : { dogs: [], confidence: "low", note: "응답 해석 실패" };
+    const parsed = parseReply(text);
     const note = typeof parsed.note === "string" ? parsed.note.slice(0, 200) : null;
 
     const nums: number[] = Array.isArray(parsed.dogs) ? parsed.dogs.map(Number) : [];
@@ -179,7 +199,7 @@ Deno.serve(async (req) => {
     let status = parsed.confidence === "high" && ids.length > 0 && unknownMain === 0 ? "done" : "review";
 
     // 처음 보는 강아지 → 새 그룹 자동 생성 (이 사진을 기준 사진으로)
-    if (!ids.length && parsed.new_dog === true && parsed.confidence === "high") {
+    if (!ids.length && parsed.new_dog === true && unknownMain <= 1) {
       const { count } = await supa.from("dogs").select("id", { count: "exact", head: true });
       const { data: dog, error: dErr } = await supa.from("dogs")
         .insert({ name: `새 강아지 ${(count ?? 0) + 1}`, auto: true }).select("id").single();
