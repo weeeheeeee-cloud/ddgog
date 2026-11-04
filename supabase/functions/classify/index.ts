@@ -21,12 +21,20 @@ Decide which reference dogs appear in the new photo.
 Compare fur color and pattern, face markings, ear shape, muzzle, size and coat length.
 Clothes, collars and backgrounds can differ between photos, so do not rely on them.
 Many dogs look alike (e.g. several white Maltese). Only match when the specific dog is the same.
+The photos are sent to each dog's owner, so decide who the photo is ABOUT.
+- A MAIN dog is a subject of the photo: in focus, reasonably large, usually near the center,
+  face or body clearly shown. Dogs in the background, cut off at the edge, tiny, blurry,
+  or only partly visible are NOT main dogs, even if you can recognize them.
+- If two or three dogs share the frame equally (similar size, all in focus, all clearly shown,
+  e.g. posing or playing together), they are ALL main dogs.
 Reply with JSON only, no other text:
-{"dogs":[<reference numbers>],"new_dog":true|false,"confidence":"high"|"low","note":"<짧은 한국어 메모>"}
-- "dogs": every reference dog clearly visible in the new photo ([] if none).
-- "new_dog": true ONLY if the new photo shows exactly one dog, clearly visible with its face,
+{"dogs":[<reference numbers of MAIN dogs>],"new_dog":true|false,"unknown_main":<number>,"confidence":"high"|"low","note":"<짧은 한국어 메모>"}
+- "dogs": the reference dogs that are MAIN dogs in the new photo ([] if none).
+- "unknown_main": how many MAIN dogs match none of the references.
+- "new_dog": true ONLY if the photo has exactly one MAIN dog, its face is clearly visible,
   and it matches none of the references. Then "dogs" must be [].
-- "confidence": "low" if a dog is blurry, mostly hidden, or two references look alike.`;
+- "confidence": "low" if a main dog is blurry or hidden, if two references look alike,
+  or if it is unclear which dogs are the main ones.`;
 
 const refCache = new Map<string, string>();
 
@@ -129,7 +137,9 @@ Deno.serve(async (req) => {
 
     const nums: number[] = Array.isArray(parsed.dogs) ? parsed.dogs.map(Number) : [];
     let ids = [...new Set(nums.filter((n) => n >= 1 && n <= refs.length).map((n) => refs[n - 1].id))];
-    let status = parsed.confidence === "high" && ids.length > 0 ? "done" : "review";
+    // 주인공 중 모르는 아이가 섞여 있으면 사람이 확인하도록
+    const unknownMain = Number(parsed.unknown_main) || 0;
+    let status = parsed.confidence === "high" && ids.length > 0 && unknownMain === 0 ? "done" : "review";
 
     // 처음 보는 강아지 → 새 그룹 자동 생성 (이 사진을 기준 사진으로)
     if (!ids.length && parsed.new_dog === true && parsed.confidence === "high") {
