@@ -6,169 +6,26 @@
 <meta name="theme-color" content="#003B89">
 <title>댕겨올개 사진함</title>
 <link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/orioncactus/pretendard@v1.3.9/dist/web/static/pretendard.min.css">
-<script>
-  // 매번 최신 화면 파일을 받도록 주소에 시간을 붙여 불러옴
-  window.__v = Date.now();
-  document.write('<link rel="stylesheet" href="style.css?v=' + window.__v + '">');
-</script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
 </head>
 <body>
-
-<!-- 로그인 -->
-<section id="login" class="login hidden">
-  <div class="login-card">
-    <div class="brand-mark">🐾</div>
-    <h1>댕겨올개 사진함</h1>
-    <p class="muted">직원 계정으로 로그인하세요</p>
-    <form id="login-form">
-      <input id="login-email" type="email" placeholder="이메일" autocomplete="username" required>
-      <input id="login-pw" type="password" placeholder="비밀번호" autocomplete="current-password" required>
-      <button class="btn primary block" type="submit">로그인</button>
-      <p id="login-err" class="err"></p>
-    </form>
-  </div>
-</section>
-
-<!-- 앱 -->
-<div id="app" class="hidden">
-  <header class="top">
-    <div class="top-row">
-      <span class="logo">🐾 댕겨올개 사진함</span>
-      <button id="logout" class="link">로그아웃</button>
-    </div>
-    <div class="date-row">
-      <button class="icon" data-shift="-1" aria-label="전날">‹</button>
-      <input id="day" type="date">
-      <button class="icon" data-shift="1" aria-label="다음날">›</button>
-      <button id="today" class="chip">오늘</button>
-    </div>
-    <nav class="tabs">
-      <button data-tab="photos" class="on">사진</button>
-      <button data-tab="roster">명단</button>
-      <button data-tab="admin">관리</button>
-    </nav>
-  </header>
-
-  <div class="layout">
-  <aside id="side" class="side">
-    <button id="side-toggle" class="side-head" type="button">
-      <span>🐾 명단 <b id="side-count">0</b>마리</span>
-      <small id="side-sub" class="muted"></small>
-      <i class="chev">▾</i>
-    </button>
-    <div id="side-list" class="side-list"></div>
-  </aside>
-  <main>
-    <!-- 사진 -->
-    <section id="tab-photos" class="tab">
-      <div id="roll" class="card roll">
-        <div class="row between">
-          <h2>📋 오늘 출석</h2>
-          <span id="roll-count" class="muted small"></span>
-        </div>
-        <div id="roll-body"></div>
-      </div>
-      <input id="board-file" type="file" accept="image/*" hidden>
-      <input id="ref-file" type="file" accept="image/*" multiple hidden>
-
-      <label class="drop">
-        <input id="file" type="file" accept="image/*" multiple hidden>
-        <span class="drop-icon">📷</span>
-        <strong>사진 올리기</strong>
-        <span class="muted">여러 장을 한 번에 골라도 돼요. 올리면 AI가 강아지별로 묶어줘요.</span>
-      </label>
-
-      <div id="progress" class="card hidden">
-        <div class="row between"><strong id="pg-title"></strong><span id="pg-count" class="muted small"></span></div>
-        <div class="bar"><i id="pg-bar"></i></div>
-        <p id="pg-detail" class="muted small"></p>
-      </div>
-
-      <div id="summary" class="summary"></div>
-      <div id="groups"></div>
-    </section>
-
-    <!-- 명단 -->
-    <section id="tab-roster" class="tab hidden">
-      <div id="roster-stats" class="roster-stats"></div>
-      <div class="card">
-        <h2>새 강아지 등록</h2>
-        <p class="muted small">정면·옆·뒤·엎드린 모습·옷 입은 모습 등 <b>여러 각도 사진을 많이</b> 올릴수록 얼굴이 안 보이는 사진도 잘 구분해요. 장수 제한은 없어요.</p>
-        <form id="new-dog" class="new-dog">
-          <input id="new-dog-name" placeholder="이름" required>
-          <input id="new-dog-note" placeholder="특징 (예: 흰색 비숑, 왼쪽 귀 갈색) — 선택">
-          <label class="btn ghost block file-btn">
-            <input id="new-dog-files" type="file" accept="image/*" multiple hidden>
-            <span id="new-dog-files-label">📷 대표 사진 고르기 (여러 장)</span>
-          </label>
-          <button class="btn primary block" type="submit">등록</button>
-        </form>
-      </div>
-      <input id="roster-search" class="roster-search" placeholder="🔍 이름 검색">
-      <div id="roster-list"></div>
-      <div id="roster-auto"></div>
-      <input id="roster-file" type="file" accept="image/*" multiple hidden>
-    </section>
-
-    <!-- 관리 -->
-    <section id="tab-admin" class="tab hidden">
-
-      <div class="card">
-        <h2>오래된 사진 정리</h2>
-        <div class="row">
-          <select id="purge-days">
-            <option value="3">3일</option>
-            <option value="7" selected>7일</option>
-            <option value="14">14일</option>
-            <option value="30">30일</option>
-          </select>
-          <span>지난 사진</span>
-          <button id="purge" class="btn danger">삭제</button>
-        </div>
-        <p id="purge-msg" class="muted small"></p>
-      </div>
-
-      <div class="card danger-zone">
-        <h2>전체 초기화</h2>
-        <p class="muted small">모든 사진과 강아지 그룹을 지우고 처음 상태로 돌려요.</p>
-        <button id="reset-all" class="btn danger">전체 초기화</button>
-        <p id="reset-msg" class="muted small"></p>
-      </div>
-    </section>
-  </main>
-  </div>
-</div>
-
-<!-- 사진 크게 보기 + 강아지 지정 -->
-<div id="sheet" class="sheet hidden">
-  <div class="sheet-body">
-    <button class="sheet-close" aria-label="닫기">×</button>
-    <div class="sheet-view">
-      <img id="sheet-img" alt="">
-      <button id="sheet-prev" class="nav prev" aria-label="이전 사진">‹</button>
-      <button id="sheet-next" class="nav next" aria-label="다음 사진">›</button>
-      <span id="sheet-count" class="count"></span>
-    </div>
-    <p id="sheet-note" class="ai-note"></p>
-    <p class="small"><b>이 사진의 주인공</b>을 모두 골라 주세요</p>
-    <div id="sheet-chips" class="chips"></div>
-    <div class="row">
-      <button id="sheet-save" class="btn primary grow">분류 저장</button>
-      <button id="sheet-new" class="btn ghost">새 강아지로</button>
-      <button id="sheet-dl" class="btn ghost">이 사진 받기</button>
-      <button id="sheet-out" class="btn ghost hidden">여기서 빼기</button>
-      <button id="sheet-del" class="btn ghost hidden">삭제</button>
-    </div>
-  </div>
-</div>
-
-<div id="toast" class="toast hidden"></div>
-
-<div id="update-bar" class="update-bar hidden">
-  <span>새 버전이 올라왔어요</span>
-  <button id="update-now" class="btn sm">새로고침</button>
-</div>
-<script type="module">import("./app.js?v=" + window.__v);</script>
+<div id="boot-loading" style="font-family:sans-serif;color:#6b7280;text-align:center;padding:40vh 16px 0">🐾 불러오는 중…</div>
+<script>
+  // 화면(shell.html)·스타일·스크립트를 매번 최신으로 불러옴 → 수정 사항이 바로 반영됨
+  (async () => {
+    const v = Date.now();
+    const css = document.createElement("link");
+    css.rel = "stylesheet";
+    css.href = "style.css?v=" + v;
+    document.head.appendChild(css);
+    await new Promise((r) => { css.onload = r; css.onerror = r; });
+    const html = await fetch("shell.html?v=" + v, { cache: "no-store" }).then((r) => r.text());
+    document.body.innerHTML = html;
+    await import("./app.js?v=" + v);
+  })().catch(() => {
+    const el = document.getElementById("boot-loading");
+    if (el) el.textContent = "불러오지 못했어요. 새로고침해 주세요.";
+  });
+</script>
 </body>
 </html>

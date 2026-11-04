@@ -1028,7 +1028,7 @@ $("#reset-all").addEventListener("click", async () => {
 // 화면 파일이 바뀌면(제가 수정해서 올리면) 위에 알림 띄우기
 async function fingerprint() {
   const t = Date.now();
-  const parts = await Promise.all(["app.js", "style.css", "index.html"].map((f) =>
+  const parts = await Promise.all(["app.js", "style.css", "shell.html", "index.html"].map((f) =>
     fetch(`./${f}?check=${t}`, { cache: "no-store" }).then((r) => (r.ok ? r.text() : "")).catch(() => "")));
   const all = parts.join("|");
   if (!parts.every(Boolean)) return null;
