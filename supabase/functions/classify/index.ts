@@ -1,5 +1,6 @@
 // 댕겨올개 사진 분류 Edge Function
-// 그날 등원한 강아지들의 기준 사진과 새 사진을 Claude 에게 보내서 어떤 강아지인지 판별합니다.
+// 기준 사진(등록한 강아지 + AI가 자동으로 만든 "새 강아지" 그룹)과 새 사진을 Claude 에게 보내서
+// 어떤 강아지인지 판별합니다. 처음 보는 강아지면 새 그룹을 자동으로 만듭니다.
 // 필요한 Secret: ANTHROPIC_API_KEY  (선택: CLASSIFY_MODEL)
 
 import { createClient } from "jsr:@supabase/supabase-js@2";
@@ -15,16 +16,18 @@ const CORS = {
 };
 
 const SYSTEM = `You identify individual dogs in photos taken at a dog daycare.
-You get numbered reference photos (one per dog, with optional notes), then ONE new photo.
-Decide which of the reference dogs appear in the new photo.
+You get numbered reference photos (one per known dog, possibly none yet), then ONE new photo.
+Decide which reference dogs appear in the new photo.
 Compare fur color and pattern, face markings, ear shape, muzzle, size and coat length.
 Clothes, collars and backgrounds can differ between photos, so do not rely on them.
+Many dogs look alike (e.g. several white Maltese). Only match when the specific dog is the same.
 Reply with JSON only, no other text:
-{"dogs":[<reference numbers>],"confidence":"high"|"low","note":"<짧은 한국어 메모>"}
-- "dogs": every listed dog clearly visible in the new photo ([] if none).
+{"dogs":[<reference numbers>],"new_dog":true|false,"confidence":"high"|"low","note":"<짧은 한국어 메모>"}
+- "dogs": every reference dog clearly visible in the new photo ([] if none).
+- "new_dog": true ONLY if the new photo shows exactly one dog, clearly visible with its face,
+  and it matches none of the references. Then "dogs" must be [].
 - "confidence": "low" if a dog is blurry, mostly hidden, or two references look alike.`;
 
-// 기준 사진은 인스턴스가 살아있는 동안 메모리에 보관
 const refCache = new Map<string, string>();
 
 function json(body: unknown, status = 200) {
@@ -34,21 +37,22 @@ function json(body: unknown, status = 200) {
   });
 }
 
-async function download(supa: ReturnType<typeof createClient>, bucket: string, path: string) {
+type Supa = ReturnType<typeof createClient>;
+
+async function download(supa: Supa, bucket: string, path: string) {
   const { data, error } = await supa.storage.from(bucket).download(path);
   if (error || !data) throw new Error(`download failed: ${bucket}/${path}`);
-  return encodeBase64(new Uint8Array(await data.arrayBuffer()));
+  return new Uint8Array(await data.arrayBuffer());
 }
 
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") return new Response("ok", { headers: CORS });
   if (!ANTHROPIC_KEY) return json({ error: "ANTHROPIC_API_KEY 가 설정되지 않았어요" }, 500);
 
-  const authHeader = req.headers.get("Authorization") ?? "";
   const supa = createClient(
     Deno.env.get("SUPABASE_URL")!,
     Deno.env.get("SUPABASE_ANON_KEY")!,
-    { global: { headers: { Authorization: authHeader } } },
+    { global: { headers: { Authorization: req.headers.get("Authorization") ?? "" } } },
   );
   const { data: { user } } = await supa.auth.getUser();
   if (!user) return json({ error: "로그인이 필요해요" }, 401);
@@ -64,36 +68,38 @@ Deno.serve(async (req) => {
     .from("photos").select("id, day, thumb_path").eq("id", photoId).single();
   if (pErr || !photo) return json({ error: "사진을 찾을 수 없어요" }, 404);
 
-  // 후보: 그날 담당이 지정된 강아지 → 없으면 활성 강아지 전체
-  const { data: assigned } = await supa
-    .from("assignments").select("dog_id").eq("day", photo.day);
+  // 후보: 그날 담당이 지정된 강아지 + 이름 안 붙은 자동 그룹. 담당 지정이 없으면 활성 강아지 전체
+  const { data: assigned } = await supa.from("assignments").select("dog_id").eq("day", photo.day);
   let q = supa.from("dogs").select("id, name, note, ref_path")
-    .eq("active", true).not("ref_path", "is", null).order("name");
-  if (assigned && assigned.length) q = q.in("id", assigned.map((a) => a.dog_id));
-  const { data: dogs } = await q;
-  if (!dogs || dogs.length === 0) {
-    await supa.from("photos").update({ status: "review", ai_note: "기준 사진이 등록된 강아지가 없어요" }).eq("id", photoId);
-    return json({ status: "review" });
+    .eq("active", true).not("ref_path", "is", null).order("created_at");
+  if (assigned && assigned.length) {
+    q = q.or(`id.in.(${assigned.map((a) => a.dog_id).join(",")}),auto.eq.true`);
   }
+  const { data: dogs } = await q;
+  const refs = dogs ?? [];
 
   try {
-    const content: unknown[] = [{ type: "text", text: "Reference dogs:" }];
-    for (let i = 0; i < dogs.length; i++) {
-      const d = dogs[i];
-      let b64 = refCache.get(d.ref_path!);
-      if (!b64) {
-        b64 = await download(supa, "refs", d.ref_path!);
-        refCache.set(d.ref_path!, b64);
+    const content: Record<string, unknown>[] = [];
+    if (refs.length) {
+      content.push({ type: "text", text: "Reference dogs:" });
+      for (let i = 0; i < refs.length; i++) {
+        const d = refs[i];
+        let b64 = refCache.get(d.ref_path!);
+        if (!b64) {
+          b64 = encodeBase64(await download(supa, "refs", d.ref_path!));
+          refCache.set(d.ref_path!, b64);
+        }
+        content.push({ type: "text", text: `[${i + 1}] ${d.name}${d.note ? ` — ${d.note}` : ""}` });
+        content.push({ type: "image", source: { type: "base64", media_type: "image/jpeg", data: b64 } });
       }
-      content.push({ type: "text", text: `[${i + 1}] ${d.name}${d.note ? ` — ${d.note}` : ""}` });
-      content.push({ type: "image", source: { type: "base64", media_type: "image/jpeg", data: b64 } });
+      content[content.length - 1].cache_control = { type: "ephemeral" };
+    } else {
+      content.push({ type: "text", text: "Reference dogs: none yet." });
     }
-    // 기준 사진 묶음은 같은 날 반복되므로 캐시 지점 표시
-    (content[content.length - 1] as Record<string, unknown>).cache_control = { type: "ephemeral" };
 
-    const target = await download(supa, "photos", photo.thumb_path);
+    const targetBytes = await download(supa, "photos", photo.thumb_path);
     content.push({ type: "text", text: "New photo to classify:" });
-    content.push({ type: "image", source: { type: "base64", media_type: "image/jpeg", data: target } });
+    content.push({ type: "image", source: { type: "base64", media_type: "image/jpeg", data: encodeBase64(targetBytes) } });
 
     const res = await fetch("https://api.anthropic.com/v1/messages", {
       method: "POST",
@@ -111,7 +117,6 @@ Deno.serve(async (req) => {
     });
 
     if (res.status === 429 || res.status === 529 || res.status >= 500) {
-      // 잠시 후 다시 시도할 수 있도록 pending 유지
       return json({ error: "busy", retryable: true }, 503);
     }
     if (!res.ok) throw new Error(`Claude API ${res.status}: ${await res.text()}`);
@@ -120,19 +125,35 @@ Deno.serve(async (req) => {
     const text: string = (out.content ?? []).map((c: { text?: string }) => c.text ?? "").join("");
     const m = text.match(/\{[\s\S]*\}/);
     const parsed = m ? JSON.parse(m[0]) : { dogs: [], confidence: "low", note: "응답 해석 실패" };
+    const note = typeof parsed.note === "string" ? parsed.note.slice(0, 200) : null;
 
     const nums: number[] = Array.isArray(parsed.dogs) ? parsed.dogs.map(Number) : [];
-    const ids = [...new Set(nums.filter((n) => n >= 1 && n <= dogs.length).map((n) => dogs[n - 1].id))];
-    const confident = parsed.confidence === "high" && ids.length > 0;
+    let ids = [...new Set(nums.filter((n) => n >= 1 && n <= refs.length).map((n) => refs[n - 1].id))];
+    let status = parsed.confidence === "high" && ids.length > 0 ? "done" : "review";
+
+    // 처음 보는 강아지 → 새 그룹 자동 생성 (이 사진을 기준 사진으로)
+    if (!ids.length && parsed.new_dog === true && parsed.confidence === "high") {
+      const { count } = await supa.from("dogs").select("id", { count: "exact", head: true });
+      const { data: dog, error: dErr } = await supa.from("dogs")
+        .insert({ name: `새 강아지 ${(count ?? 0) + 1}`, auto: true }).select("id").single();
+      if (dErr || !dog) throw new Error("새 그룹 생성 실패");
+      const refPath = `${dog.id}-${Date.now()}.jpg`;
+      const up = await supa.storage.from("refs")
+        .upload(refPath, targetBytes, { contentType: "image/jpeg" });
+      if (up.error) throw new Error("기준 사진 저장 실패");
+      await supa.from("dogs").update({ ref_path: refPath }).eq("id", dog.id);
+      ids = [dog.id];
+      status = "done";
+    }
 
     await supa.from("photos").update({
       dog_ids: ids,
       confidence: parsed.confidence ?? null,
-      ai_note: typeof parsed.note === "string" ? parsed.note.slice(0, 200) : null,
-      status: confident ? "done" : "review",
+      ai_note: note,
+      status,
     }).eq("id", photoId);
 
-    return json({ status: confident ? "done" : "review", dog_ids: ids });
+    return json({ status, dog_ids: ids });
   } catch (e) {
     await supa.from("photos").update({ status: "error", ai_note: String(e).slice(0, 200) }).eq("id", photoId);
     return json({ error: String(e) }, 500);

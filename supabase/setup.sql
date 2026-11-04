@@ -18,6 +18,7 @@ create table if not exists public.dogs (
   note text,                 -- 견종·털색·특징 (분류 힌트)
   ref_path text,             -- refs 버킷 안의 기준 사진 경로
   active boolean not null default true,
+  auto boolean not null default false,  -- AI가 자동으로 만든 그룹 (이름 붙이기 전)
   created_at timestamptz not null default now()
 );
 
@@ -79,3 +80,21 @@ create policy staff_delete on storage.objects for delete to authenticated using 
 insert into public.teachers (name, sort) values
   ('에이미', 1), ('원익', 2), ('세훈', 3), ('신디', 4), ('하율', 5), ('형민', 6)
 on conflict (name) do nothing;
+alter table public.dogs add column if not exists auto boolean not null default false;
+
+-- 강아지 그룹 합치기: src 의 사진·담당을 dst 로 옮기고 src 삭제
+create or replace function public.merge_dogs(src uuid, dst uuid)
+returns void
+language sql
+as $$
+  update public.photos
+     set dog_ids = array(select distinct unnest(array_replace(dog_ids, src, dst)))
+   where src = any(dog_ids);
+  delete from public.assignments a
+   where a.dog_id = src
+     and exists (select 1 from public.assignments b where b.day = a.day and b.dog_id = dst);
+  update public.assignments set dog_id = dst where dog_id = src;
+  delete from public.dogs where id = src;
+$$;
+
+grant execute on function public.merge_dogs(uuid, uuid) to authenticated;
