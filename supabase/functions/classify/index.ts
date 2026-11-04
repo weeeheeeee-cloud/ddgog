@@ -123,8 +123,13 @@ Deno.serve(async (req) => {
     if (!paths.length && d.ref_path) paths.push(d.ref_path);
     return { ...d, paths };
   }).filter((d) => d.paths.length);
-  const perDog = withRefs.length <= 30 ? 4 : withRefs.length <= 50 ? 3 : withRefs.length <= 80 ? 2 : 1;
-  const refs = withRefs.map((d) => ({ ...d, paths: d.paths.slice(0, perDog) }));
+  // 한 번에 보내는 대표 사진은 최대 MAX_REF_IMAGES장 (요금이 비싸지는 길이를 넘지 않도록).
+  // 강아지 수로 나눠 강아지당 최대 10장, 사진이 더 많으면 고르게 골라 다양한 각도가 들어가게 함
+  const MAX_REF_IMAGES = 180;
+  const perDog = Math.max(1, Math.min(10, Math.floor(MAX_REF_IMAGES / Math.max(1, withRefs.length))));
+  const spread = (arr: string[], k: number) =>
+    arr.length <= k ? arr : Array.from({ length: k }, (_, i) => arr[Math.floor((i * arr.length) / k)]);
+  const refs = withRefs.map((d) => ({ ...d, paths: spread(d.paths, perDog) }));
 
   try {
     const content: Record<string, unknown>[] = [];

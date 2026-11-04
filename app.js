@@ -87,7 +87,7 @@ async function addRefs(dog, files, onEach) {
   let added = 0;
   for (const f of files) {
     try {
-      const blob = await resize(f, 640, 0.85);
+      const blob = await resize(f, 512, 0.85); // 여러 장을 AI가 한 번에 보도록 작게
       const path = `${dog.id}-${Date.now()}-${added}.jpg`;
       const up = await sb.storage.from("refs").upload(path, blob, { contentType: "image/jpeg" });
       if (up.error) throw up.error;
@@ -383,7 +383,7 @@ async function renderRoll() {
   count.textContent = `${roll.length}마리${need.length ? ` · 대표 사진 필요 ${need.length}` : " · 모두 얼굴 앎 ✓"}`;
   const ref = await signed("refs", known.map((dg) => dg.ref_path));
   body.innerHTML = `
-    ${need.length ? `<p class="small">명단에 없던 아이예요. <b>대표 사진</b>을 올려 주세요. 정면·옆·뒤 등 <b>여러 장</b>을 한 번에 고르면 더 잘 알아봐요. 한 번 올리면 다음부터는 묻지 않아요.</p>
+    ${need.length ? `<p class="small">명단에 없던 아이예요. <b>대표 사진</b>을 올려 주세요. 정면·옆·뒤·엎드린 모습 등 <b>여러 장</b>을 한 번에 고를수록 더 잘 알아봐요. 한 번 올리면 다음부터는 묻지 않아요.</p>
     <div class="need-list">${need.map((dg) => `
       <div class="need-row"><span class="avatar"></span><b class="grow">${esc(dg.name)}</b>
         <button class="btn primary sm" data-ref-for="${dg.id}">대표 사진 올리기</button></div>`).join("")}</div>` : ""}
@@ -834,7 +834,7 @@ async function renderRoster() {
         ${refs.map((r) => `<span class="ref-thumb"><img src="${ref(r.path)}" alt="">${r.id ? `<b class="x" data-del-ref="${r.id}" title="이 사진 빼기">×</b>` : ""}</span>`).join("")}
         <button class="ref-add" data-add-ref>＋<small>사진</small></button>
       </div>
-      <p class="ref-hint ${refs.length >= 3 ? "ok" : ""}">대표 사진 ${refs.length}장${refs.length < 3 ? " · 여러 각도로 3장 이상 올리면 더 정확해요" : " ✓"}</p>
+      <p class="ref-hint ${refs.length >= 3 ? "ok" : ""}">대표 사진 ${refs.length}장${refs.length < 3 ? " · 여러 각도로 많이 올릴수록 정확해요" : refs.length > 10 ? " ✓ (AI는 매번 이 중 최대 10장을 골고루 골라 참고해요)" : " ✓ 더 올려도 돼요"}</p>
       <div class="merge-box hidden">
         <span class="small">이 강아지를</span>
         <select>${state.dogs.filter((o) => o.id !== d.id).map((o) => `<option value="${o.id}">${esc(o.name)}</option>`).join("")}</select>
