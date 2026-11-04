@@ -7,24 +7,19 @@ const $$ = (s, el = document) => [...el.querySelectorAll(s)];
 
 const state = {
   day: kstToday(),
-  tab: "upload",
-  teachers: [],
+  tab: "photos",
   dogs: [],
-  assignments: new Map(),          // dog_id -> teacher_id
-  viewTeacher: lsGet("viewTeacher") || "",
+  photos: [],
+  busy: false, // 업로드·분류 진행 중
 };
 
-/* ---------- 유틸 ---------- */
-function kstToday() {
-  return new Date(Date.now() + 9 * 3600e3).toISOString().slice(0, 10);
-}
+/* ================= 유틸 ================= */
+function kstToday() { return new Date(Date.now() + 9 * 3600e3).toISOString().slice(0, 10); }
 function shiftDay(day, n) {
   const d = new Date(day + "T00:00:00Z");
   d.setUTCDate(d.getUTCDate() + n);
   return d.toISOString().slice(0, 10);
 }
-function lsGet(k) { try { return localStorage.getItem(k); } catch { return null; } }
-function lsSet(k, v) { try { localStorage.setItem(k, v); } catch { /* 무시 */ } }
 function esc(s) {
   return String(s ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
 }
@@ -38,7 +33,6 @@ function toast(msg) {
 }
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
-// 이미지 리사이즈 → JPEG Blob
 async function resize(file, maxSide, quality) {
   let bmp;
   try {
@@ -51,47 +45,45 @@ async function resize(file, maxSide, quality) {
       img.src = URL.createObjectURL(file);
     });
   }
-  const w = bmp.width, h = bmp.height;
-  const scale = Math.min(1, maxSide / Math.max(w, h));
-  const cw = Math.round(w * scale), ch = Math.round(h * scale);
+  const scale = Math.min(1, maxSide / Math.max(bmp.width, bmp.height));
   const c = document.createElement("canvas");
-  c.width = cw; c.height = ch;
-  c.getContext("2d").drawImage(bmp, 0, 0, cw, ch);
+  c.width = Math.round(bmp.width * scale);
+  c.height = Math.round(bmp.height * scale);
+  c.getContext("2d").drawImage(bmp, 0, 0, c.width, c.height);
   if (bmp.close) bmp.close();
   return await new Promise((res) => c.toBlob(res, "image/jpeg", quality));
 }
 
-// 서명 URL 캐시
 const urlCache = new Map();
 async function signed(bucket, paths) {
-  const need = paths.filter((p) => p && !urlCache.has(bucket + p));
+  const need = [...new Set(paths.filter((p) => p && !urlCache.has(bucket + p)))];
   for (let i = 0; i < need.length; i += 100) {
-    const chunk = need.slice(i, i + 100);
-    const { data } = await sb.storage.from(bucket).createSignedUrls(chunk, 60 * 60 * 6);
+    const { data } = await sb.storage.from(bucket).createSignedUrls(need.slice(i, i + 100), 60 * 60 * 6);
     (data || []).forEach((d) => d.signedUrl && urlCache.set(bucket + d.path, d.signedUrl));
   }
   return (p) => (p ? urlCache.get(bucket + p) || "" : "");
 }
 
-// 동시 실행 제한
 async function pool(items, limit, fn) {
   let i = 0;
-  const workers = Array.from({ length: Math.min(limit, items.length) }, async () => {
-    while (i < items.length) {
-      const idx = i++;
-      await fn(items[idx], idx);
-    }
-  });
-  await Promise.all(workers);
+  await Promise.all(Array.from({ length: Math.min(limit, items.length) }, async () => {
+    while (i < items.length) { const idx = i++; await fn(items[idx], idx); }
+  }));
 }
 
-/* ---------- 로그인 ---------- */
+// 이름 붙은 강아지 가나다순 → 새 강아지 번호순
+function dogOrder(a, b) {
+  if (a.auto !== b.auto) return a.auto ? 1 : -1;
+  if (a.auto) return (parseInt(a.name.replace(/\D/g, "")) || 0) - (parseInt(b.name.replace(/\D/g, "")) || 0);
+  return a.name.localeCompare(b.name, "ko");
+}
+const dogById = (id) => state.dogs.find((d) => d.id === id);
+
+/* ================= 로그인 ================= */
 async function boot() {
   const { data: { session } } = await sb.auth.getSession();
   if (session) startApp(); else showLogin();
-  sb.auth.onAuthStateChange((ev) => {
-    if (ev === "SIGNED_OUT") showLogin();
-  });
+  sb.auth.onAuthStateChange((ev) => { if (ev === "SIGNED_OUT") showLogin(); });
 }
 function showLogin() {
   $("#app").classList.add("hidden");
@@ -116,324 +108,288 @@ async function startApp() {
   if (started) return;
   started = true;
   $("#day").value = state.day;
-  await loadBase();
-  render();
+  await render();
 }
 
-/* ---------- 데이터 ---------- */
-async function loadBase() {
-  const { data } = await sb.from("teachers").select("*").order("sort").order("name");
-  state.teachers = data || [];
-  await Promise.all([loadDogs(), loadAssignments()]);
-}
-// AI가 새 그룹을 만들 수 있어서 화면 열 때마다 다시 불러옴
+/* ================= 데이터 ================= */
 async function loadDogs() {
   const { data } = await sb.from("dogs").select("*");
   state.dogs = (data || []).sort(dogOrder);
 }
-// 이름 붙은 강아지 가나다순, 그다음 새 강아지 번호순
-function dogOrder(a, b) {
-  if (a.auto !== b.auto) return a.auto ? 1 : -1;
-  if (a.auto) return (parseInt(a.name.replace(/\D/g, "")) || 0) - (parseInt(b.name.replace(/\D/g, "")) || 0);
-  return a.name.localeCompare(b.name, "ko");
+async function loadPhotos() {
+  const all = [];
+  for (let from = 0; ; from += 1000) {
+    const { data } = await sb.from("photos")
+      .select("id, path, thumb_path, dog_ids, status, ai_note, created_at")
+      .eq("day", state.day).order("created_at").range(from, from + 999);
+    all.push(...(data || []));
+    if (!data || data.length < 1000) break;
+  }
+  state.photos = all;
 }
-async function renameDog(dog) {
-  const name = prompt("강아지 이름", dog.auto ? "" : dog.name);
-  if (!name || !name.trim()) return false;
-  await sb.from("dogs").update({ name: name.trim(), auto: false }).eq("id", dog.id);
-  Object.assign(dog, { name: name.trim(), auto: false });
-  state.dogs.sort(dogOrder);
-  toast(`${dog.name}(으)로 저장했어요`);
-  return true;
-}
-async function loadAssignments() {
-  const { data } = await sb.from("assignments").select("dog_id, teacher_id").eq("day", state.day);
-  state.assignments = new Map((data || []).map((a) => [a.dog_id, a.teacher_id]));
-}
-const dogById = (id) => state.dogs.find((d) => d.id === id);
-const teacherById = (id) => state.teachers.find((t) => t.id === id);
 
-/* ---------- 날짜·탭 ---------- */
-$("#day").addEventListener("change", async (e) => {
-  state.day = e.target.value || kstToday();
-  await loadAssignments();
-  render();
-});
-$$(".date-row [data-shift]").forEach((b) =>
-  b.addEventListener("click", async () => {
-    state.day = shiftDay(state.day, +b.dataset.shift);
-    $("#day").value = state.day;
-    await loadAssignments();
-    render();
-  }));
-$("#today").addEventListener("click", async () => {
-  state.day = kstToday();
-  $("#day").value = state.day;
-  await loadAssignments();
-  render();
-});
-$$(".tabs button").forEach((b) =>
-  b.addEventListener("click", () => {
-    state.tab = b.dataset.tab;
-    render();
-  }));
+/* ================= 날짜·탭 ================= */
+async function setDay(day) {
+  state.day = day;
+  $("#day").value = day;
+  $("#progress").classList.add("hidden");
+  await render();
+}
+$("#day").addEventListener("change", (e) => setDay(e.target.value || kstToday()));
+$$(".date-row [data-shift]").forEach((b) => b.addEventListener("click", () => setDay(shiftDay(state.day, +b.dataset.shift))));
+$("#today").addEventListener("click", () => setDay(kstToday()));
+$$(".tabs button").forEach((b) => b.addEventListener("click", () => { state.tab = b.dataset.tab; render(); }));
 
 async function render() {
   $$(".tabs button").forEach((b) => b.classList.toggle("on", b.dataset.tab === state.tab));
   $$(".tab").forEach((s) => s.classList.toggle("hidden", s.id !== "tab-" + state.tab));
   await loadDogs();
-  ({ upload: renderUpload, view: renderView, review: renderReview, admin: renderAdmin })[state.tab]();
-  updateReviewBadge();
+  if (state.tab === "photos") { await loadPhotos(); await renderPhotos(); }
+  else renderDogs();
 }
 
-async function updateReviewBadge() {
-  const { count } = await sb.from("photos").select("id", { count: "exact", head: true })
-    .eq("day", state.day).in("status", ["review", "error"]);
-  const b = $("#review-count");
-  b.textContent = count || "";
-  b.classList.toggle("hidden", !count);
-}
+/* ================= 사진 화면 ================= */
+async function renderPhotos() {
+  const P = state.photos;
+  const done = P.filter((p) => p.status === "done");
+  const unsorted = P.filter((p) => p.status === "review" || p.status === "error");
+  const pending = P.filter((p) => p.status === "pending");
 
-/* ---------- 올리기 ---------- */
-async function renderUpload() {
-  const { data } = await sb.from("photos").select("status").eq("day", state.day);
-  const c = { total: 0, done: 0, review: 0, pending: 0 };
-  (data || []).forEach((p) => {
-    c.total++;
-    if (p.status === "done") c.done++;
-    else if (p.status === "pending") c.pending++;
-    else c.review++;
-  });
-  $("#stats").innerHTML = [
-    ["전체", c.total, ""], ["분류 완료", c.done, "view"], ["확인 필요", c.review, "review"], ["대기", c.pending, "pending"],
-  ].map(([k, v, go]) => `<div class="stat ${go && v ? "link" : ""}" data-go="${go}"><b>${v}</b><span>${k}${go && v ? " ›" : ""}</span></div>`).join("");
-  $$("#stats .stat.link").forEach((el) => el.addEventListener("click", () => {
-    const go = el.dataset.go;
-    if (go === "pending") { $("#retry-pending").click(); return; }
-    if (go === "view") { state.viewTeacher = ""; lsSet("viewTeacher", ""); }
-    state.tab = go;
-    render();
-    scrollTo(0, 0);
-  }));
-  $("#retry-pending").classList.toggle("hidden", !c.pending);
-  renderRecent();
-}
+  $("#summary").innerHTML = P.length
+    ? `<span><b>${P.length}</b>장</span>
+       <span>분류 완료 <b>${done.length}</b></span>
+       ${unsorted.length ? `<span class="warn">분류 안 됨 <b>${unsorted.length}</b></span>` : ""}
+       ${pending.length && !state.busy ? `<button id="resume" class="btn primary sm">남은 ${pending.length}장 분류하기</button>` : ""}`
+    : "";
+  $("#resume")?.addEventListener("click", () => classifyPending());
 
-// 올리기 탭: 분류 결과 바로 확인
-async function renderRecent() {
-  const box = $("#recent");
-  const { data: photos } = await sb.from("photos")
-    .select("id, path, thumb_path, dog_ids, status, created_at")
-    .eq("day", state.day).in("status", ["done", "review"])
-    .order("created_at", { ascending: false }).limit(60);
-  $("#recent-card").classList.toggle("hidden", !photos?.length);
-  if (!photos?.length) return;
-  const thumbUrl = await signed("photos", photos.map((p) => p.thumb_path));
-  box.innerHTML = photos.map((p) => {
-    const names = p.dog_ids.map((id) => dogById(id)?.name).filter(Boolean);
-    const label = p.status === "review"
-      ? `<em class="cap warn">확인 필요</em>`
-      : `<em class="cap">${esc(names.join(", ") || "강아지 없음")}</em>`;
-    return `<figure><img loading="lazy" src="${thumbUrl(p.thumb_path)}" data-full="${p.path}" alt="">${label}</figure>`;
-  }).join("");
-  bindViewer(box);
-}
-$("#recent-all").addEventListener("click", () => {
-  state.viewTeacher = ""; lsSet("viewTeacher", "");
-  state.tab = "view"; render(); scrollTo(0, 0);
-});
-$("#refresh-stats").addEventListener("click", renderUpload);
-
-let lastClassifyError = "";
-async function classify(photoId) {
-  for (let attempt = 0; attempt < 4; attempt++) {
-    const { data, error } = await sb.functions.invoke("classify", { body: { photo_id: photoId } });
-    if (!error) return data;
-    const status = error.context?.status;
-    if (status === 503 || status === 429) { await sleep(2000 * 2 ** attempt); continue; }
-    let detail = "";
-    try { detail = (await error.context.json()).error || ""; } catch { /* 무시 */ }
-    lastClassifyError = status === 404 || !status
-      ? "분류 함수(classify)를 찾을 수 없어요. Supabase에 함수가 배포됐는지 확인해 주세요."
-      : `분류 오류 (${status}) ${detail}`.trim();
-    return null;
-  }
-  lastClassifyError = "AI가 바빠서 분류하지 못했어요. 잠시 후 다시 시도해 주세요.";
-  return null;
-}
-
-let uploading = false;
-$("#file").addEventListener("change", async (e) => {
-  const files = [...e.target.files];
-  e.target.value = "";
-  if (!files.length || uploading) return;
-  uploading = true;
-  const day = state.day;
-  const box = $("#up-progress");
-  box.classList.remove("hidden");
-  $("#up-title").textContent = "올리고 분류하는 중… 창을 닫지 마세요";
-  let done = 0, failed = 0;
-  const tick = () => {
-    $("#up-count").textContent = `${done + failed} / ${files.length}`;
-    $("#up-bar").style.width = `${((done + failed) / files.length) * 100}%`;
-    $("#up-detail").textContent = failed ? `실패 ${failed}장 (다시 올려 주세요)` : "";
-  };
-  tick();
-
-  await pool(files, 2, async (file) => {
-    try {
-      const id = crypto.randomUUID();
-      const [full, thumb] = await Promise.all([resize(file, 1600, 0.85), resize(file, 640, 0.8)]);
-      const path = `${day}/${id}.jpg`;
-      const thumbPath = `${day}/thumb/${id}.jpg`;
-      const opts = { contentType: "image/jpeg", upsert: false };
-      const [a, b] = await Promise.all([
-        sb.storage.from("photos").upload(path, full, opts),
-        sb.storage.from("photos").upload(thumbPath, thumb, opts),
-      ]);
-      if (a.error || b.error) throw a.error || b.error;
-      const ins = await sb.from("photos").insert({ id, day, path, thumb_path: thumbPath });
-      if (ins.error) throw ins.error;
-      await classify(id);
-      done++;
-    } catch (err) {
-      console.error(err);
-      failed++;
-    }
-    tick();
-  });
-
-  $("#up-title").textContent = `완료! ${done}장 올림`;
-  if (lastClassifyError) $("#up-detail").textContent = lastClassifyError;
-  uploading = false;
-  toast(`${done}장 올리기 완료`);
-  if (state.tab === "upload") renderUpload();
-  updateReviewBadge();
-});
-
-$("#retry-pending").addEventListener("click", async (e) => {
-  const btn = e.currentTarget;
-  btn.disabled = true;
-  const { data } = await sb.from("photos").select("id").eq("day", state.day).eq("status", "pending");
-  let n = 0, ok = 0;
-  lastClassifyError = "";
-  await pool(data || [], 2, async (p) => {
-    if (await classify(p.id)) ok++;
-    n++;
-    btn.textContent = `분류 중… ${n}/${data.length}`;
-  });
-  btn.disabled = false;
-  btn.textContent = "분류 안 된 사진 다시 분류";
-  if (!ok && lastClassifyError) alert(lastClassifyError);
-  else toast(`${ok}장 분류했어요`);
-  renderUpload();
-  updateReviewBadge();
-});
-
-/* ---------- 내 사진 ---------- */
-async function renderView() {
-  const pick = $("#teacher-pick");
-  const opts = [{ id: "", name: "전체" }, ...state.teachers];
-  pick.innerHTML = opts.map((t) =>
-    `<button data-id="${t.id}" class="${t.id === state.viewTeacher ? "on" : ""}">${esc(t.name)}</button>`).join("");
-  $$("button", pick).forEach((b) => b.addEventListener("click", () => {
-    state.viewTeacher = b.dataset.id;
-    lsSet("viewTeacher", state.viewTeacher);
-    renderView();
-  }));
-
-  const body = $("#view-body");
-  body.innerHTML = `<div class="empty">불러오는 중…</div>`;
-
-  let dogIds;
-  if (state.viewTeacher) {
-    dogIds = [...state.assignments].filter(([, t]) => t === state.viewTeacher).map(([d]) => d);
-    if (!dogIds.length) {
-      body.innerHTML = `<div class="empty">이 날짜에 담당 강아지가 지정되지 않았어요.<br>관리 탭에서 담당을 지정해 주세요.</div>`;
-      return;
-    }
-  }
-
-  let q = sb.from("photos").select("id, path, thumb_path, dog_ids, created_at")
-    .eq("day", state.day).eq("status", "done").order("created_at");
-  if (dogIds) q = q.overlaps("dog_ids", dogIds);
-  const { data: photos } = await q;
-
+  // 강아지별 묶기
   const groups = new Map();
-  (dogIds || []).forEach((id) => groups.set(id, []));
-  (photos || []).forEach((p) => p.dog_ids.forEach((d) => {
-    if (dogIds && !dogIds.includes(d)) return;
+  done.forEach((p) => p.dog_ids.forEach((d) => {
+    if (!dogById(d)) return;
     if (!groups.has(d)) groups.set(d, []);
     groups.get(d).push(p);
   }));
+  const dogIds = [...groups.keys()].sort((a, b) => dogOrder(dogById(a), dogById(b)));
 
-  if (![...groups.values()].some((g) => g.length) && !dogIds) {
-    body.innerHTML = `<div class="empty">아직 분류된 사진이 없어요.</div>`;
+  const box = $("#groups");
+  if (!P.length) {
+    box.innerHTML = `<div class="empty">아직 이 날짜에 올린 사진이 없어요.<br>위에서 사진을 올려 보세요.</div>`;
     return;
   }
 
-  const order = [...groups.keys()].filter(dogById).sort((a, b) => dogOrder(dogById(a), dogById(b)));
-  const thumbUrl = await signed("photos", (photos || []).map((p) => p.thumb_path));
-  const refUrl = await signed("refs", order.map((id) => dogById(id)?.ref_path));
+  const thumb = await signed("photos", P.map((p) => p.thumb_path));
+  const ref = await signed("refs", dogIds.map((id) => dogById(id)?.ref_path));
+  const img = (p) => `<img loading="lazy" src="${thumb(p.thumb_path)}" data-photo="${p.id}" alt="">`;
 
-  body.innerHTML = order.map((id) => {
+  box.innerHTML = dogIds.map((id) => {
     const dog = dogById(id);
     const list = groups.get(id);
     return `<div class="dog-group">
       <div class="dog-head">
-        ${dog?.ref_path ? `<img class="avatar" src="${refUrl(dog.ref_path)}" alt="">` : `<span class="avatar"></span>`}
-        <div class="grow"><div class="name">${esc(dog?.name || "알 수 없음")}</div>
-        <small class="muted">${list.length}장</small></div>
-        ${dog?.auto ? `<button class="btn ghost sm" data-name="${id}">이름 붙이기</button>` : ""}
-        ${list.length ? `<button class="btn primary sm" data-save="${id}">저장</button>` : ""}
+        ${dog.ref_path ? `<img class="avatar" src="${ref(dog.ref_path)}" alt="">` : `<span class="avatar"></span>`}
+        <div class="grow">
+          <button class="dog-name ${dog.auto ? "unnamed" : ""}" data-rename="${id}">${esc(dog.name)} <span>✎</span></button>
+          <small class="muted">${list.length}장</small>
+        </div>
+        <button class="btn primary sm" data-save="${id}">저장</button>
       </div>
-      ${list.length
-        ? `<div class="grid">${list.map((p) => `<img loading="lazy" src="${thumbUrl(p.thumb_path)}" data-full="${p.path}" alt="">`).join("")}</div>`
-        : `<div class="muted small">아직 사진이 없어요</div>`}
+      <div class="grid">${list.map(img).join("")}</div>
     </div>`;
-  }).join("") || `<div class="empty">사진이 없어요.</div>`;
+  }).join("") +
+  (unsorted.length ? `<div class="dog-group unsorted">
+      <div class="dog-head"><span class="avatar q">?</span>
+        <div class="grow"><b>분류 안 된 사진</b><small class="muted">사진을 눌러 강아지를 골라 주세요</small></div>
+        <small class="muted">${unsorted.length}장</small></div>
+      <div class="grid">${unsorted.map(img).join("")}</div>
+    </div>` : "") +
+  (!dogIds.length && !unsorted.length ? `<div class="empty">분류를 기다리는 사진이 있어요.</div>` : "");
 
-  $$("[data-save]", body).forEach((b) => b.addEventListener("click", () =>
+  $$("[data-photo]", box).forEach((el) => el.addEventListener("click", () => openSheet(el.dataset.photo)));
+  $$("[data-rename]", box).forEach((b) => b.addEventListener("click", async () => {
+    if (await renameDog(dogById(b.dataset.rename))) renderPhotos();
+  }));
+  $$("[data-save]", box).forEach((b) => b.addEventListener("click", () =>
     saveDogPhotos(dogById(b.dataset.save), groups.get(b.dataset.save), b)));
-  $$("[data-name]", body).forEach((b) => b.addEventListener("click", async () => {
-    if (await renameDog(dogById(b.dataset.name))) renderView();
-  }));
-  bindViewer(body);
 }
 
-function bindViewer(root) {
-  $$("img[data-full]", root).forEach((img) => img.addEventListener("click", async () => {
-    const url = await signed("photos", [img.dataset.full]);
-    const v = $("#viewer");
-    $("img", v).src = url(img.dataset.full);
-    v.classList.remove("hidden");
-  }));
+async function renameDog(dog) {
+  const name = prompt("강아지 이름", dog.auto ? "" : dog.name);
+  if (!name || !name.trim()) return false;
+  const { error } = await sb.from("dogs").update({ name: name.trim(), auto: false }).eq("id", dog.id);
+  if (error) { toast("저장하지 못했어요"); return false; }
+  Object.assign(dog, { name: name.trim(), auto: false });
+  state.dogs.sort(dogOrder);
+  return true;
 }
-$("#viewer").addEventListener("click", () => {
-  $("#viewer").classList.add("hidden");
-  $("#viewer img").src = "";
+
+/* ---------- 올리기 + 분류 ---------- */
+function progress(title, n, total, detail = "") {
+  $("#progress").classList.remove("hidden");
+  $("#pg-title").textContent = title;
+  $("#pg-count").textContent = total ? `${n} / ${total}` : "";
+  $("#pg-bar").style.width = total ? `${(n / total) * 100}%` : "0";
+  $("#pg-detail").textContent = detail;
+}
+
+$("#file").addEventListener("change", async (e) => {
+  const files = [...e.target.files];
+  e.target.value = "";
+  if (!files.length) return;
+  if (state.busy) { toast("지금 진행 중인 작업이 끝나면 다시 올려 주세요"); return; }
+  state.busy = true;
+  const day = state.day;
+  let n = 0, failed = 0;
+  progress("사진 올리는 중… 창을 닫지 마세요", 0, files.length);
+  await pool(files, 3, async (file) => {
+    try {
+      const id = crypto.randomUUID();
+      const [full, small] = await Promise.all([resize(file, 1600, 0.85), resize(file, 640, 0.8)]);
+      const path = `${day}/${id}.jpg`, thumbPath = `${day}/thumb/${id}.jpg`;
+      const opt = { contentType: "image/jpeg", upsert: false };
+      const [a, b] = await Promise.all([
+        sb.storage.from("photos").upload(path, full, opt),
+        sb.storage.from("photos").upload(thumbPath, small, opt),
+      ]);
+      if (a.error || b.error) throw a.error || b.error;
+      const ins = await sb.from("photos").insert({ id, day, path, thumb_path: thumbPath });
+      if (ins.error) throw ins.error;
+    } catch (err) {
+      console.error(err);
+      failed++;
+    }
+    n++;
+    progress("사진 올리는 중… 창을 닫지 마세요", n, files.length, failed ? `실패 ${failed}장` : "");
+  });
+  state.busy = false;
+  await classifyPending();
 });
 
-// 폰: 공유 시트(→ 사진 앱에 저장) / PC: ZIP 다운로드
+let lastError = "";
+async function classifyOne(photoId) {
+  for (let attempt = 0; attempt < 4; attempt++) {
+    const { error } = await sb.functions.invoke("classify", { body: { photo_id: photoId } });
+    if (!error) return true;
+    const status = error.context?.status;
+    if (status === 503 || status === 429) { await sleep(2000 * 2 ** attempt); continue; }
+    let detail = "";
+    try { detail = (await error.context.json()).error || ""; } catch { /* 무시 */ }
+    lastError = status === 404 || !status
+      ? "분류 함수(classify)를 찾을 수 없어요. Supabase에 함수가 배포됐는지 확인해 주세요."
+      : `분류 오류 (${status}) ${detail}`.trim();
+    return false;
+  }
+  lastError = "AI가 바빠서 분류하지 못했어요. 잠시 후 다시 시도해 주세요.";
+  return false;
+}
+
+// 같은 아이가 여러 그룹으로 생기지 않도록 한 장씩 차례로 분류
+async function classifyPending() {
+  if (state.busy) return;
+  state.busy = true;
+  const { data } = await sb.from("photos").select("id").eq("day", state.day).eq("status", "pending").order("created_at");
+  const list = data || [];
+  if (!list.length) { state.busy = false; $("#progress").classList.add("hidden"); await render(); return; }
+  lastError = "";
+  let ok = 0, fail = 0;
+  for (let i = 0; i < list.length; i++) {
+    progress("AI가 강아지별로 묶는 중… 창을 닫지 마세요", i, list.length, "아래 목록이 조금씩 채워져요");
+    if (await classifyOne(list[i].id)) ok++;
+    else if (++fail >= 3 && !ok) break;          // 설정 문제면 바로 멈춤
+    if ((i + 1) % 8 === 0 && state.tab === "photos") { await loadDogs(); await loadPhotos(); await renderPhotos(); }
+  }
+  state.busy = false;
+  if (fail && lastError) {
+    progress("분류를 멈췄어요", ok, list.length, lastError);
+  } else {
+    progress(`완료! ${ok}장 분류했어요`, list.length, list.length);
+    setTimeout(() => $("#progress").classList.add("hidden"), 4000);
+  }
+  await render();
+}
+
+/* ---------- 사진 시트 (크게 보기 + 강아지 지정) ---------- */
+let sheetPhoto = null;
+async function openSheet(photoId) {
+  const p = state.photos.find((x) => x.id === photoId);
+  if (!p) return;
+  sheetPhoto = p;
+  const url = await signed("photos", [p.path]);
+  $("#sheet-img").src = url(p.path);
+  $("#sheet-note").textContent = p.ai_note && p.status !== "done" ? `AI 메모: ${p.ai_note}` : "";
+  $("#sheet-chips").innerHTML = state.dogs.filter((d) => d.active).map((d) =>
+    `<button data-dog="${d.id}" class="${p.dog_ids.includes(d.id) ? "on" : ""}">${esc(d.name)}</button>`).join("")
+    || `<span class="muted small">아직 강아지 그룹이 없어요. '새 강아지로'를 눌러 주세요.</span>`;
+  $$("#sheet-chips button").forEach((b) => b.addEventListener("click", () => b.classList.toggle("on")));
+  $("#sheet").classList.remove("hidden");
+  document.body.style.overflow = "hidden";
+}
+function closeSheet() {
+  $("#sheet").classList.add("hidden");
+  $("#sheet-img").src = "";
+  document.body.style.overflow = "";
+  sheetPhoto = null;
+}
+$(".sheet-close").addEventListener("click", closeSheet);
+$("#sheet").addEventListener("click", (e) => { if (e.target.id === "sheet") closeSheet(); });
+
+$("#sheet-save").addEventListener("click", async () => {
+  const ids = $$("#sheet-chips button.on").map((b) => b.dataset.dog);
+  if (!ids.length) { toast("강아지를 한 마리 이상 골라 주세요"); return; }
+  await sb.from("photos").update({ dog_ids: ids, status: "done", confidence: "manual" }).eq("id", sheetPhoto.id);
+  Object.assign(sheetPhoto, { dog_ids: ids, status: "done" });
+  closeSheet();
+  renderPhotos();
+});
+
+// 이 사진으로 새 강아지 그룹 만들기
+$("#sheet-new").addEventListener("click", async () => {
+  const p = sheetPhoto;
+  const name = prompt("강아지 이름 (모르면 비워 두세요)", "");
+  if (name === null) return;
+  const { count } = await sb.from("dogs").select("id", { count: "exact", head: true });
+  const { data: dog, error } = await sb.from("dogs")
+    .insert({ name: name.trim() || `새 강아지 ${(count ?? 0) + 1}`, auto: !name.trim() }).select().single();
+  if (error) { toast("만들지 못했어요"); return; }
+  const { data: blob } = await sb.storage.from("photos").download(p.thumb_path);
+  const refPath = `${dog.id}-${Date.now()}.jpg`;
+  await sb.storage.from("refs").upload(refPath, blob, { contentType: "image/jpeg" });
+  await sb.from("dogs").update({ ref_path: refPath }).eq("id", dog.id);
+  const ids = [...new Set([...$$("#sheet-chips button.on").map((b) => b.dataset.dog), dog.id])];
+  await sb.from("photos").update({ dog_ids: ids, status: "done", confidence: "manual" }).eq("id", p.id);
+  closeSheet();
+  toast(`${dog.name} 그룹을 만들었어요`);
+  render();
+});
+
+$("#sheet-del").addEventListener("click", async () => {
+  if (!confirm("이 사진을 삭제할까요?")) return;
+  const p = sheetPhoto;
+  await sb.storage.from("photos").remove([p.path, p.thumb_path]);
+  await sb.from("photos").delete().eq("id", p.id);
+  state.photos = state.photos.filter((x) => x.id !== p.id);
+  closeSheet();
+  renderPhotos();
+});
+
+// 폰: 공유 시트(→ 사진 앱 저장) / PC: ZIP
 async function saveDogPhotos(dog, photos, btn) {
   const label = btn.textContent;
   btn.disabled = true;
   btn.textContent = "준비 중…";
   try {
-    const blobs = await Promise.all(photos.map(async (p, i) => {
+    const files = await Promise.all(photos.map(async (p, i) => {
       const { data } = await sb.storage.from("photos").download(p.path);
       return new File([data], `${dog.name}_${state.day}_${String(i + 1).padStart(2, "0")}.jpg`, { type: "image/jpeg" });
     }));
-    const canShare = navigator.canShare && navigator.canShare({ files: blobs });
-    const isMobile = /Android|iPhone|iPad/i.test(navigator.userAgent);
-    if (isMobile && canShare) {
-      await navigator.share({ files: blobs, title: `${dog.name} ${state.day}` });
+    const mobile = /Android|iPhone|iPad/i.test(navigator.userAgent);
+    if (mobile && navigator.canShare?.({ files })) {
+      await navigator.share({ files, title: `${dog.name} ${state.day}` });
     } else {
       const zip = new JSZip();
-      blobs.forEach((f) => zip.file(f.name, f));
-      const out = await zip.generateAsync({ type: "blob" });
+      files.forEach((f) => zip.file(f.name, f));
       const a = document.createElement("a");
-      a.href = URL.createObjectURL(out);
+      a.href = URL.createObjectURL(await zip.generateAsync({ type: "blob" }));
       a.download = `${dog.name}_${state.day}.zip`;
       a.click();
       setTimeout(() => URL.revokeObjectURL(a.href), 5000);
@@ -445,117 +401,15 @@ async function saveDogPhotos(dog, photos, btn) {
   btn.textContent = label;
 }
 
-/* ---------- 확인 필요 ---------- */
-async function renderReview() {
-  const body = $("#review-body");
-  body.innerHTML = `<div class="empty">불러오는 중…</div>`;
-  const { data: photos } = await sb.from("photos")
-    .select("id, path, thumb_path, dog_ids, ai_note, status")
-    .eq("day", state.day).in("status", ["review", "error"]).order("created_at").limit(60);
-  if (!photos?.length) {
-    body.innerHTML = `<div class="empty">확인할 사진이 없어요 👍</div>`;
-    return;
-  }
-  // 후보: 오늘 담당 지정된 강아지 → 없으면 활성 강아지 전체
-  const todays = state.dogs.filter((d) => state.assignments.has(d.id) || (d.auto && d.active));
-  const candidates = (todays.length ? todays : state.dogs.filter((d) => d.active)).slice().sort(dogOrder);
-  const thumbUrl = await signed("photos", photos.map((p) => p.thumb_path));
-
-  body.innerHTML = photos.map((p) => `
-    <div class="review-item" data-id="${p.id}">
-      <img class="big" src="${thumbUrl(p.thumb_path)}" data-full="${p.path}" alt="">
-      ${p.ai_note ? `<div class="ai-note">AI 메모: ${esc(p.ai_note)}</div>` : ""}
-      <div class="chips">${candidates.map((d) =>
-        `<button data-dog="${d.id}" class="${p.dog_ids.includes(d.id) ? "on" : ""}">${esc(d.name)}</button>`).join("")}</div>
-      <div class="row">
-        <button class="btn primary grow" data-act="save">저장</button>
-        <button class="btn ghost" data-act="none">강아지 없음</button>
-        <button class="btn ghost" data-act="del">삭제</button>
-      </div>
-    </div>`).join("") + (photos.length === 60 ? `<p class="muted small">60장씩 보여드려요. 정리하면 다음 사진이 나와요.</p>` : "");
-
-  $$(".review-item", body).forEach((item) => {
-    const id = item.dataset.id;
-    const photo = photos.find((p) => p.id === id);
-    $$(".chips button", item).forEach((b) => b.addEventListener("click", () => b.classList.toggle("on")));
-    $$("[data-act]", item).forEach((b) => b.addEventListener("click", async () => {
-      const act = b.dataset.act;
-      if (act === "del") {
-        if (!confirm("이 사진을 삭제할까요?")) return;
-        await sb.storage.from("photos").remove([photo.path, photo.thumb_path]);
-        await sb.from("photos").delete().eq("id", id);
-      } else {
-        const ids = act === "none" ? [] : $$(".chips button.on", item).map((x) => x.dataset.dog);
-        if (act === "save" && !ids.length) { toast("강아지를 한 마리 이상 골라 주세요"); return; }
-        await sb.from("photos").update({ dog_ids: ids, status: "done", confidence: "manual" }).eq("id", id);
-      }
-      item.remove();
-      updateReviewBadge();
-      if (!$(".review-item", body)) renderReview();
-    }));
-  });
-  bindViewer(body);
-}
-
-/* ---------- 관리 ---------- */
-async function renderAdmin() {
-  renderAssign();
-  renderDogs();
-  renderTeachers();
-}
-
-function renderAssign() {
-  const active = state.dogs.filter((d) => d.active);
-  const body = $("#assign-body");
-  if (!active.length) {
-    body.innerHTML = `<div class="muted small">먼저 아래에서 강아지를 등록해 주세요.</div>`;
-    return;
-  }
-  const opts = (sel) => `<option value="">안 옴</option>` + state.teachers.map((t) =>
-    `<option value="${t.id}" ${t.id === sel ? "selected" : ""}>${esc(t.name)}</option>`).join("");
-  const count = state.assignments.size;
-  body.innerHTML = `<p class="small"><b>${count}</b>마리 등원</p>` + active.map((d) => `
-    <div class="assign-row">
-      <span class="grow">${esc(d.name)}</span>
-      <select data-dog="${d.id}">${opts(state.assignments.get(d.id) || "")}</select>
-    </div>`).join("");
-  $$("select", body).forEach((s) => s.addEventListener("change", async () => {
-    const dogId = s.dataset.dog;
-    if (s.value) {
-      await sb.from("assignments").upsert({ day: state.day, dog_id: dogId, teacher_id: s.value });
-      state.assignments.set(dogId, s.value);
-    } else {
-      await sb.from("assignments").delete().eq("day", state.day).eq("dog_id", dogId);
-      state.assignments.delete(dogId);
-    }
-    $("p.small b", body).textContent = state.assignments.size;
-  }));
-}
-
-$("#copy-prev").addEventListener("click", async () => {
-  const prev = shiftDay(state.day, -1);
-  const { data } = await sb.from("assignments").select("dog_id, teacher_id").eq("day", prev);
-  if (!data?.length) { toast("전날 담당 기록이 없어요"); return; }
-  if (state.assignments.size && !confirm("지금 담당을 전날 담당으로 바꿀까요?")) return;
-  await sb.from("assignments").delete().eq("day", state.day);
-  await sb.from("assignments").insert(data.map((a) => ({ ...a, day: state.day })));
-  await loadAssignments();
-  renderAssign();
-  toast("전날 담당을 불러왔어요");
-});
-
+/* ================= 관리 ================= */
 async function renderDogs() {
   const list = $("#dog-list");
-  const refUrl = await signed("refs", state.dogs.map((d) => d.ref_path));
-  const autoCount = state.dogs.filter((d) => d.auto && d.active).length;
-  list.innerHTML = (autoCount
-    ? `<p class="notice">AI가 만든 <b>새 강아지 그룹 ${autoCount}개</b>가 있어요. <b>이름</b>을 눌러 이름을 붙이고, 같은 아이가 두 그룹이면 <b>합치기</b>를 눌러 주세요.</p>`
-    : "") +
-    (state.dogs.map((d) => `
+  const ref = await signed("refs", state.dogs.map((d) => d.ref_path));
+  list.innerHTML = state.dogs.map((d) => `
     <div class="dog-row ${d.active ? "" : "off"} ${d.auto ? "auto" : ""}" data-id="${d.id}">
-      <label class="ref-pick" style="width:52px;height:52px">
+      <label class="ref-pick sm">
         <input type="file" accept="image/*" hidden data-ref>
-        ${d.ref_path ? `<img src="${refUrl(d.ref_path)}" alt="">` : "사진"}
+        ${d.ref_path ? `<img src="${ref(d.ref_path)}" alt="">` : "사진"}
       </label>
       <div class="grow"><b>${esc(d.name)}</b>${d.auto ? ` <span class="tag">이름 필요</span>` : ""}<small>${esc(d.note || "")}</small></div>
       <div class="row-actions">
@@ -565,40 +419,42 @@ async function renderDogs() {
       </div>
       <div class="merge-box hidden">
         <span class="small">이 그룹을</span>
-        <select>${state.dogs.filter((o) => o.id !== d.id).map((o) =>
-          `<option value="${o.id}">${esc(o.name)}</option>`).join("")}</select>
+        <select>${state.dogs.filter((o) => o.id !== d.id).map((o) => `<option value="${o.id}">${esc(o.name)}</option>`).join("")}</select>
         <span class="small">(으)로</span>
         <button class="btn primary mini" data-merge-go>합치기</button>
         <button class="btn ghost mini" data-merge-cancel>취소</button>
       </div>
-    </div>`).join("") || `<div class="muted small">아직 강아지가 없어요. 사진을 올리면 AI가 자동으로 그룹을 만들어요.</div>`);
+    </div>`).join("") || `<div class="muted small">아직 강아지가 없어요. 사진을 올리면 AI가 자동으로 그룹을 만들어요.</div>`;
 
   $$(".dog-row", list).forEach((row) => {
     const dog = dogById(row.dataset.id);
     $("[data-ref]", row).addEventListener("change", async (e) => {
       const f = e.target.files[0];
       if (!f) return;
-      await saveRef(dog, f);
+      const blob = await resize(f, 640, 0.85);
+      const path = `${dog.id}-${Date.now()}.jpg`;
+      const { error } = await sb.storage.from("refs").upload(path, blob, { contentType: "image/jpeg" });
+      if (error) { toast("기준 사진을 올리지 못했어요"); return; }
+      if (dog.ref_path) await sb.storage.from("refs").remove([dog.ref_path]);
+      await sb.from("dogs").update({ ref_path: path }).eq("id", dog.id);
+      dog.ref_path = path;
       renderDogs();
     });
     $("[data-edit]", row).addEventListener("click", async () => {
-      if (dog.auto) {
-        if (await renameDog(dog)) { renderDogs(); renderAssign(); }
-        return;
-      }
+      if (dog.auto) { if (await renameDog(dog)) renderDogs(); return; }
       const name = prompt("이름", dog.name);
       if (name === null) return;
-      const note = prompt("특징 (견종·털색·무늬)", dog.note || "");
+      const note = prompt("특징 (견종·털색·무늬, 헷갈리는 아이면 자세히)", dog.note || "");
       if (note === null) return;
       await sb.from("dogs").update({ name: name.trim() || dog.name, note: note.trim() }).eq("id", dog.id);
       Object.assign(dog, { name: name.trim() || dog.name, note: note.trim() });
       state.dogs.sort(dogOrder);
-      renderDogs(); renderAssign();
+      renderDogs();
     });
     $("[data-toggle]", row).addEventListener("click", async () => {
       await sb.from("dogs").update({ active: !dog.active }).eq("id", dog.id);
       dog.active = !dog.active;
-      renderDogs(); renderAssign();
+      renderDogs();
     });
     const box = $(".merge-box", row);
     $("[data-merge]", row).addEventListener("click", () => box.classList.toggle("hidden"));
@@ -610,86 +466,51 @@ async function renderDogs() {
       if (error) { toast("합치지 못했어요. 다시 시도해 주세요."); return; }
       if (dog.ref_path) await sb.storage.from("refs").remove([dog.ref_path]);
       state.dogs = state.dogs.filter((d) => d.id !== dog.id);
-      await loadAssignments();
       toast(`'${target.name}'(으)로 합쳤어요`);
-      renderDogs(); renderAssign();
+      renderDogs();
     });
   });
 }
 
-async function saveRef(dog, file) {
-  const blob = await resize(file, 512, 0.85);
-  const path = `${dog.id}-${Date.now()}.jpg`;
-  const { error } = await sb.storage.from("refs").upload(path, blob, { contentType: "image/jpeg" });
-  if (error) { toast("기준 사진을 올리지 못했어요"); return; }
-  if (dog.ref_path) await sb.storage.from("refs").remove([dog.ref_path]);
-  await sb.from("dogs").update({ ref_path: path }).eq("id", dog.id);
-  dog.ref_path = path;
-}
-
-let newRef = null;
-$("#dog-ref").addEventListener("change", (e) => {
-  newRef = e.target.files[0] || null;
-  $("#dog-ref-preview").innerHTML = newRef ? `<img src="${URL.createObjectURL(newRef)}" alt="">` : "기준<br>사진";
-});
-$("#dog-form").addEventListener("submit", async (e) => {
-  e.preventDefault();
-  const name = $("#dog-name").value.trim();
-  if (!name) return;
-  if (!newRef) { toast("기준 사진도 함께 넣어 주세요"); return; }
-  const { data, error } = await sb.from("dogs")
-    .insert({ name, note: $("#dog-note").value.trim() || null }).select().single();
-  if (error) { toast("추가하지 못했어요"); return; }
-  await saveRef(data, newRef);
-  state.dogs.push(data);
-  state.dogs.sort(dogOrder);
-  e.target.reset();
-  newRef = null;
-  $("#dog-ref-preview").innerHTML = "기준<br>사진";
-  toast(`${name} 등록 완료`);
-  renderDogs(); renderAssign();
-});
-
-function renderTeachers() {
-  const box = $("#teacher-list");
-  box.innerHTML = state.teachers.map((t) =>
-    `<span>${esc(t.name)}<b class="x" data-id="${t.id}">×</b></span>`).join("");
-  $$(".x", box).forEach((x) => x.addEventListener("click", async () => {
-    const t = teacherById(x.dataset.id);
-    if (!confirm(`${t.name} 선생님을 목록에서 뺄까요?`)) return;
-    await sb.from("teachers").delete().eq("id", t.id);
-    state.teachers = state.teachers.filter((v) => v.id !== t.id);
-    renderTeachers(); renderAssign();
-  }));
-}
-$("#teacher-form").addEventListener("submit", async (e) => {
-  e.preventDefault();
-  const name = $("#teacher-name").value.trim();
-  if (!name) return;
-  const { data, error } = await sb.from("teachers")
-    .insert({ name, sort: state.teachers.length + 1 }).select().single();
-  if (error) { toast("추가하지 못했어요 (이미 있는 이름일 수 있어요)"); return; }
-  state.teachers.push(data);
-  e.target.reset();
-  renderTeachers(); renderAssign();
-});
-
-$("#purge").addEventListener("click", async () => {
-  const days = +$("#purge-days").value;
-  const cutoff = shiftDay(kstToday(), -days);
-  if (!confirm(`${cutoff} 이전 사진을 모두 삭제할까요? 되돌릴 수 없어요.`)) return;
-  const msg = $("#purge-msg");
+// 사진 + 파일 일괄 삭제 (조건에 맞는 것만)
+async function deletePhotos(applyFilter, onProgress) {
   let removed = 0;
   for (;;) {
-    const { data } = await sb.from("photos").select("id, path, thumb_path").lt("day", cutoff).limit(200);
+    const { data } = await applyFilter(sb.from("photos").select("id, path, thumb_path")).limit(200);
     if (!data?.length) break;
     await sb.storage.from("photos").remove(data.flatMap((p) => [p.path, p.thumb_path]));
     const del = await sb.from("photos").delete().in("id", data.map((p) => p.id));
-    if (del.error) { msg.textContent = "삭제 중 오류가 났어요."; return; }
+    if (del.error) throw del.error;
     removed += data.length;
-    msg.textContent = `${removed}장 삭제 중…`;
+    onProgress(removed);
   }
-  msg.textContent = removed ? `${removed}장 삭제했어요.` : "지울 사진이 없어요.";
+  return removed;
+}
+
+$("#purge").addEventListener("click", async () => {
+  const cutoff = shiftDay(kstToday(), -+$("#purge-days").value);
+  if (!confirm(`${cutoff} 이전 사진을 모두 삭제할까요? 되돌릴 수 없어요.`)) return;
+  const msg = $("#purge-msg");
+  try {
+    const n = await deletePhotos((q) => q.lt("day", cutoff), (n) => { msg.textContent = `${n}장 삭제 중…`; });
+    msg.textContent = n ? `${n}장 삭제했어요.` : "지울 사진이 없어요.";
+  } catch { msg.textContent = "삭제 중 오류가 났어요."; }
+});
+
+$("#reset-all").addEventListener("click", async () => {
+  if (!confirm("모든 사진과 강아지 그룹을 지울까요? 되돌릴 수 없어요.")) return;
+  if (prompt("확인을 위해 '초기화'라고 입력해 주세요") !== "초기화") return;
+  const msg = $("#reset-msg");
+  try {
+    await deletePhotos((q) => q, (n) => { msg.textContent = `사진 ${n}장 삭제 중…`; });
+    const { data: dogs } = await sb.from("dogs").select("id, ref_path");
+    const refs = (dogs || []).map((d) => d.ref_path).filter(Boolean);
+    for (let i = 0; i < refs.length; i += 100) await sb.storage.from("refs").remove(refs.slice(i, i + 100));
+    if (dogs?.length) await sb.from("dogs").delete().in("id", dogs.map((d) => d.id));
+    urlCache.clear();
+    msg.textContent = "초기화했어요. 사진 탭에서 새로 올려 보세요.";
+    await render();
+  } catch { msg.textContent = "초기화 중 오류가 났어요. 다시 눌러 주세요."; }
 });
 
 boot();

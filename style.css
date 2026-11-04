@@ -163,3 +163,29 @@ main { max-width: 760px; margin: 0 auto; padding: 16px; padding-bottom: 60px; }
 }
 .recent .cap.warn { background: var(--yellow); color: var(--navy); }
 @media (max-width: 420px) { .recent { grid-template-columns: repeat(3, 1fr); } }
+
+/* ---------- 사진 화면 (단순화 버전) ---------- */
+.summary { display: flex; flex-wrap: wrap; gap: 6px 14px; align-items: center; margin: 0 2px 12px; font-size: 14px; color: var(--muted); }
+.summary b { color: var(--navy); }
+.summary .warn b { color: var(--danger); }
+.summary .btn { margin-left: auto; }
+.dog-name { background: none; border: 0; padding: 0; font: inherit; font-weight: 700; font-size: 16px; color: var(--ink); cursor: pointer; text-align: left; }
+.dog-name span { font-size: 12px; color: var(--muted); font-weight: 400; }
+.dog-name.unnamed { color: var(--navy); }
+.dog-name.unnamed::after { content: "이름 붙이기"; margin-left: 6px; font-size: 11px; font-weight: 700; background: var(--yellow); color: var(--navy); border-radius: 999px; padding: 1px 7px; vertical-align: 2px; }
+.dog-head small { display: block; }
+.avatar.q { display: grid; place-items: center; font-weight: 800; color: var(--muted); }
+.dog-group.unsorted { border-style: dashed; border-color: #e6c84d; background: #fffdf3; }
+.ref-pick.sm { width: 52px; height: 52px; }
+.danger-zone { border-color: #f2c9b5; }
+
+/* 사진 시트 */
+.sheet { position: fixed; inset: 0; z-index: 40; background: rgba(0, 0, 0, .6); display: flex; align-items: flex-end; justify-content: center; }
+.sheet-body {
+  position: relative; width: 100%; max-width: 640px; max-height: 92vh; overflow-y: auto;
+  background: #fff; border-radius: 18px 18px 0 0; padding: 14px 16px calc(16px + env(safe-area-inset-bottom));
+}
+.sheet-body img { width: 100%; max-height: 56vh; object-fit: contain; background: #111; border-radius: 12px; display: block; }
+.sheet-body .chips { max-height: 30vh; overflow-y: auto; }
+.sheet-close { position: absolute; top: 20px; right: 22px; z-index: 1; width: 36px; height: 36px; border-radius: 50%; border: 0; background: rgba(0,0,0,.55); color: #fff; font-size: 22px; cursor: pointer; }
+@media (min-width: 700px) { .sheet { align-items: center; } .sheet-body { border-radius: 18px; } }
