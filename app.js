@@ -211,14 +211,21 @@ async function renderUpload() {
 }
 $("#refresh-stats").addEventListener("click", renderUpload);
 
+let lastClassifyError = "";
 async function classify(photoId) {
   for (let attempt = 0; attempt < 4; attempt++) {
     const { data, error } = await sb.functions.invoke("classify", { body: { photo_id: photoId } });
     if (!error) return data;
     const status = error.context?.status;
     if (status === 503 || status === 429) { await sleep(2000 * 2 ** attempt); continue; }
+    let detail = "";
+    try { detail = (await error.context.json()).error || ""; } catch { /* 무시 */ }
+    lastClassifyError = status === 404 || !status
+      ? "분류 함수(classify)를 찾을 수 없어요. Supabase에 함수가 배포됐는지 확인해 주세요."
+      : `분류 오류 (${status}) ${detail}`.trim();
     return null;
   }
+  lastClassifyError = "AI가 바빠서 분류하지 못했어요. 잠시 후 다시 시도해 주세요.";
   return null;
 }
 
@@ -264,6 +271,7 @@ $("#file").addEventListener("change", async (e) => {
   });
 
   $("#up-title").textContent = `완료! ${done}장 올림`;
+  if (lastClassifyError) $("#up-detail").textContent = lastClassifyError;
   uploading = false;
   toast(`${done}장 올리기 완료`);
   if (state.tab === "upload") renderUpload();
@@ -274,14 +282,17 @@ $("#retry-pending").addEventListener("click", async (e) => {
   const btn = e.currentTarget;
   btn.disabled = true;
   const { data } = await sb.from("photos").select("id").eq("day", state.day).eq("status", "pending");
-  let n = 0;
+  let n = 0, ok = 0;
+  lastClassifyError = "";
   await pool(data || [], 2, async (p) => {
-    await classify(p.id);
+    if (await classify(p.id)) ok++;
     n++;
     btn.textContent = `분류 중… ${n}/${data.length}`;
   });
   btn.disabled = false;
   btn.textContent = "분류 안 된 사진 다시 분류";
+  if (!ok && lastClassifyError) alert(lastClassifyError);
+  else toast(`${ok}장 분류했어요`);
   renderUpload();
   updateReviewBadge();
 });
