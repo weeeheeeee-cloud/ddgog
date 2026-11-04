@@ -6,7 +6,11 @@
 <meta name="theme-color" content="#003B89">
 <title>댕겨올개 사진함</title>
 <link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/orioncactus/pretendard@v1.3.9/dist/web/static/pretendard.min.css">
-<link rel="stylesheet" href="style.css">
+<script>
+  // 매번 최신 화면 파일을 받도록 주소에 시간을 붙여 불러옴
+  window.__v = Date.now();
+  document.write('<link rel="stylesheet" href="style.css?v=' + window.__v + '">');
+</script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
 </head>
 <body>
@@ -132,6 +136,10 @@
 
 <div id="toast" class="toast hidden"></div>
 
-<script type="module" src="app.js"></script>
+<div id="update-bar" class="update-bar hidden">
+  <span>새 버전이 올라왔어요</span>
+  <button id="update-now" class="btn sm">새로고침</button>
+</div>
+<script type="module">import("./app.js?v=" + window.__v);</script>
 </body>
 </html>

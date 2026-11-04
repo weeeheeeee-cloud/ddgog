@@ -868,4 +868,31 @@ $("#reset-all").addEventListener("click", async () => {
   } catch { msg.textContent = "초기화 중 오류가 났어요. 다시 눌러 주세요."; }
 });
 
+/* ================= 새 버전 알림 ================= */
+// 화면 파일이 바뀌면(제가 수정해서 올리면) 위에 알림 띄우기
+async function fingerprint() {
+  const t = Date.now();
+  const parts = await Promise.all(["app.js", "style.css", "index.html"].map((f) =>
+    fetch(`./${f}?check=${t}`, { cache: "no-store" }).then((r) => (r.ok ? r.text() : "")).catch(() => "")));
+  const all = parts.join("|");
+  if (!parts.every(Boolean)) return null;
+  let h = 0;
+  for (let i = 0; i < all.length; i++) h = (h * 31 + all.charCodeAt(i)) | 0;
+  return h;
+}
+let baseFp = null;
+async function checkUpdate() {
+  const fp = await fingerprint();
+  if (fp === null) return;
+  if (baseFp === null) { baseFp = fp; return; }
+  if (fp !== baseFp) $("#update-bar").classList.remove("hidden");
+}
+$("#update-now").addEventListener("click", () => {
+  if (state.busy && !confirm("지금 분류 중이에요. 새로고침하면 남은 사진은 '남은 N장 분류하기'로 이어서 할 수 있어요. 새로고침할까요?")) return;
+  location.reload();
+});
+checkUpdate();
+setInterval(checkUpdate, 60 * 1000);
+document.addEventListener("visibilitychange", () => { if (!document.hidden) checkUpdate(); });
+
 boot();
