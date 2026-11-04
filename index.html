@@ -48,6 +48,16 @@
   <main>
     <!-- 사진 -->
     <section id="tab-photos" class="tab">
+      <div id="roll" class="card roll">
+        <div class="row between">
+          <h2>📋 오늘 출석</h2>
+          <span id="roll-count" class="muted small"></span>
+        </div>
+        <div id="roll-body"></div>
+      </div>
+      <input id="board-file" type="file" accept="image/*" hidden>
+      <input id="ref-file" type="file" accept="image/*" hidden>
+
       <label class="drop">
         <input id="file" type="file" accept="image/*" multiple hidden>
         <span class="drop-icon">📷</span>

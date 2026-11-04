@@ -10,6 +10,8 @@ const state = {
   tab: "photos",
   dogs: [],
   photos: [],
+  attendance: new Set(), // 오늘 출석한 강아지 id (assignments 테이블에 저장)
+  draft: null,           // 출석 보드에서 읽은 명단 (확정 전) { names, unsure, img }
   busy: false, // 업로드·분류 진행 중
 };
 
@@ -116,6 +118,12 @@ async function loadDogs() {
   const { data } = await sb.from("dogs").select("*");
   state.dogs = (data || []).sort(dogOrder);
 }
+async function loadAttendance() {
+  const { data } = await sb.from("assignments").select("dog_id").eq("day", state.day);
+  state.attendance = new Set((data || []).map((a) => a.dog_id));
+}
+const norm = (s) => String(s || "").replace(/\s+/g, "").toLowerCase();
+
 async function loadPhotos() {
   const all = [];
   for (let from = 0; ; from += 1000) {
@@ -131,6 +139,7 @@ async function loadPhotos() {
 /* ================= 날짜·탭 ================= */
 async function setDay(day) {
   state.day = day;
+  state.draft = null;
   $("#day").value = day;
   $("#progress").classList.add("hidden");
   await render();
@@ -143,13 +152,14 @@ $$(".tabs button").forEach((b) => b.addEventListener("click", () => { state.tab 
 async function render() {
   $$(".tabs button").forEach((b) => b.classList.toggle("on", b.dataset.tab === state.tab));
   $$(".tab").forEach((s) => s.classList.toggle("hidden", s.id !== "tab-" + state.tab));
-  await loadDogs();
+  await Promise.all([loadDogs(), loadAttendance()]);
   if (state.tab === "photos") { await loadPhotos(); await renderPhotos(); }
   else renderDogs();
 }
 
 /* ================= 사진 화면 ================= */
 async function renderPhotos() {
+  renderRoll();
   const P = state.photos;
   const done = P.filter((p) => p.status === "done");
   const unsorted = P.filter((p) => p.status === "review" || p.status === "error");
@@ -230,14 +240,222 @@ async function renderPhotos() {
 }
 
 async function renameDog(dog) {
-  const name = prompt("강아지 이름", dog.auto ? "" : dog.name);
+  const need = state.dogs.filter((d) => !d.auto && !d.ref_path && state.attendance.has(d.id)).map((d) => d.name);
+  const hint = need.length ? `\n(오늘 명단 중 얼굴을 아직 모르는 아이: ${need.join(", ")})` : "";
+  const name = prompt(`강아지 이름${hint}`, dog.auto ? "" : dog.name);
   if (!name || !name.trim()) return false;
-  const { error } = await sb.from("dogs").update({ name: name.trim(), auto: false }).eq("id", dog.id);
+  const nm = name.trim();
+  const same = state.dogs.find((d) => d.id !== dog.id && norm(d.name) === norm(nm));
+  if (same) {
+    if (!confirm(`'${same.name}'(이)가 이미 있어요. 이 그룹 사진을 '${same.name}'(으)로 합칠까요?`)) return false;
+    let moved = false;
+    if (!same.ref_path && dog.ref_path) {            // 얼굴을 몰랐던 아이 → 이 그룹 기준 사진으로 기억
+      await sb.from("dogs").update({ ref_path: dog.ref_path }).eq("id", same.id);
+      same.ref_path = dog.ref_path;
+      moved = true;
+    }
+    const { error } = await sb.rpc("merge_dogs", { src: dog.id, dst: same.id });
+    if (error) { toast("합치지 못했어요"); return false; }
+    if (dog.ref_path && !moved) await sb.storage.from("refs").remove([dog.ref_path]);
+    state.dogs = state.dogs.filter((d) => d.id !== dog.id);
+    state.photos.forEach((p) => {
+      if (p.dog_ids.includes(dog.id)) p.dog_ids = [...new Set(p.dog_ids.map((x) => (x === dog.id ? same.id : x)))];
+    });
+    toast(`'${same.name}'(으)로 합쳤어요${moved ? " · 얼굴도 기억했어요" : ""}`);
+    return true;
+  }
+  const { error } = await sb.from("dogs").update({ name: nm, auto: false }).eq("id", dog.id);
   if (error) { toast("저장하지 못했어요"); return false; }
-  Object.assign(dog, { name: name.trim(), auto: false });
+  Object.assign(dog, { name: nm, auto: false });
   state.dogs.sort(dogOrder);
   return true;
 }
+
+/* ---------- 오늘 출석 (보드 사진 → 명단 → 대표 사진) ---------- */
+function blobToBase64(blob) {
+  return new Promise((res, rej) => {
+    const r = new FileReader();
+    r.onload = () => res(String(r.result).split(",")[1]);
+    r.onerror = rej;
+    r.readAsDataURL(blob);
+  });
+}
+
+async function renderRoll() {
+  const body = $("#roll-body");
+  const count = $("#roll-count");
+
+  // ① 보드에서 읽은 명단 확인·수정
+  if (state.draft) {
+    const d = state.draft;
+    count.textContent = `${d.names.length}마리 읽음`;
+    body.innerHTML = `
+      ${d.img ? `<img class="board-preview" src="${d.img}" alt="출석 보드">` : ""}
+      <p class="small">읽은 이름이 맞는지 확인해 주세요. <b>이름을 누르면 고칠 수 있고</b>, ×로 뺄 수 있어요.
+        ${d.unsure.length ? `<span class="q-legend">?</span> 표시는 글씨가 애매했던 이름이에요.` : ""}</p>
+      <div class="chips roll-chips">${d.names.map((n, i) => `
+        <span class="${d.unsure.includes(n) ? "unsure" : ""}"><b data-edit="${i}">${esc(n)}</b><b class="x" data-del="${i}">×</b></span>`).join("")
+        || `<span class="muted small">아직 이름이 없어요</span>`}</div>
+      <form id="roll-add" class="row">
+        <input id="roll-add-name" class="grow" placeholder="빠진 이름 추가">
+        <button class="btn ghost" type="submit">추가</button>
+      </form>
+      <div class="row" style="margin-top:10px">
+        <button id="roll-confirm" class="btn primary grow" ${d.names.length ? "" : "disabled"}>명단 확정 (${d.names.length}마리)</button>
+        <button id="roll-retake" class="btn ghost">다시 찍기</button>
+        <button id="roll-cancel" class="btn ghost">취소</button>
+      </div>`;
+    $$("[data-edit]", body).forEach((el) => el.addEventListener("click", () => {
+      const i = +el.dataset.edit;
+      const v = prompt("이름 고치기", d.names[i]);
+      if (v === null) return;
+      if (!v.trim()) d.names.splice(i, 1);
+      else { d.unsure = d.unsure.filter((u) => u !== d.names[i]); d.names[i] = v.trim(); }
+      renderRoll();
+    }));
+    $$("[data-del]", body).forEach((el) => el.addEventListener("click", () => { d.names.splice(+el.dataset.del, 1); renderRoll(); }));
+    $("#roll-add").addEventListener("submit", (e) => {
+      e.preventDefault();
+      const v = $("#roll-add-name").value.trim();
+      if (v && !d.names.some((n) => norm(n) === norm(v))) d.names.push(v);
+      renderRoll();
+      $("#roll-add-name")?.focus();
+    });
+    $("#roll-confirm").addEventListener("click", confirmRoll);
+    $("#roll-retake").addEventListener("click", () => $("#board-file").click());
+    $("#roll-cancel").addEventListener("click", () => { state.draft = null; renderRoll(); });
+    return;
+  }
+
+  const roll = state.dogs.filter((dg) => state.attendance.has(dg.id)).sort(dogOrder);
+
+  // ② 아직 명단 없음
+  if (!roll.length) {
+    count.textContent = "";
+    body.innerHTML = `
+      <p class="muted small">출석 보드를 찍어 올리면 AI가 이름을 읽어 명단을 만들어요. 명단이 있으면 분류가 더 정확해져요. (안 해도 분류는 돼요)</p>
+      <div class="row">
+        <button id="roll-board" class="btn primary grow">출석 보드 사진 올리기</button>
+        <button id="roll-manual" class="btn ghost">직접 입력</button>
+      </div>`;
+    $("#roll-board").addEventListener("click", () => $("#board-file").click());
+    $("#roll-manual").addEventListener("click", () => { state.draft = { names: [], unsure: [], img: "" }; renderRoll(); });
+    return;
+  }
+
+  // ③ 확정된 명단: 얼굴 아는 아이 ✓ / 처음 보는 아이는 대표 사진 올리기
+  const known = roll.filter((dg) => dg.ref_path);
+  const need = roll.filter((dg) => !dg.ref_path);
+  count.textContent = `${roll.length}마리${need.length ? ` · 대표 사진 필요 ${need.length}` : " · 모두 얼굴 앎 ✓"}`;
+  const ref = await signed("refs", known.map((dg) => dg.ref_path));
+  body.innerHTML = `
+    ${need.length ? `<p class="small">처음 보는 아이예요. <b>대표 사진</b>을 한 번만 올려 주면 다음부터는 알아서 알아봐요.</p>
+    <div class="need-list">${need.map((dg) => `
+      <div class="need-row"><span class="avatar"></span><b class="grow">${esc(dg.name)}</b>
+        <button class="btn primary sm" data-ref-for="${dg.id}">대표 사진 올리기</button></div>`).join("")}</div>` : ""}
+    ${known.length ? `<div class="known-list">${known.map((dg) => `
+      <span class="known" title="얼굴 기억함"><img src="${ref(dg.ref_path)}" alt="">${esc(dg.name)}<i>✓</i></span>`).join("")}</div>` : ""}
+    <div class="row" style="margin-top:10px">
+      <button id="roll-edit" class="btn ghost sm">명단 수정</button>
+      <button id="roll-board" class="btn ghost sm">보드 다시 읽기</button>
+    </div>`;
+  $$("[data-ref-for]", body).forEach((b) => b.addEventListener("click", () => {
+    refTarget = b.dataset.refFor;
+    $("#ref-file").click();
+  }));
+  $("#roll-edit").addEventListener("click", () => {
+    state.draft = { names: roll.map((dg) => dg.name), unsure: [], img: "" };
+    renderRoll();
+  });
+  $("#roll-board").addEventListener("click", () => $("#board-file").click());
+}
+
+// 보드 사진 → 이름 읽기
+$("#board-file").addEventListener("change", async (e) => {
+  const f = e.target.files[0];
+  e.target.value = "";
+  if (!f) return;
+  const body = $("#roll-body");
+  body.innerHTML = `<div class="reading"><span class="spinner"></span> 출석 보드를 읽는 중… (10초 정도 걸려요)</div>`;
+  try {
+    const blob = await resize(f, 1600, 0.85);
+    const image = await blobToBase64(blob);
+    const known = state.dogs.filter((d) => !d.auto).map((d) => d.name);
+    const { data, error } = await sb.functions.invoke("read-board", { body: { image, known } });
+    if (error) {
+      let msg = "";
+      try { msg = (await error.context.json()).error || ""; } catch { /* 무시 */ }
+      throw new Error(msg || (error.context?.status === 404 ? "보드 읽기 기능을 찾을 수 없어요" : "읽지 못했어요"));
+    }
+    state.draft = { names: data.names || [], unsure: data.unsure || [], img: URL.createObjectURL(blob) };
+    if (!state.draft.names.length) toast("이름을 찾지 못했어요. 직접 추가해 주세요.");
+  } catch (err) {
+    toast(err.message || "읽지 못했어요. 다시 시도해 주세요.");
+    if (!state.draft) state.draft = { names: [], unsure: [], img: "" };
+  }
+  renderRoll();
+});
+
+// 명단 확정 → 아는 아이는 연결, 처음 보는 이름은 새로 등록
+async function confirmRoll() {
+  const btn = $("#roll-confirm");
+  btn.disabled = true;
+  btn.textContent = "저장 중…";
+  try {
+    const ids = [];
+    for (const name of state.draft.names) {
+      let dog = state.dogs.find((d) => !d.auto && norm(d.name) === norm(name));
+      if (!dog) {
+        const { data, error } = await sb.from("dogs").insert({ name, auto: false, active: true }).select().single();
+        if (error) throw error;
+        dog = data;
+        state.dogs.push(dog);
+      } else if (!dog.active) {
+        await sb.from("dogs").update({ active: true }).eq("id", dog.id);
+        dog.active = true;
+      }
+      ids.push(dog.id);
+    }
+    await sb.from("assignments").delete().eq("day", state.day);
+    const uniq = [...new Set(ids)];
+    if (uniq.length) {
+      const { error } = await sb.from("assignments").insert(uniq.map((dog_id) => ({ day: state.day, dog_id })));
+      if (error) throw error;
+    }
+    state.attendance = new Set(uniq);
+    state.draft = null;
+    state.dogs.sort(dogOrder);
+    const need = uniq.filter((id) => !dogById(id)?.ref_path).length;
+    toast(need ? `명단 저장! 대표 사진이 필요한 아이 ${need}마리` : "명단 저장! 모두 아는 얼굴이에요");
+  } catch (err) {
+    console.error(err);
+    toast("저장하지 못했어요. 다시 시도해 주세요.");
+  }
+  renderPhotos();
+}
+
+// 대표 사진 올리기 (한 번 올리면 계속 기억)
+let refTarget = null;
+$("#ref-file").addEventListener("change", async (e) => {
+  const f = e.target.files[0];
+  e.target.value = "";
+  const dog = dogById(refTarget);
+  refTarget = null;
+  if (!f || !dog) return;
+  try {
+    const blob = await resize(f, 640, 0.85);
+    const path = `${dog.id}-${Date.now()}.jpg`;
+    const { error } = await sb.storage.from("refs").upload(path, blob, { contentType: "image/jpeg" });
+    if (error) throw error;
+    if (dog.ref_path) await sb.storage.from("refs").remove([dog.ref_path]);
+    await sb.from("dogs").update({ ref_path: path }).eq("id", dog.id);
+    dog.ref_path = path;
+    toast(`${dog.name} 얼굴을 기억했어요`);
+  } catch {
+    toast("올리지 못했어요. 다시 시도해 주세요.");
+  }
+  renderRoll();
+});
 
 /* ---------- 올리기 + 분류 ---------- */
 function progress(title, n, total, detail = "") {
@@ -339,7 +557,10 @@ async function openSheet(photoId, list = sheetList) {
   const url = await signed("photos", [p.path]);
   $("#sheet-img").src = url(p.path);
   $("#sheet-note").textContent = p.ai_note ? `AI 메모: ${p.ai_note}` : "";
-  $("#sheet-chips").innerHTML = state.dogs.filter((d) => d.active).map((d) =>
+  // 오늘 출석한 아이를 앞쪽에
+  const chipDogs = state.dogs.filter((d) => d.active)
+    .sort((a, b) => (state.attendance.has(b.id) - state.attendance.has(a.id)) || dogOrder(a, b));
+  $("#sheet-chips").innerHTML = chipDogs.map((d) =>
     `<button data-dog="${d.id}" class="${p.dog_ids.includes(d.id) ? "on" : ""}">${esc(d.name)}</button>`).join("")
     || `<span class="muted small">아직 강아지 그룹이 없어요. '새 강아지로'를 눌러 주세요.</span>`;
   $$("#sheet-chips button").forEach((b) => b.addEventListener("click", () => b.classList.toggle("on")));
