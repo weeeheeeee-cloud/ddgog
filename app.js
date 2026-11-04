@@ -190,6 +190,7 @@ async function render() {
   await Promise.all([loadDogs(), loadAttendance()]);
   if (state.tab === "photos") { await loadPhotos(); await renderPhotos(); }
   else if (state.tab === "roster") renderRoster();
+  renderSide();
 }
 
 /* ================= 사진 화면 ================= */
@@ -315,6 +316,7 @@ function blobToBase64(blob) {
 const isNewName = (n) => !state.dogs.some((d) => !d.auto && norm(d.name) === norm(n));
 
 async function renderRoll() {
+  renderSide();
   const body = $("#roll-body");
   const count = $("#roll-count");
 
@@ -804,7 +806,41 @@ async function saveAll(btn) {
 }
 
 /* ================= 관리 ================= */
+/* ---------- 왼쪽 명단 (항상 보임) ---------- */
+async function renderSide() {
+  const named = state.dogs.filter((d) => !d.auto);
+  const autos = state.dogs.filter((d) => d.auto && d.active);
+  const refs = named.reduce((a, d) => a + refCount(d), 0);
+  $("#side-count").textContent = named.length;
+  $("#side-sub").textContent = `대표 사진 ${refs}장${state.attendance.size ? ` · 오늘 ${state.attendance.size}마리` : ""}`;
+  const ref = await signed("refs", state.dogs.map((d) => d.ref_path));
+  const row = (d) => `<button class="side-row ${d.active ? "" : "off"}" data-side="${d.id}" title="${esc(d.name)}">
+      ${d.ref_path ? `<img src="${ref(d.ref_path)}" alt="">` : `<span class="noimg">?</span>`}
+      <span class="nm">${esc(d.name)}</span>
+      ${state.attendance.has(d.id) ? `<i class="dot" title="오늘 출석"></i>` : ""}
+      <small>${refCount(d)}</small>
+    </button>`;
+  $("#side-list").innerHTML =
+    (named.length ? named.map(row).join("") : `<p class="muted small side-empty">아직 등록된 강아지가 없어요</p>`) +
+    (autos.length ? `<p class="side-sec">이름 없는 그룹 ${autos.length}</p>` + autos.map(row).join("") : "");
+  $$("[data-side]", $("#side-list")).forEach((b) => b.addEventListener("click", async () => {
+    const id = b.dataset.side;
+    if (state.tab === "photos" && document.querySelector(`[data-list="${id}"]`)) {
+      document.querySelector(`[data-list="${id}"]`).scrollIntoView({ behavior: "smooth", block: "start" });
+    } else {
+      if (state.tab !== "roster") { state.tab = "roster"; await render(); }
+      const card = document.querySelector(`.dog-card[data-id="${id}"]`);
+      card?.scrollIntoView({ behavior: "smooth", block: "center" });
+      card?.classList.add("flash");
+      setTimeout(() => card?.classList.remove("flash"), 1200);
+    }
+    if (matchMedia("(max-width: 899px)").matches) $("#side").classList.remove("open");
+  }));
+}
+$("#side-toggle").addEventListener("click", () => $("#side").classList.toggle("open"));
+
 async function renderRoster() {
+  renderSide();
   const q = norm($("#roster-search").value);
   const named = state.dogs.filter((d) => !d.auto && (!q || norm(d.name).includes(q)));
   const autos = state.dogs.filter((d) => d.auto && d.active && !q);
