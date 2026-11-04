@@ -80,6 +80,40 @@ function dogOrder(a, b) {
   return a.name.localeCompare(b.name, "ko");
 }
 const dogById = (id) => state.dogs.find((d) => d.id === id);
+const refCount = (d) => (d?.dog_refs?.length || (d?.ref_path ? 1 : 0));
+
+// 대표 사진 여러 장 추가 (한 번 올리면 계속 기억)
+async function addRefs(dog, files, onEach) {
+  let added = 0;
+  for (const f of files) {
+    try {
+      const blob = await resize(f, 640, 0.85);
+      const path = `${dog.id}-${Date.now()}-${added}.jpg`;
+      const up = await sb.storage.from("refs").upload(path, blob, { contentType: "image/jpeg" });
+      if (up.error) throw up.error;
+      const { data: row, error } = await sb.from("dog_refs").insert({ dog_id: dog.id, path }).select().single();
+      if (error) throw error;
+      dog.dog_refs = [...(dog.dog_refs || []), row];
+      if (!dog.ref_path) {
+        await sb.from("dogs").update({ ref_path: path }).eq("id", dog.id);
+        dog.ref_path = path;
+      }
+      added++;
+      onEach?.(added);
+    } catch (err) { console.error(err); }
+  }
+  return added;
+}
+async function removeRef(dog, ref) {
+  await sb.from("dog_refs").delete().eq("id", ref.id);
+  await sb.storage.from("refs").remove([ref.path]);
+  dog.dog_refs = (dog.dog_refs || []).filter((r) => r.id !== ref.id);
+  if (dog.ref_path === ref.path) {
+    const next = dog.dog_refs[0]?.path || null;
+    await sb.from("dogs").update({ ref_path: next }).eq("id", dog.id);
+    dog.ref_path = next;
+  }
+}
 
 /* ================= 로그인 ================= */
 async function boot() {
@@ -115,7 +149,8 @@ async function startApp() {
 
 /* ================= 데이터 ================= */
 async function loadDogs() {
-  const { data } = await sb.from("dogs").select("*");
+  const { data } = await sb.from("dogs").select("*, dog_refs(id, path, created_at)");
+  (data || []).forEach((d) => (d.dog_refs || []).sort((a, b) => a.created_at.localeCompare(b.created_at)));
   state.dogs = (data || []).sort(dogOrder);
 }
 async function loadAttendance() {
@@ -154,7 +189,7 @@ async function render() {
   $$(".tab").forEach((s) => s.classList.toggle("hidden", s.id !== "tab-" + state.tab));
   await Promise.all([loadDogs(), loadAttendance()]);
   if (state.tab === "photos") { await loadPhotos(); await renderPhotos(); }
-  else renderDogs();
+  else if (state.tab === "roster") renderRoster();
 }
 
 /* ================= 사진 화면 ================= */
@@ -222,7 +257,7 @@ async function renderPhotos() {
   lists.set("unsorted", unsorted.map((p) => p.id));
   $$("[data-photo]", box).forEach((el) => el.addEventListener("click", () => {
     const key = el.closest("[data-list]")?.dataset.list;
-    openSheet(el.dataset.photo, lists.get(key) || [el.dataset.photo]);
+    openSheet(el.dataset.photo, lists.get(key) || [el.dataset.photo], key);
   }));
   // 그룹이 늘어난 뒤 다시 돌리면 대부분 자리를 찾아감
   $("#reclassify")?.addEventListener("click", async () => {
@@ -248,15 +283,11 @@ async function renameDog(dog) {
   const same = state.dogs.find((d) => d.id !== dog.id && norm(d.name) === norm(nm));
   if (same) {
     if (!confirm(`'${same.name}'(이)가 이미 있어요. 이 그룹 사진을 '${same.name}'(으)로 합칠까요?`)) return false;
-    let moved = false;
-    if (!same.ref_path && dog.ref_path) {            // 얼굴을 몰랐던 아이 → 이 그룹 기준 사진으로 기억
-      await sb.from("dogs").update({ ref_path: dog.ref_path }).eq("id", same.id);
-      same.ref_path = dog.ref_path;
-      moved = true;
-    }
+    const moved = refCount(same) === 0 && refCount(dog) > 0;  // 얼굴을 몰랐던 아이 → 이 그룹 사진으로 기억
     const { error } = await sb.rpc("merge_dogs", { src: dog.id, dst: same.id });
     if (error) { toast("합치지 못했어요"); return false; }
-    if (dog.ref_path && !moved) await sb.storage.from("refs").remove([dog.ref_path]);
+    same.dog_refs = [...(same.dog_refs || []), ...(dog.dog_refs || [])];
+    if (!same.ref_path) same.ref_path = dog.ref_path;
     state.dogs = state.dogs.filter((d) => d.id !== dog.id);
     state.photos.forEach((p) => {
       if (p.dog_ids.includes(dog.id)) p.dog_ids = [...new Set(p.dog_ids.map((x) => (x === dog.id ? same.id : x)))];
@@ -281,6 +312,8 @@ function blobToBase64(blob) {
   });
 }
 
+const isNewName = (n) => !state.dogs.some((d) => !d.auto && norm(d.name) === norm(n));
+
 async function renderRoll() {
   const body = $("#roll-body");
   const count = $("#roll-count");
@@ -292,9 +325,10 @@ async function renderRoll() {
     body.innerHTML = `
       ${d.img ? `<img class="board-preview" src="${d.img}" alt="출석 보드">` : ""}
       <p class="small">읽은 이름이 맞는지 확인해 주세요. <b>이름을 누르면 고칠 수 있고</b>, ×로 뺄 수 있어요.
+        ${d.names.some(isNewName) ? `<em class="tag-new">새 아이</em>는 명단에 없는 이름이라 확정 후 대표 사진을 받을게요.` : ""}
         ${d.unsure.length ? `<span class="q-legend">?</span> 표시는 글씨가 애매했던 이름이에요.` : ""}</p>
       <div class="chips roll-chips">${d.names.map((n, i) => `
-        <span class="${d.unsure.includes(n) ? "unsure" : ""}"><b data-edit="${i}">${esc(n)}</b><b class="x" data-del="${i}">×</b></span>`).join("")
+        <span class="${d.unsure.includes(n) ? "unsure" : ""} ${isNewName(n) ? "new" : ""}"><b data-edit="${i}">${esc(n)}</b>${isNewName(n) ? `<em class="tag-new">새 아이</em>` : ""}<b class="x" data-del="${i}">×</b></span>`).join("")
         || `<span class="muted small">아직 이름이 없어요</span>`}</div>
       <form id="roll-add" class="row">
         <input id="roll-add-name" class="grow" placeholder="빠진 이름 추가">
@@ -344,12 +378,12 @@ async function renderRoll() {
   }
 
   // ③ 확정된 명단: 얼굴 아는 아이 ✓ / 처음 보는 아이는 대표 사진 올리기
-  const known = roll.filter((dg) => dg.ref_path);
-  const need = roll.filter((dg) => !dg.ref_path);
+  const known = roll.filter((dg) => refCount(dg));
+  const need = roll.filter((dg) => !refCount(dg));
   count.textContent = `${roll.length}마리${need.length ? ` · 대표 사진 필요 ${need.length}` : " · 모두 얼굴 앎 ✓"}`;
   const ref = await signed("refs", known.map((dg) => dg.ref_path));
   body.innerHTML = `
-    ${need.length ? `<p class="small">처음 보는 아이예요. <b>대표 사진</b>을 한 번만 올려 주면 다음부터는 알아서 알아봐요.</p>
+    ${need.length ? `<p class="small">명단에 없던 아이예요. <b>대표 사진</b>을 올려 주세요. 정면·옆·뒤 등 <b>여러 장</b>을 한 번에 고르면 더 잘 알아봐요. 한 번 올리면 다음부터는 묻지 않아요.</p>
     <div class="need-list">${need.map((dg) => `
       <div class="need-row"><span class="avatar"></span><b class="grow">${esc(dg.name)}</b>
         <button class="btn primary sm" data-ref-for="${dg.id}">대표 사진 올리기</button></div>`).join("")}</div>` : ""}
@@ -437,23 +471,14 @@ async function confirmRoll() {
 // 대표 사진 올리기 (한 번 올리면 계속 기억)
 let refTarget = null;
 $("#ref-file").addEventListener("change", async (e) => {
-  const f = e.target.files[0];
+  const files = [...e.target.files];
   e.target.value = "";
   const dog = dogById(refTarget);
   refTarget = null;
-  if (!f || !dog) return;
-  try {
-    const blob = await resize(f, 640, 0.85);
-    const path = `${dog.id}-${Date.now()}.jpg`;
-    const { error } = await sb.storage.from("refs").upload(path, blob, { contentType: "image/jpeg" });
-    if (error) throw error;
-    if (dog.ref_path) await sb.storage.from("refs").remove([dog.ref_path]);
-    await sb.from("dogs").update({ ref_path: path }).eq("id", dog.id);
-    dog.ref_path = path;
-    toast(`${dog.name} 얼굴을 기억했어요`);
-  } catch {
-    toast("올리지 못했어요. 다시 시도해 주세요.");
-  }
+  if (!files.length || !dog) return;
+  toast(`${dog.name} 사진 올리는 중…`);
+  const n = await addRefs(dog, files);
+  toast(n ? `${dog.name} 얼굴을 기억했어요 (${n}장)` : "올리지 못했어요. 다시 시도해 주세요.");
   renderRoll();
 });
 
@@ -545,7 +570,9 @@ async function classifyPending() {
 /* ---------- 사진 시트 (크게 보기 + 강아지 지정) ---------- */
 let sheetPhoto = null;
 let sheetList = [];
-async function openSheet(photoId, list = sheetList) {
+let sheetKey = null; // 연 그룹 (강아지 id 또는 "unsorted")
+async function openSheet(photoId, list = sheetList, key = sheetKey) {
+  sheetKey = key;
   const p = state.photos.find((x) => x.id === photoId);
   if (!p) return;
   sheetPhoto = p;
@@ -564,6 +591,10 @@ async function openSheet(photoId, list = sheetList) {
     `<button data-dog="${d.id}" class="${p.dog_ids.includes(d.id) ? "on" : ""}">${esc(d.name)}</button>`).join("")
     || `<span class="muted small">아직 강아지 그룹이 없어요. '새 강아지로'를 눌러 주세요.</span>`;
   $$("#sheet-chips button").forEach((b) => b.addEventListener("click", () => b.classList.toggle("on")));
+  const inGroup = sheetKey && sheetKey !== "unsorted" && p.dog_ids.includes(sheetKey);
+  $("#sheet-out").classList.toggle("hidden", !inGroup);
+  $("#sheet-out").textContent = inGroup ? `${dogById(sheetKey)?.name || ""}에서 빼기` : "여기서 빼기";
+  $("#sheet-del").classList.toggle("hidden", inGroup);
   $("#sheet").classList.remove("hidden");
   document.body.style.overflow = "hidden";
   // 다음 사진 미리 불러오기
@@ -642,6 +673,7 @@ $("#sheet-new").addEventListener("click", async () => {
   const refPath = `${dog.id}-${Date.now()}.jpg`;
   await sb.storage.from("refs").upload(refPath, blob, { contentType: "image/jpeg" });
   await sb.from("dogs").update({ ref_path: refPath }).eq("id", dog.id);
+  await sb.from("dog_refs").insert({ dog_id: dog.id, path: refPath });
   const ids = [...new Set([...$$("#sheet-chips button.on").map((b) => b.dataset.dog), dog.id])];
   await sb.from("photos").update({ dog_ids: ids, status: "done", confidence: "manual" }).eq("id", p.id);
   closeSheet();
@@ -649,8 +681,23 @@ $("#sheet-new").addEventListener("click", async () => {
   render();
 });
 
+// 잘못 들어간 사진: 지우지 않고 이 강아지에서만 빼서 '분류 안 된 사진'으로 돌려보냄
+$("#sheet-out").addEventListener("click", async () => {
+  const p = sheetPhoto, dogId = sheetKey;
+  const rest = p.dog_ids.filter((d) => d !== dogId);
+  const status = rest.length ? "done" : "review";
+  const { error } = await sb.from("photos").update({ dog_ids: rest, status, confidence: "manual" }).eq("id", p.id);
+  if (error) { toast("옮기지 못했어요"); return; }
+  Object.assign(p, { dog_ids: rest, status });
+  toast(rest.length ? `${dogById(dogId)?.name}에서 뺐어요` : "분류 안 된 사진으로 옮겼어요");
+  const i = sheetList.indexOf(p.id);
+  sheetList = sheetList.filter((id) => id !== p.id);
+  if (sheetList.length) openSheet(sheetList[Math.min(i, sheetList.length - 1)]); else closeSheet();
+  renderPhotos();
+});
+
 $("#sheet-del").addEventListener("click", async () => {
-  if (!confirm("이 사진을 삭제할까요?")) return;
+  if (!confirm("이 사진을 완전히 삭제할까요? 되돌릴 수 없어요.\n(잘못 분류된 거라면 다른 강아지를 골라 '분류 저장'을 누르세요)")) return;
   const p = sheetPhoto;
   await sb.storage.from("photos").remove([p.path, p.thumb_path]);
   await sb.from("photos").delete().eq("id", p.id);
@@ -757,46 +804,64 @@ async function saveAll(btn) {
 }
 
 /* ================= 관리 ================= */
-async function renderDogs() {
-  const list = $("#dog-list");
-  const ref = await signed("refs", state.dogs.map((d) => d.ref_path));
-  list.innerHTML = state.dogs.map((d) => `
-    <div class="dog-row ${d.active ? "" : "off"} ${d.auto ? "auto" : ""}" data-id="${d.id}">
-      <label class="ref-pick sm">
-        <input type="file" accept="image/*" hidden data-ref>
-        ${d.ref_path ? `<img src="${ref(d.ref_path)}" alt="">` : "사진"}
-      </label>
-      <div class="grow"><b>${esc(d.name)}</b>${d.auto ? ` <span class="tag">이름 필요</span>` : ""}<small>${esc(d.note || "")}</small></div>
-      <div class="row-actions">
-        <button class="btn ${d.auto ? "primary" : "ghost"} mini" data-edit>${d.auto ? "이름" : "수정"}</button>
-        <button class="btn ghost mini" data-merge>합치기</button>
-        <button class="btn ghost mini" data-toggle>${d.active ? "숨기기" : "표시"}</button>
+async function renderRoster() {
+  const q = norm($("#roster-search").value);
+  const named = state.dogs.filter((d) => !d.auto && (!q || norm(d.name).includes(q)));
+  const autos = state.dogs.filter((d) => d.auto && d.active && !q);
+  const paths = state.dogs.flatMap((d) => (d.dog_refs || []).map((r) => r.path).concat(d.ref_path || []));
+  const ref = await signed("refs", paths);
+
+  const card = (d) => {
+    const refs = d.dog_refs?.length ? d.dog_refs : (d.ref_path ? [{ id: "", path: d.ref_path }] : []);
+    const today = state.attendance.has(d.id);
+    return `<div class="dog-card ${d.active ? "" : "off"} ${d.auto ? "auto" : ""}" data-id="${d.id}">
+      <div class="dog-card-head">
+        ${d.ref_path ? `<img class="avatar" src="${ref(d.ref_path)}" alt="">` : `<span class="avatar"></span>`}
+        <div class="grow">
+          <b class="nm">${esc(d.name)}</b>
+          ${d.auto ? `<span class="tag">이름 필요</span>` : ""}
+          ${today ? `<span class="tag today">오늘 출석</span>` : ""}
+          ${!d.active ? `<span class="tag off">숨김</span>` : ""}
+          <small>${esc(d.note || "")}</small>
+        </div>
+        <div class="row-actions">
+          <button class="btn ${d.auto ? "primary" : "ghost"} mini" data-edit>${d.auto ? "이름" : "수정"}</button>
+          <button class="btn ghost mini" data-merge>합치기</button>
+          <button class="btn ghost mini" data-toggle>${d.active ? "숨기기" : "표시"}</button>
+        </div>
       </div>
+      <div class="ref-strip">
+        ${refs.map((r) => `<span class="ref-thumb"><img src="${ref(r.path)}" alt="">${r.id ? `<b class="x" data-del-ref="${r.id}" title="이 사진 빼기">×</b>` : ""}</span>`).join("")}
+        <button class="ref-add" data-add-ref>＋<small>사진</small></button>
+      </div>
+      <p class="ref-hint ${refs.length >= 3 ? "ok" : ""}">대표 사진 ${refs.length}장${refs.length < 3 ? " · 여러 각도로 3장 이상 올리면 더 정확해요" : " ✓"}</p>
       <div class="merge-box hidden">
-        <span class="small">이 그룹을</span>
+        <span class="small">이 강아지를</span>
         <select>${state.dogs.filter((o) => o.id !== d.id).map((o) => `<option value="${o.id}">${esc(o.name)}</option>`).join("")}</select>
         <span class="small">(으)로</span>
         <button class="btn primary mini" data-merge-go>합치기</button>
         <button class="btn ghost mini" data-merge-cancel>취소</button>
       </div>
-    </div>`).join("") || `<div class="muted small">아직 강아지가 없어요. 사진을 올리면 AI가 자동으로 그룹을 만들어요.</div>`;
+    </div>`;
+  };
 
-  $$(".dog-row", list).forEach((row) => {
+  $("#roster-list").innerHTML = named.length
+    ? `<h3 class="sec">명단 ${named.length}마리</h3>` + named.map(card).join("")
+    : `<div class="empty">${q ? "찾는 이름이 없어요." : "아직 명단이 없어요. 위에서 등록하거나, 사진 탭에서 출석 보드를 올려 보세요."}</div>`;
+  $("#roster-auto").innerHTML = autos.length
+    ? `<h3 class="sec">이름 없는 그룹 ${autos.length}개 <small class="muted">AI가 만든 그룹이에요. 이름을 붙이면 명단에 들어가요 (같은 이름이 있으면 합쳐져요)</small></h3>` + autos.map(card).join("")
+    : "";
+
+  $$(".dog-card").forEach((row) => {
     const dog = dogById(row.dataset.id);
-    $("[data-ref]", row).addEventListener("change", async (e) => {
-      const f = e.target.files[0];
-      if (!f) return;
-      const blob = await resize(f, 640, 0.85);
-      const path = `${dog.id}-${Date.now()}.jpg`;
-      const { error } = await sb.storage.from("refs").upload(path, blob, { contentType: "image/jpeg" });
-      if (error) { toast("기준 사진을 올리지 못했어요"); return; }
-      if (dog.ref_path) await sb.storage.from("refs").remove([dog.ref_path]);
-      await sb.from("dogs").update({ ref_path: path }).eq("id", dog.id);
-      dog.ref_path = path;
-      renderDogs();
-    });
+    $("[data-add-ref]", row).addEventListener("click", () => { refTarget = dog.id; $("#roster-file").click(); });
+    $$("[data-del-ref]", row).forEach((x) => x.addEventListener("click", async () => {
+      if (!confirm("이 대표 사진을 뺄까요?")) return;
+      await removeRef(dog, dog.dog_refs.find((r) => r.id === x.dataset.delRef));
+      renderRoster();
+    }));
     $("[data-edit]", row).addEventListener("click", async () => {
-      if (dog.auto) { if (await renameDog(dog)) renderDogs(); return; }
+      if (dog.auto) { if (await renameDog(dog)) renderRoster(); return; }
       const name = prompt("이름", dog.name);
       if (name === null) return;
       const note = prompt("특징 (견종·털색·무늬, 헷갈리는 아이면 자세히)", dog.note || "");
@@ -804,28 +869,70 @@ async function renderDogs() {
       await sb.from("dogs").update({ name: name.trim() || dog.name, note: note.trim() }).eq("id", dog.id);
       Object.assign(dog, { name: name.trim() || dog.name, note: note.trim() });
       state.dogs.sort(dogOrder);
-      renderDogs();
+      renderRoster();
     });
     $("[data-toggle]", row).addEventListener("click", async () => {
       await sb.from("dogs").update({ active: !dog.active }).eq("id", dog.id);
       dog.active = !dog.active;
-      renderDogs();
+      renderRoster();
     });
     const box = $(".merge-box", row);
     $("[data-merge]", row).addEventListener("click", () => box.classList.toggle("hidden"));
     $("[data-merge-cancel]", row).addEventListener("click", () => box.classList.add("hidden"));
     $("[data-merge-go]", row).addEventListener("click", async () => {
       const target = dogById($("select", box).value);
-      if (!target || !confirm(`'${dog.name}' 사진을 모두 '${target.name}'(으)로 옮기고 '${dog.name}' 그룹은 지울까요?`)) return;
+      if (!target || !confirm(`'${dog.name}'의 사진과 대표 사진을 모두 '${target.name}'(으)로 옮기고 '${dog.name}'은(는) 지울까요?`)) return;
       const { error } = await sb.rpc("merge_dogs", { src: dog.id, dst: target.id });
       if (error) { toast("합치지 못했어요. 다시 시도해 주세요."); return; }
-      if (dog.ref_path) await sb.storage.from("refs").remove([dog.ref_path]);
-      state.dogs = state.dogs.filter((d) => d.id !== dog.id);
       toast(`'${target.name}'(으)로 합쳤어요`);
-      renderDogs();
+      await Promise.all([loadDogs(), loadAttendance()]);
+      renderRoster();
     });
   });
 }
+$("#roster-search").addEventListener("input", () => renderRoster());
+$("#roster-file").addEventListener("change", async (e) => {
+  const files = [...e.target.files];
+  e.target.value = "";
+  const dog = dogById(refTarget);
+  refTarget = null;
+  if (!files.length || !dog) return;
+  toast(`${dog.name} 사진 올리는 중…`);
+  const n = await addRefs(dog, files);
+  toast(n ? `${dog.name} 대표 사진 ${n}장 추가` : "올리지 못했어요");
+  renderRoster();
+});
+
+// 새 강아지 등록 (이름 + 여러 각도 사진)
+$("#new-dog-files").addEventListener("change", (e) => {
+  const n = e.target.files.length;
+  $("#new-dog-files-label").textContent = n ? `📷 ${n}장 선택됨` : "📷 대표 사진 고르기 (여러 장)";
+});
+$("#new-dog").addEventListener("submit", async (e) => {
+  e.preventDefault();
+  const name = $("#new-dog-name").value.trim();
+  const files = [...$("#new-dog-files").files];
+  if (!name) return;
+  if (state.dogs.some((d) => !d.auto && norm(d.name) === norm(name))) {
+    toast(`'${name}'은(는) 이미 명단에 있어요. 아래에서 사진을 추가하세요.`);
+    return;
+  }
+  const btn = $("button[type=submit]", e.target);
+  btn.disabled = true;
+  const { data: dog, error } = await sb.from("dogs")
+    .insert({ name, note: $("#new-dog-note").value.trim() || null, auto: false }).select().single();
+  if (error) { toast("등록하지 못했어요"); btn.disabled = false; return; }
+  dog.dog_refs = [];
+  state.dogs.push(dog);
+  if (files.length) await addRefs(dog, files, (n) => { btn.textContent = `사진 올리는 중 ${n}/${files.length}`; });
+  e.target.reset();
+  $("#new-dog-files-label").textContent = "📷 대표 사진 고르기 (여러 장)";
+  btn.disabled = false;
+  btn.textContent = "등록";
+  state.dogs.sort(dogOrder);
+  toast(`${name} 등록 완료`);
+  renderRoster();
+});
 
 // 사진 + 파일 일괄 삭제 (조건에 맞는 것만)
 async function deletePhotos(applyFilter, onProgress) {
@@ -858,8 +965,8 @@ $("#reset-all").addEventListener("click", async () => {
   const msg = $("#reset-msg");
   try {
     await deletePhotos((q) => q, (n) => { msg.textContent = `사진 ${n}장 삭제 중…`; });
-    const { data: dogs } = await sb.from("dogs").select("id, ref_path");
-    const refs = (dogs || []).map((d) => d.ref_path).filter(Boolean);
+    const { data: dogs } = await sb.from("dogs").select("id, ref_path, dog_refs(path)");
+    const refs = [...new Set((dogs || []).flatMap((d) => (d.dog_refs || []).map((r) => r.path).concat(d.ref_path || [])))];
     for (let i = 0; i < refs.length; i += 100) await sb.storage.from("refs").remove(refs.slice(i, i + 100));
     if (dogs?.length) await sb.from("dogs").delete().in("id", dogs.map((d) => d.id));
     urlCache.clear();

@@ -45,6 +45,7 @@
     </div>
     <nav class="tabs">
       <button data-tab="photos" class="on">사진</button>
+      <button data-tab="roster">명단</button>
       <button data-tab="admin">관리</button>
     </nav>
   </header>
@@ -60,7 +61,7 @@
         <div id="roll-body"></div>
       </div>
       <input id="board-file" type="file" accept="image/*" hidden>
-      <input id="ref-file" type="file" accept="image/*" hidden>
+      <input id="ref-file" type="file" accept="image/*" multiple hidden>
 
       <label class="drop">
         <input id="file" type="file" accept="image/*" multiple hidden>
@@ -79,13 +80,29 @@
       <div id="groups"></div>
     </section>
 
+    <!-- 명단 -->
+    <section id="tab-roster" class="tab hidden">
+      <div class="card">
+        <h2>새 강아지 등록</h2>
+        <p class="muted small">정면·옆·뒤·엎드린 모습 등 <b>여러 각도 사진 3~5장</b>을 올리면 얼굴이 안 보이는 사진도 잘 구분해요.</p>
+        <form id="new-dog" class="new-dog">
+          <input id="new-dog-name" placeholder="이름" required>
+          <input id="new-dog-note" placeholder="특징 (예: 흰색 비숑, 왼쪽 귀 갈색) — 선택">
+          <label class="btn ghost block file-btn">
+            <input id="new-dog-files" type="file" accept="image/*" multiple hidden>
+            <span id="new-dog-files-label">📷 대표 사진 고르기 (여러 장)</span>
+          </label>
+          <button class="btn primary block" type="submit">등록</button>
+        </form>
+      </div>
+      <input id="roster-search" class="roster-search" placeholder="🔍 이름 검색">
+      <div id="roster-list"></div>
+      <div id="roster-auto"></div>
+      <input id="roster-file" type="file" accept="image/*" multiple hidden>
+    </section>
+
     <!-- 관리 -->
     <section id="tab-admin" class="tab hidden">
-      <div class="card">
-        <h2>강아지</h2>
-        <p class="muted small">AI가 만든 그룹이에요. <b>이름</b>을 붙이거나, 같은 아이가 두 그룹이면 <b>합치기</b> 하세요. 동그란 사진을 누르면 기준 사진을 바꿀 수 있어요.</p>
-        <div id="dog-list"></div>
-      </div>
 
       <div class="card">
         <h2>오래된 사진 정리</h2>
@@ -129,7 +146,8 @@
       <button id="sheet-save" class="btn primary grow">분류 저장</button>
       <button id="sheet-new" class="btn ghost">새 강아지로</button>
       <button id="sheet-dl" class="btn ghost">이 사진 받기</button>
-      <button id="sheet-del" class="btn ghost">삭제</button>
+      <button id="sheet-out" class="btn ghost hidden">여기서 빼기</button>
+      <button id="sheet-del" class="btn ghost hidden">삭제</button>
     </div>
   </div>
 </div>

@@ -231,3 +231,31 @@ main { max-width: 760px; margin: 0 auto; padding: 16px; padding-bottom: 60px; }
   padding: 8px 8px 8px 16px; border-radius: 999px; box-shadow: 0 6px 20px rgba(0,0,0,.25); font-size: 14px; font-weight: 600;
 }
 .update-bar .btn { background: var(--yellow); color: var(--navy); }
+
+/* 명단 탭 */
+.new-dog { display: grid; gap: 8px; }
+.file-btn { display: block; text-align: center; margin-top: 0; }
+.roster-search { margin: 0 0 12px; }
+h3.sec { font-size: 15px; margin: 18px 2px 8px; }
+h3.sec small { display: block; font-weight: 400; font-size: 12px; margin-top: 2px; }
+.dog-card { background: #fff; border: 1px solid var(--line); border-radius: var(--radius); padding: 12px; margin-bottom: 10px; }
+.dog-card.auto { background: #fffdf3; border-color: #f0dc8a; }
+.dog-card.off { opacity: .55; }
+.dog-card-head { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.dog-card-head .nm { font-size: 16px; margin-right: 4px; }
+.dog-card-head small { display: block; color: var(--muted); }
+.tag.today { background: #dcfce7; color: var(--ok); }
+.tag.off { background: var(--cream); color: var(--muted); }
+.ref-strip { display: flex; flex-wrap: wrap; gap: 6px; padding: 10px 0 2px; }
+.ref-thumb { position: relative; flex: none; }
+.ref-thumb img { width: 72px; height: 72px; object-fit: cover; border-radius: 10px; display: block; background: var(--cream); }
+.ref-thumb .x { position: absolute; top: 3px; right: 3px; width: 20px; height: 20px; border-radius: 50%; background: rgba(0,0,0,.6); color: #fff; font-size: 13px; line-height: 20px; text-align: center; cursor: pointer; }
+.ref-add { flex: none; width: 72px; height: 72px; border: 2px dashed var(--line); border-radius: 10px; background: #fff; color: var(--navy); font-size: 22px; line-height: 1; cursor: pointer; display: grid; place-items: center; align-content: center; gap: 2px; }
+.ref-add small { font-size: 11px; color: var(--muted); }
+.ref-hint { margin: 6px 0 0; font-size: 12px; color: #b7791f; }
+.ref-hint.ok { color: var(--ok); }
+.dog-card .merge-box { padding-left: 0; }
+
+/* 출석 명단: 처음 보는 이름 */
+.tag-new { font-style: normal; font-size: 11px; font-weight: 700; background: #dbeafe; color: var(--navy); border-radius: 999px; padding: 1px 7px; margin-left: 4px; }
+.roll-chips span.new { border-color: #93c5fd; }

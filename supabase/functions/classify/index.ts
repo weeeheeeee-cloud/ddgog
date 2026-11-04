@@ -16,7 +16,8 @@ const CORS = {
 };
 
 const SYSTEM = `You identify individual dogs in photos taken at a dog daycare.
-You get numbered reference photos (one per known dog, possibly none yet). Some dogs also have
+You get numbered known dogs, each with one or more reference photos taken from different angles
+(front, side, back, lying down…), possibly none yet. Some dogs also have
 "today's look": a photo of the same dog taken TODAY, showing what it looks like today.
 Then you get ONE new photo, also taken today. Decide which known dogs appear in it.
 
@@ -110,13 +111,20 @@ Deno.serve(async (req) => {
 
   // 후보: 그날 담당이 지정된 강아지 + 이름 안 붙은 자동 그룹. 담당 지정이 없으면 활성 강아지 전체
   const { data: assigned } = await supa.from("assignments").select("dog_id").eq("day", photo.day);
-  let q = supa.from("dogs").select("id, name, note, ref_path")
-    .eq("active", true).not("ref_path", "is", null).order("created_at");
+  let q = supa.from("dogs").select("id, name, note, ref_path, dog_refs(path, created_at)")
+    .eq("active", true).order("created_at");
   if (assigned && assigned.length) {
     q = q.or(`id.in.(${assigned.map((a) => a.dog_id).join(",")}),auto.eq.true`);
   }
   const { data: dogs } = await q;
-  const refs = dogs ?? [];
+  // 대표 사진이 하나라도 있는 강아지만 후보. 전체 이미지 수가 너무 많아지지 않게 강아지당 장수 조절
+  const withRefs = (dogs ?? []).map((d) => {
+    const paths = (d.dog_refs ?? []).sort((a, b) => a.created_at.localeCompare(b.created_at)).map((r) => r.path);
+    if (!paths.length && d.ref_path) paths.push(d.ref_path);
+    return { ...d, paths };
+  }).filter((d) => d.paths.length);
+  const perDog = withRefs.length <= 30 ? 4 : withRefs.length <= 50 ? 3 : withRefs.length <= 80 ? 2 : 1;
+  const refs = withRefs.map((d) => ({ ...d, paths: d.paths.slice(0, perDog) }));
 
   try {
     const content: Record<string, unknown>[] = [];
@@ -124,13 +132,15 @@ Deno.serve(async (req) => {
       content.push({ type: "text", text: "Reference dogs:" });
       for (let i = 0; i < refs.length; i++) {
         const d = refs[i];
-        let b64 = refCache.get(d.ref_path!);
-        if (!b64) {
-          b64 = encodeBase64(await download(supa, "refs", d.ref_path!));
-          refCache.set(d.ref_path!, b64);
+        content.push({ type: "text", text: `[${i + 1}] ${d.name}${d.note ? ` — ${d.note}` : ""}${d.paths.length > 1 ? ` (${d.paths.length} photos)` : ""}` });
+        for (const path of d.paths) {
+          let b64 = refCache.get(path);
+          if (!b64) {
+            try { b64 = encodeBase64(await download(supa, "refs", path)); } catch { continue; }
+            refCache.set(path, b64);
+          }
+          content.push({ type: "image", source: { type: "base64", media_type: "image/jpeg", data: b64 } });
         }
-        content.push({ type: "text", text: `[${i + 1}] ${d.name}${d.note ? ` — ${d.note}` : ""}` });
-        content.push({ type: "image", source: { type: "base64", media_type: "image/jpeg", data: b64 } });
       }
       content[content.length - 1].cache_control = { type: "ephemeral" };
     } else {
@@ -209,6 +219,7 @@ Deno.serve(async (req) => {
         .upload(refPath, targetBytes, { contentType: "image/jpeg" });
       if (up.error) throw new Error("기준 사진 저장 실패");
       await supa.from("dogs").update({ ref_path: refPath }).eq("id", dog.id);
+      await supa.from("dog_refs").insert({ dog_id: dog.id, path: refPath });
       ids = [dog.id];
       status = "done";
     }
