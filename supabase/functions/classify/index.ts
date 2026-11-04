@@ -16,25 +16,36 @@ const CORS = {
 };
 
 const SYSTEM = `You identify individual dogs in photos taken at a dog daycare.
-You get numbered reference photos (one per known dog, possibly none yet), then ONE new photo.
-Decide which reference dogs appear in the new photo.
-Compare fur color and pattern, face markings, ear shape, muzzle, size and coat length.
-Clothes, collars and backgrounds can differ between photos, so do not rely on them.
-Many dogs look alike (e.g. several white Maltese). Only match when the specific dog is the same.
+You get numbered reference photos (one per known dog, possibly none yet). Some dogs also have
+"today's look": a photo of the same dog taken TODAY, showing what it looks like today.
+Then you get ONE new photo, also taken today. Decide which known dogs appear in it.
+
+How to recognize a dog — the face is NOT required. Use every clue together:
+- Coat: color, pattern, patches and their positions, coat length and texture, grooming cut.
+- Body: size, build, leg length, tail shape and how it is carried, ear shape and set.
+- Clothes and accessories (outfit, harness, collar, bandana, hair clip): dogs wear the same
+  ones all day, so a match with "today's look" is a STRONG clue. The older reference photo
+  may show different clothes, so an outfit difference from it does not rule a dog out.
+- A dog seen from the back or side, or with its face hidden, can still be matched when
+  coat, body and clothes clearly fit one known dog and no other.
+Many dogs look alike (e.g. several white Maltese). Only match when the specific dog is the same,
+using the distinguishing details (clothes today, markings, size, cut) to tell them apart.
+
 The photos are sent to each dog's owner, so decide who the photo is ABOUT.
-- A MAIN dog is a subject of the photo: in focus, reasonably large, usually near the center,
-  face or body clearly shown. Dogs in the background, cut off at the edge, tiny, blurry,
-  or only partly visible are NOT main dogs, even if you can recognize them.
+- A MAIN dog is a subject of the photo: in focus, reasonably large, usually near the center.
+  Dogs in the background, cut off at the edge, tiny or blurry are NOT main dogs.
 - If two or three dogs share the frame equally (similar size, all in focus, all clearly shown,
   e.g. posing or playing together), they are ALL main dogs.
+
 Reply with JSON only, no other text:
-{"dogs":[<reference numbers of MAIN dogs>],"new_dog":true|false,"unknown_main":<number>,"confidence":"high"|"low","note":"<짧은 한국어 메모>"}
-- "dogs": the reference dogs that are MAIN dogs in the new photo ([] if none).
-- "unknown_main": how many MAIN dogs match none of the references.
-- "new_dog": true ONLY if the photo has exactly one MAIN dog, its face is clearly visible,
-  and it matches none of the references. Then "dogs" must be [].
-- "confidence": "low" if a main dog is blurry or hidden, if two references look alike,
-  or if it is unclear which dogs are the main ones.`;
+{"dogs":[<reference numbers of MAIN dogs>],"new_dog":true|false,"unknown_main":<number>,"confidence":"high"|"low","note":"<짧은 한국어 메모: 무엇으로 판단했는지>"}
+- "dogs": the known dogs that are MAIN dogs in the new photo ([] if none).
+- "unknown_main": how many MAIN dogs match none of the known dogs.
+- "new_dog": true ONLY if the photo has exactly one MAIN dog, it matches none of the known dogs,
+  and enough of it is visible (face, or clear body/coat/clothes) to recognize it again later.
+  Then "dogs" must be [].
+- "confidence": "high" when the clues clearly point to one dog. "low" if the dog is blurry or
+  mostly hidden, if two known dogs fit about equally, or if it is unclear which dogs are main.`;
 
 const refCache = new Map<string, string>();
 
@@ -103,6 +114,32 @@ Deno.serve(async (req) => {
       content[content.length - 1].cache_control = { type: "ephemeral" };
     } else {
       content.push({ type: "text", text: "Reference dogs: none yet." });
+    }
+
+    // 오늘 모습: 오늘 이미 분류된 사진 중 강아지별 가장 최근 1장 (옷·미용 상태가 그날 그대로라 큰 단서)
+    if (refs.length) {
+      const { data: today } = await supa.from("photos")
+        .select("id, thumb_path, dog_ids").eq("day", photo.day).eq("status", "done")
+        .neq("id", photoId).order("created_at", { ascending: false }).limit(400);
+      const latest = new Map<string, string>();
+      for (const p of today ?? []) {
+        if (p.dog_ids.length !== 1) continue; // 한 마리만 나온 사진만 써야 헷갈리지 않음
+        const d = p.dog_ids[0];
+        if (!latest.has(d)) latest.set(d, p.thumb_path);
+      }
+      const looks = refs.map((d, i) => ({ n: i + 1, name: d.name, path: latest.get(d.id) })).filter((x) => x.path);
+      if (looks.length) {
+        content.push({ type: "text", text: "Today's look (same dogs, photographed today):" });
+        for (const x of looks) {
+          let b64 = refCache.get("today:" + x.path);
+          if (!b64) {
+            b64 = encodeBase64(await download(supa, "photos", x.path!));
+            refCache.set("today:" + x.path, b64);
+          }
+          content.push({ type: "text", text: `[${x.n}] ${x.name} — today` });
+          content.push({ type: "image", source: { type: "base64", media_type: "image/jpeg", data: b64 } });
+        }
+      }
     }
 
     const targetBytes = await download(supa, "photos", photo.thumb_path);
