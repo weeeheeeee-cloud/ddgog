@@ -159,9 +159,11 @@ async function renderPhotos() {
     ? `<span><b>${P.length}</b>장</span>
        <span>분류 완료 <b>${done.length}</b></span>
        ${unsorted.length ? `<span class="warn">분류 안 됨 <b>${unsorted.length}</b></span>` : ""}
-       ${pending.length && !state.busy ? `<button id="resume" class="btn primary sm">남은 ${pending.length}장 분류하기</button>` : ""}`
+       ${pending.length && !state.busy ? `<button id="resume" class="btn primary sm">남은 ${pending.length}장 분류하기</button>` : ""}
+       ${done.length ? `<button id="save-all" class="btn ghost sm">${CAN_FOLDER ? "전체 폴더별 저장" : "전체 ZIP 받기"}</button>` : ""}`
     : "";
   $("#resume")?.addEventListener("click", () => classifyPending());
+  $("#save-all")?.addEventListener("click", (e) => saveAll(e.currentTarget));
 
   // 강아지별 묶기
   const groups = new Map();
@@ -185,19 +187,19 @@ async function renderPhotos() {
   box.innerHTML = dogIds.map((id) => {
     const dog = dogById(id);
     const list = groups.get(id);
-    return `<div class="dog-group">
+    return `<div class="dog-group" data-list="${id}">
       <div class="dog-head">
         ${dog.ref_path ? `<img class="avatar" src="${ref(dog.ref_path)}" alt="">` : `<span class="avatar"></span>`}
         <div class="grow">
           <button class="dog-name ${dog.auto ? "unnamed" : ""}" data-rename="${id}">${esc(dog.name)} <span>✎</span></button>
           <small class="muted">${list.length}장</small>
         </div>
-        <button class="btn primary sm" data-save="${id}">저장</button>
+        <div class="save-btns">${saveButtons(id)}</div>
       </div>
       <div class="grid">${list.map(img).join("")}</div>
     </div>`;
   }).join("") +
-  (unsorted.length ? `<div class="dog-group unsorted">
+  (unsorted.length ? `<div class="dog-group unsorted" data-list="unsorted">
       <div class="dog-head"><span class="avatar q">?</span>
         <div class="grow"><b>분류 안 된 사진</b><small class="muted">사진을 눌러 강아지를 골라 주세요</small></div>
         <small class="muted">${unsorted.length}장</small></div>
@@ -205,12 +207,18 @@ async function renderPhotos() {
     </div>` : "") +
   (!dogIds.length && !unsorted.length ? `<div class="empty">분류를 기다리는 사진이 있어요.</div>` : "");
 
-  $$("[data-photo]", box).forEach((el) => el.addEventListener("click", () => openSheet(el.dataset.photo)));
+  // 사진 넘겨보기용: 그룹별 사진 순서
+  const lists = new Map(dogIds.map((id) => [id, groups.get(id).map((p) => p.id)]));
+  lists.set("unsorted", unsorted.map((p) => p.id));
+  $$("[data-photo]", box).forEach((el) => el.addEventListener("click", () => {
+    const key = el.closest("[data-list]")?.dataset.list;
+    openSheet(el.dataset.photo, lists.get(key) || [el.dataset.photo]);
+  }));
   $$("[data-rename]", box).forEach((b) => b.addEventListener("click", async () => {
     if (await renameDog(dogById(b.dataset.rename))) renderPhotos();
   }));
   $$("[data-save]", box).forEach((b) => b.addEventListener("click", () =>
-    saveDogPhotos(dogById(b.dataset.save), groups.get(b.dataset.save), b)));
+    saveDogPhotos(dogById(b.dataset.save), groups.get(b.dataset.save), b, b.dataset.mode)));
 }
 
 async function renameDog(dog) {
@@ -310,20 +318,68 @@ async function classifyPending() {
 
 /* ---------- 사진 시트 (크게 보기 + 강아지 지정) ---------- */
 let sheetPhoto = null;
-async function openSheet(photoId) {
+let sheetList = [];
+async function openSheet(photoId, list = sheetList) {
   const p = state.photos.find((x) => x.id === photoId);
   if (!p) return;
   sheetPhoto = p;
+  sheetList = list;
+  const i = sheetList.indexOf(photoId);
+  $("#sheet-count").textContent = sheetList.length > 1 ? `${i + 1} / ${sheetList.length}` : "";
+  $("#sheet-prev").disabled = i <= 0;
+  $("#sheet-next").disabled = i < 0 || i >= sheetList.length - 1;
   const url = await signed("photos", [p.path]);
   $("#sheet-img").src = url(p.path);
-  $("#sheet-note").textContent = p.ai_note && p.status !== "done" ? `AI 메모: ${p.ai_note}` : "";
+  $("#sheet-note").textContent = p.ai_note ? `AI 메모: ${p.ai_note}` : "";
   $("#sheet-chips").innerHTML = state.dogs.filter((d) => d.active).map((d) =>
     `<button data-dog="${d.id}" class="${p.dog_ids.includes(d.id) ? "on" : ""}">${esc(d.name)}</button>`).join("")
     || `<span class="muted small">아직 강아지 그룹이 없어요. '새 강아지로'를 눌러 주세요.</span>`;
   $$("#sheet-chips button").forEach((b) => b.addEventListener("click", () => b.classList.toggle("on")));
   $("#sheet").classList.remove("hidden");
   document.body.style.overflow = "hidden";
+  // 다음 사진 미리 불러오기
+  const nextId = sheetList[i + 1];
+  const next = nextId && state.photos.find((x) => x.id === nextId);
+  if (next) signed("photos", [next.path]).then((u) => { new Image().src = u(next.path); });
 }
+function stepSheet(d) {
+  const i = sheetList.indexOf(sheetPhoto?.id);
+  const id = sheetList[i + d];
+  if (id) openSheet(id);
+}
+$("#sheet-prev").addEventListener("click", () => stepSheet(-1));
+$("#sheet-next").addEventListener("click", () => stepSheet(1));
+document.addEventListener("keydown", (e) => {
+  if ($("#sheet").classList.contains("hidden")) return;
+  if (e.key === "ArrowLeft") stepSheet(-1);
+  else if (e.key === "ArrowRight") stepSheet(1);
+  else if (e.key === "Escape") closeSheet();
+});
+// 폰: 좌우로 밀어서 넘기기
+let touchX = null;
+$("#sheet-img").addEventListener("touchstart", (e) => { touchX = e.touches[0].clientX; }, { passive: true });
+$("#sheet-img").addEventListener("touchend", (e) => {
+  if (touchX === null) return;
+  const dx = e.changedTouches[0].clientX - touchX;
+  touchX = null;
+  if (Math.abs(dx) > 50) stepSheet(dx < 0 ? 1 : -1);
+});
+$("#sheet-dl").addEventListener("click", async (e) => {
+  const p = sheetPhoto;
+  const names = p.dog_ids.map((id) => dogById(id)?.name).filter(Boolean).join("_") || "사진";
+  const btn = e.currentTarget;
+  btn.disabled = true;
+  try {
+    const { data } = await sb.storage.from("photos").download(p.path);
+    const file = new File([data], `${safeName(names)}_${state.day}_${p.id.slice(0, 4)}.jpg`, { type: "image/jpeg" });
+    if (IS_MOBILE && navigator.canShare?.({ files: [file] })) await navigator.share({ files: [file] });
+    else downloadBlob(file, file.name);
+  } catch (err) {
+    if (err?.name !== "AbortError") toast("저장하지 못했어요");
+  }
+  btn.disabled = false;
+});
+
 function closeSheet() {
   $("#sheet").classList.add("hidden");
   $("#sheet-img").src = "";
@@ -338,7 +394,9 @@ $("#sheet-save").addEventListener("click", async () => {
   if (!ids.length) { toast("강아지를 한 마리 이상 골라 주세요"); return; }
   await sb.from("photos").update({ dog_ids: ids, status: "done", confidence: "manual" }).eq("id", sheetPhoto.id);
   Object.assign(sheetPhoto, { dog_ids: ids, status: "done" });
-  closeSheet();
+  toast("분류를 저장했어요");
+  const i = sheetList.indexOf(sheetPhoto.id);
+  if (sheetList[i + 1]) openSheet(sheetList[i + 1]); else closeSheet();
   renderPhotos();
 });
 
@@ -372,28 +430,96 @@ $("#sheet-del").addEventListener("click", async () => {
   renderPhotos();
 });
 
-// 폰: 공유 시트(→ 사진 앱 저장) / PC: ZIP
-async function saveDogPhotos(dog, photos, btn) {
+// 저장 방식: 폰 → 사진 앱(공유 시트) / PC → 폴더에 바로 저장(크롬·엣지) 또는 ZIP
+const IS_MOBILE = /Android|iPhone|iPad/i.test(navigator.userAgent);
+const CAN_FOLDER = !IS_MOBILE && "showDirectoryPicker" in window;
+const safeName = (s) => String(s).replace(/[\\/:*?"<>|]/g, "_").trim() || "이름없음";
+
+function saveButtons(id) {
+  if (IS_MOBILE) return `<button class="btn primary sm" data-save="${id}" data-mode="share">사진 앱에 저장</button>`;
+  return (CAN_FOLDER ? `<button class="btn primary sm" data-save="${id}" data-mode="folder">폴더에 저장</button>` : "") +
+    `<button class="btn ${CAN_FOLDER ? "ghost" : "primary"} sm" data-save="${id}" data-mode="zip">ZIP</button>`;
+}
+function downloadBlob(blob, name) {
+  const a = document.createElement("a");
+  a.href = URL.createObjectURL(blob);
+  a.download = name;
+  a.click();
+  setTimeout(() => URL.revokeObjectURL(a.href), 5000);
+}
+async function photoFiles(dog, photos, onEach) {
+  const prefix = `${safeName(dog.name)}_${state.day}`;
+  const out = [];
+  await pool(photos, 4, async (p, i) => {
+    const { data } = await sb.storage.from("photos").download(p.path);
+    out[i] = new File([data], `${prefix}_${String(i + 1).padStart(2, "0")}.jpg`, { type: "image/jpeg" });
+    onEach?.();
+  });
+  return out;
+}
+async function writeToFolder(dir, files) {
+  for (const f of files) {
+    const fh = await dir.getFileHandle(f.name, { create: true });
+    const w = await fh.createWritable();
+    await w.write(f);
+    await w.close();
+  }
+}
+
+async function saveDogPhotos(dog, photos, btn, mode) {
   const label = btn.textContent;
   btn.disabled = true;
-  btn.textContent = "준비 중…";
   try {
-    const files = await Promise.all(photos.map(async (p, i) => {
-      const { data } = await sb.storage.from("photos").download(p.path);
-      return new File([data], `${dog.name}_${state.day}_${String(i + 1).padStart(2, "0")}.jpg`, { type: "image/jpeg" });
-    }));
-    const mobile = /Android|iPhone|iPad/i.test(navigator.userAgent);
-    if (mobile && navigator.canShare?.({ files })) {
+    let root = null;
+    if (mode === "folder") root = await window.showDirectoryPicker({ mode: "readwrite", id: "ddgog" });
+    let n = 0;
+    const files = await photoFiles(dog, photos, () => { btn.textContent = `${++n}/${photos.length}`; });
+    if (mode === "share") {
       await navigator.share({ files, title: `${dog.name} ${state.day}` });
+    } else if (mode === "folder") {
+      const dir = await root.getDirectoryHandle(`${state.day}_${safeName(dog.name)}`, { create: true });
+      await writeToFolder(dir, files);
+      toast(`${dog.name} ${files.length}장을 폴더에 저장했어요`);
     } else {
       const zip = new JSZip();
       files.forEach((f) => zip.file(f.name, f));
-      const a = document.createElement("a");
-      a.href = URL.createObjectURL(await zip.generateAsync({ type: "blob" }));
-      a.download = `${dog.name}_${state.day}.zip`;
-      a.click();
-      setTimeout(() => URL.revokeObjectURL(a.href), 5000);
+      downloadBlob(await zip.generateAsync({ type: "blob" }), `${safeName(dog.name)}_${state.day}.zip`);
     }
+  } catch (err) {
+    if (err?.name !== "AbortError") toast("저장하지 못했어요. 다시 시도해 주세요.");
+  }
+  btn.disabled = false;
+  btn.textContent = label;
+}
+
+// 이 날짜 전체를 강아지별 폴더로
+async function saveAll(btn) {
+  const groups = new Map();
+  state.photos.filter((p) => p.status === "done").forEach((p) => p.dog_ids.forEach((d) => {
+    const dog = dogById(d);
+    if (!dog) return;
+    if (!groups.has(d)) groups.set(d, []);
+    groups.get(d).push(p);
+  }));
+  const label = btn.textContent;
+  btn.disabled = true;
+  try {
+    let root = null;
+    if (CAN_FOLDER) {
+      const picked = await window.showDirectoryPicker({ mode: "readwrite", id: "ddgog" });
+      root = await picked.getDirectoryHandle(state.day, { create: true });
+    }
+    const zip = CAN_FOLDER ? null : new JSZip();
+    const total = [...groups.values()].reduce((a, g) => a + g.length, 0);
+    let n = 0;
+    for (const [id, photos] of groups) {
+      const dog = dogById(id);
+      const files = await photoFiles(dog, photos, () => { btn.textContent = `저장 중 ${++n}/${total}`; });
+      if (root) await writeToFolder(await root.getDirectoryHandle(safeName(dog.name), { create: true }), files);
+      else files.forEach((f) => zip.file(`${safeName(dog.name)}/${f.name}`, f));
+    }
+    if (zip) downloadBlob(await zip.generateAsync({ type: "blob" }), `댕겨올개_${state.day}.zip`);
+    else toast(`강아지 ${groups.size}마리, ${total}장을 폴더별로 저장했어요`);
   } catch (err) {
     if (err?.name !== "AbortError") toast("저장하지 못했어요. 다시 시도해 주세요.");
   }

@@ -102,13 +102,19 @@
 <div id="sheet" class="sheet hidden">
   <div class="sheet-body">
     <button class="sheet-close" aria-label="닫기">×</button>
-    <img id="sheet-img" alt="">
+    <div class="sheet-view">
+      <img id="sheet-img" alt="">
+      <button id="sheet-prev" class="nav prev" aria-label="이전 사진">‹</button>
+      <button id="sheet-next" class="nav next" aria-label="다음 사진">›</button>
+      <span id="sheet-count" class="count"></span>
+    </div>
     <p id="sheet-note" class="ai-note"></p>
     <p class="small"><b>이 사진의 주인공</b>을 모두 골라 주세요</p>
     <div id="sheet-chips" class="chips"></div>
     <div class="row">
-      <button id="sheet-save" class="btn primary grow">저장</button>
+      <button id="sheet-save" class="btn primary grow">분류 저장</button>
       <button id="sheet-new" class="btn ghost">새 강아지로</button>
+      <button id="sheet-dl" class="btn ghost">이 사진 받기</button>
       <button id="sheet-del" class="btn ghost">삭제</button>
     </div>
   </div>
