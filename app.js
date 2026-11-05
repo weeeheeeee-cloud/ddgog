@@ -1930,7 +1930,38 @@ $("#up-new").addEventListener("click", async () => {
   try { await navigator.clipboard.writeText(upUrl(token)); toast("새 링크를 만들고 복사했어요"); } catch { /* 무시 */ }
 });
 
-// 선생님이 올린 사진: 오늘 화면이 켜져 있으면 30초마다 확인해서 자동 분류
+// 선생님이 링크로 올리는 사진: 실시간으로 받아서 알림 → 다 들어오면(20초 조용하면) 자동 분류
+const live = { n: 0, timer: null, last: 0 };
+const baseTitle = document.title;
+function showLive() {
+  const bar = $("#live-bar");
+  const quiet = Date.now() - live.last > 15000;
+  $("#live-text").innerHTML = quiet
+    ? `📲 선생님이 올린 사진 <b>${live.n}장</b>이 들어왔어요${state.attendance.size ? " · 분류 시작" : " · 명단을 확정하면 분류해요"}`
+    : `📲 선생님이 사진을 올리고 있어요… <b>${live.n}장</b> 들어옴`;
+  bar.classList.toggle("receiving", !quiet);
+  bar.classList.remove("hidden");
+  document.title = `(${live.n}) ${baseTitle}`;
+}
+$("#live-x").addEventListener("click", () => { $("#live-bar").classList.add("hidden"); live.n = 0; document.title = baseTitle; });
+sb.channel("teacher-photos")
+  .on("postgres_changes", { event: "INSERT", schema: "public", table: "photos" }, (msg) => {
+    const p = msg.new || {};
+    if (p.source !== "teacher" || p.day !== kstToday()) return;
+    live.n++;
+    live.last = Date.now();
+    showLive();
+    clearTimeout(live.timer);
+    live.timer = setTimeout(async () => {
+      showLive();
+      if (state.day === kstToday()) { await loadPhotos(); if (state.tab === "photos") await renderPhotos(); }
+      if (!state.busy && !state.draft && state.attendance.size && state.day === kstToday()) classifyPending();
+      setTimeout(() => { if (Date.now() - live.last > 60000) { $("#live-bar").classList.add("hidden"); live.n = 0; document.title = baseTitle; } }, 60000);
+    }, 20000);
+  })
+  .subscribe();
+
+// 실시간 연결이 끊겼을 때를 대비해 30초마다도 확인해서 자동 분류
 setInterval(async () => {
   if (state.busy || state.draft || document.hidden || state.day !== kstToday()) return;
   const { count } = await sb.from("photos").select("id", { count: "exact", head: true }).eq("day", state.day).eq("status", "pending");
