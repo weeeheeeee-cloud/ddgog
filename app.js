@@ -185,8 +185,6 @@ $("#today").addEventListener("click", () => setDay(kstToday()));
 $$(".tabs button").forEach((b) => b.addEventListener("click", () => { state.tab = b.dataset.tab; render(); }));
 
 async function render() {
-  // 왼쪽 명단 칸은 명단 탭에서만
-  document.querySelector(".layout")?.classList.toggle("with-side", state.tab === "roster");
   $$(".tabs button").forEach((b) => b.classList.toggle("on", b.dataset.tab === state.tab));
   $$(".tab").forEach((s) => s.classList.toggle("hidden", s.id !== "tab-" + state.tab));
   await Promise.all([loadDogs(), loadAttendance()]);
@@ -197,7 +195,7 @@ async function render() {
 
 /* ================= 사진 화면 ================= */
 async function renderPhotos() {
-  renderRoll();
+  renderRoll(); // 왼쪽 오늘 명단(장수)도 함께 갱신
   const P = state.photos;
   const done = P.filter((p) => p.status === "done");
   const unsorted = P.filter((p) => p.status === "review" || p.status === "error");
@@ -810,12 +808,59 @@ async function saveAll(btn) {
 /* ================= 관리 ================= */
 /* ---------- 왼쪽 명단 (항상 보임) ---------- */
 async function renderSide() {
+  const layout = document.querySelector(".layout");
+  const ref = await signed("refs", state.dogs.map((d) => d.ref_path));
+
+  // ---- 사진 탭: 오늘 온 아이들 + 분류된 사진 장수
+  if (state.tab === "photos") {
+    const today = state.dogs.filter((d) => state.attendance.has(d.id)).sort(dogOrder);
+    layout?.classList.toggle("with-side", today.length > 0);
+    if (!today.length) return;
+    const count = new Map();
+    let done = 0, unsorted = 0, pending = 0;
+    state.photos.forEach((p) => {
+      if (p.status === "done") { done++; p.dog_ids.forEach((d) => count.set(d, (count.get(d) || 0) + 1)); }
+      else if (p.status === "pending") pending++;
+      else unsorted++;
+    });
+    const zero = today.filter((d) => !count.get(d.id)).length;
+    // 명단 밖인데 사진이 분류된 아이 (자동 그룹 등)
+    const extra = [...count.keys()].filter((id) => !state.attendance.has(id) && dogById(id)).map(dogById).sort(dogOrder);
+
+    $("#side-head-label").innerHTML = `📋 오늘 <b id="side-count">${today.length}</b>마리`;
+    $("#side-sub").textContent = state.photos.length
+      ? `분류 완료 ${done}장${unsorted ? ` · 분류 안 됨 ${unsorted}` : ""}${pending ? ` · 대기 ${pending}` : ""}${zero && done ? ` · 사진 없는 아이 ${zero}` : ""}`
+      : "아직 올린 사진이 없어요";
+    const row = (d) => {
+      const n = count.get(d.id) || 0;
+      return `<button class="side-row ${n ? "" : "zero"}" data-side="${d.id}" title="${esc(d.name)}">
+        ${d.ref_path ? `<img src="${ref(d.ref_path)}" alt="">` : `<span class="noimg">?</span>`}
+        <span class="nm">${esc(d.name)}</span>
+        <b class="cnt">${n}<small>장</small></b>
+      </button>`;
+    };
+    $("#side-list").innerHTML = today.map(row).join("") +
+      (extra.length ? `<p class="side-sec">명단 밖 ${extra.length}</p>` + extra.map(row).join("") : "");
+    $$("[data-side]", $("#side-list")).forEach((b) => b.addEventListener("click", () => {
+      const g = document.querySelector(`[data-list="${b.dataset.side}"]`);
+      if (g) {
+        g.scrollIntoView({ behavior: "smooth", block: "start" });
+        g.classList.add("flash");
+        setTimeout(() => g.classList.remove("flash"), 1200);
+      } else toast("아직 이 아이로 분류된 사진이 없어요");
+      if (matchMedia("(max-width: 899px)").matches) $("#side").classList.remove("open");
+    }));
+    return;
+  }
+
+  // ---- 명단 탭: 등록된 전체 명단
+  layout?.classList.toggle("with-side", state.tab === "roster");
+  if (state.tab !== "roster") return;
   const named = state.dogs.filter((d) => !d.auto);
   const autos = state.dogs.filter((d) => d.auto && d.active);
   const refs = named.reduce((a, d) => a + refCount(d), 0);
-  $("#side-count").textContent = named.length;
+  $("#side-head-label").innerHTML = `🐾 명단 <b id="side-count">${named.length}</b>마리`;
   $("#side-sub").textContent = `대표 사진 ${refs}장${state.attendance.size ? ` · 오늘 ${state.attendance.size}마리` : ""}`;
-  const ref = await signed("refs", state.dogs.map((d) => d.ref_path));
   const row = (d) => `<button class="side-row ${d.active ? "" : "off"}" data-side="${d.id}" title="${esc(d.name)}">
       ${d.ref_path ? `<img src="${ref(d.ref_path)}" alt="">` : `<span class="noimg">?</span>`}
       <span class="nm">${esc(d.name)}</span>
@@ -825,14 +870,11 @@ async function renderSide() {
   $("#side-list").innerHTML =
     (named.length ? named.map(row).join("") : `<p class="muted small side-empty">아직 등록된 강아지가 없어요</p>`) +
     (autos.length ? `<p class="side-sec">이름 없는 그룹 ${autos.length}</p>` + autos.map(row).join("") : "");
-  $$("[data-side]", $("#side-list")).forEach((b) => b.addEventListener("click", async () => {
-    const id = b.dataset.side;
-    {
-      const card = document.querySelector(`.dog-card[data-id="${id}"]`);
-      card?.scrollIntoView({ behavior: "smooth", block: "center" });
-      card?.classList.add("flash");
-      setTimeout(() => card?.classList.remove("flash"), 1200);
-    }
+  $$("[data-side]", $("#side-list")).forEach((b) => b.addEventListener("click", () => {
+    const card = document.querySelector(`.dog-card[data-id="${b.dataset.side}"]`);
+    card?.scrollIntoView({ behavior: "smooth", block: "center" });
+    card?.classList.add("flash");
+    setTimeout(() => card?.classList.remove("flash"), 1200);
     if (matchMedia("(max-width: 899px)").matches) $("#side").classList.remove("open");
   }));
 }

@@ -315,3 +315,10 @@ h3.sec small { display: block; font-weight: 400; font-size: 12px; margin-top: 2p
   .layout:not(.with-side) { display: block; max-width: 820px; }
   .layout:not(.with-side) main { margin: 0 auto; }
 }
+
+/* 사진 탭: 오늘 온 아이 + 장수 */
+.side-row .cnt { font-size: 13px; color: var(--navy); font-weight: 800; flex: none; }
+.side-row .cnt small { font-size: 10px; font-weight: 600; color: var(--muted); margin-left: 1px; }
+.side-row.zero .cnt { color: var(--danger); }
+.side-row.zero .nm { color: var(--muted); }
+.dog-group.flash { outline: 3px solid var(--yellow); outline-offset: 2px; }
