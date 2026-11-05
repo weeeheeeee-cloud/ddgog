@@ -11,7 +11,7 @@ const MODEL = Deno.env.get("CLASSIFY_MODEL") ?? "claude-haiku-5-5";
 
 const CORS = {
   "Access-Control-Allow-Origin": "*",
-  "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
+  "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type, x-worker-key",
   "Access-Control-Allow-Methods": "POST, OPTIONS",
 };
 
@@ -112,13 +112,23 @@ Deno.serve(async (req) => {
   if (req.method === "OPTIONS") return new Response("ok", { headers: CORS });
   if (!ANTHROPIC_KEY) return json({ error: "ANTHROPIC_API_KEY 가 설정되지 않았어요" }, 500);
 
-  const supa = createClient(
-    Deno.env.get("SUPABASE_URL")!,
-    Deno.env.get("SUPABASE_ANON_KEY") || req.headers.get("apikey") || "",
-    { global: { headers: { Authorization: req.headers.get("Authorization") ?? "" } } },
-  );
-  const { data: { user } } = await supa.auth.getUser();
-  if (!user) return json({ error: "로그인이 필요해요" }, 401);
+  // 서버 자동 분류(작업자)는 내부 키로, 직원 화면은 로그인으로
+  let supa: Supa;
+  const wk = req.headers.get("x-worker-key");
+  if (wk) {
+    const admin = createClient(Deno.env.get("SUPABASE_URL")!, Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!);
+    const { data: k } = await admin.from("internal_keys").select("key").eq("name", "worker").single();
+    if (!k || k.key !== wk) return json({ error: "forbidden" }, 403);
+    supa = admin;
+  } else {
+    supa = createClient(
+      Deno.env.get("SUPABASE_URL")!,
+      Deno.env.get("SUPABASE_ANON_KEY") || req.headers.get("apikey") || "",
+      { global: { headers: { Authorization: req.headers.get("Authorization") ?? "" } } },
+    );
+    const { data: { user } } = await supa.auth.getUser();
+    if (!user) return json({ error: "로그인이 필요해요" }, 401);
+  }
 
   let photoId: string;
   let recheck = false;
@@ -129,12 +139,12 @@ Deno.serve(async (req) => {
   }
 
   const { data: photo, error: pErr } = await supa
-    .from("photos").select("id, day, thumb_path").eq("id", photoId).single();
+    .from("photos").select("id, day, thumb_path, vec").eq("id", photoId).single();
   if (pErr || !photo) return json({ error: "사진을 찾을 수 없어요" }, 404);
 
   // 후보: 그날 담당이 지정된 강아지 + 이름 안 붙은 자동 그룹. 담당 지정이 없으면 활성 강아지 전체
   const { data: assigned } = await supa.from("assignments").select("dog_id").eq("day", photo.day);
-  let q = supa.from("dogs").select("id, name, note, tips, tips_ai, features, ref_path, dog_refs(path, created_at)")
+  let q = supa.from("dogs").select("id, name, auto, note, tips, tips_ai, features, ref_path, dog_refs(path, created_at)")
     .eq("active", true).order("created_at");
   // recheck: '새 강아지' 그룹 사진을 이름 있는 아이들과만 다시 비교
   if (assigned && assigned.length) {
@@ -167,6 +177,37 @@ Deno.serve(async (req) => {
     return [...spread(arr.slice(0, -2), k - 2), ...arr.slice(-2)];
   };
   const refs = withRefs.map((d) => ({ ...d, paths: pickRefs(d.paths, perDog) }));
+
+  // ---- 지문(이미지 특징값) 먼저: 확실하면 AI 없이 바로 분류, 애매하면 후보를 AI에게 힌트로
+  let fpHint = "";
+  if (photo.vec && !recheck) {
+    const { data: st } = await supa.from("app_settings").select("value").eq("name", "fp").maybeSingle();
+    const cfg = { enabled: true, twin: 0.95, dog: 0.86, margin: 0.07, min_n: 2, ...(st?.value ?? {}) };
+    if (cfg.enabled) {
+      const named = refs.filter((d) => !d.auto);
+      const finish = async (ids: string[], note: string) => {
+        await supa.from("photos").update({ dog_ids: ids, status: "done", confidence: "high", ai_note: note, claimed_at: null }).eq("id", photoId);
+        return json({ status: "done", dog_ids: ids, by: "fingerprint" });
+      };
+      // 1) 오늘 이미 분류된 거의 같은 장면 사진
+      const { data: tw } = await supa.rpc("fp_twin", { q: photo.vec, p_day: photo.day, p_photo: photoId });
+      const t = tw?.[0];
+      if (t && t.sim >= cfg.twin && t.dog_ids.every((id: string) => refs.some((d) => d.id === id))) {
+        return await finish(t.dog_ids, `지문: 같은 장면 사진과 일치 (${t.sim.toFixed(2)})`);
+      }
+      // 2) 아이별 지문
+      if (named.length) {
+        const { data: m } = await supa.rpc("fp_match", { q: photo.vec, dogs: named.map((d) => d.id), p_day: photo.day, p_photo: photoId });
+        const top = m?.[0], second = m?.[1];
+        const nameOf = (id: string) => named.find((d) => d.id === id)?.name ?? "?";
+        if (top && top.sim >= cfg.dog && top.n >= cfg.min_n && (!second || top.sim - second.sim >= cfg.margin)) {
+          return await finish([top.dog_id], `지문: ${nameOf(top.dog_id)} (${top.sim.toFixed(2)})`);
+        }
+        if (m?.length) fpHint = `Visual fingerprint similarity (a hint only; check with your own eyes): ` +
+          m.slice(0, 3).map((x: { dog_id: string; sim: number }) => `[${refs.findIndex((d) => d.id === x.dog_id) + 1}] ${nameOf(x.dog_id)} ${x.sim.toFixed(2)}`).join(", ");
+      }
+    }
+  }
 
   // 대표 사진을 한꺼번에(16장씩 동시에) 미리 불러옴. 한 장씩 받으면 사진 1장 분류에 1분 넘게 걸림
   const needPaths = [...new Set(refs.flatMap((d) => d.paths))].filter((p) => !refCache.has(p));
@@ -255,6 +296,7 @@ Deno.serve(async (req) => {
     }
 
     const targetBytes = await download(supa, "photos", photo.thumb_path);
+    if (fpHint) content.push({ type: "text", text: fpHint });
     content.push({ type: "text", text: "New photo to classify:" });
     content.push({ type: "image", source: { type: "base64", media_type: "image/jpeg", data: encodeBase64(targetBytes) } });
 
@@ -274,6 +316,7 @@ Deno.serve(async (req) => {
     });
 
     if (res.status === 429 || res.status === 529 || res.status >= 500) {
+      await supa.from("photos").update({ status: "pending", claimed_at: null }).eq("id", photoId).eq("status", "working");
       return json({ error: "busy", retryable: true }, 503);
     }
     if (!res.ok) throw new Error(`Claude API ${res.status}: ${await res.text()}`);
@@ -318,6 +361,7 @@ Deno.serve(async (req) => {
       confidence: allSure ? "high" : "low",
       ai_note: note,
       status,
+      claimed_at: null,
     }).eq("id", photoId);
 
     return json({ status, dog_ids: ids });

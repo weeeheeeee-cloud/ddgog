@@ -72,6 +72,7 @@ Deno.serve(async (req) => {
       rows.push({
         id, day, path: `${day}/${id}.jpg`, thumb_path: `${day}/thumb/${id}.jpg`,
         taken_at: it.taken_at ?? null, phash: h, sharp: typeof it.sharp === "number" ? it.sharp : null, source: "teacher",
+        vec: typeof it.vec === "string" && /^\[[-0-9.,e]+\]$/.test(it.vec) && it.vec.split(",").length === 384 ? it.vec : null,
       });
       added++;
     }

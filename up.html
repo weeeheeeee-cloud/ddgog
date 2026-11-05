@@ -47,6 +47,7 @@
 <script type="module">
 import { createClient } from "https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/+esm";
 import { SUPABASE_URL, SUPABASE_ANON_KEY } from "./config.js";
+import { loadFingerprint, fingerprint } from "./fp.js";
 const sb = createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 const $ = (s) => document.querySelector(s);
 const token = new URLSearchParams(location.hash.slice(1)).get("k") || new URLSearchParams(location.search).get("k") || "";
@@ -140,6 +141,9 @@ $("#file").addEventListener("change", async (e) => {
   $("#done").style.display = "none"; $("#err").style.display = "none";
   $("#pick-label").style.opacity = .5; $("#pick-label").style.pointerEvents = "none";
   let n = 0, added = 0, skipped = 0, failed = 0;
+  // 사진 지문 모델 준비 (처음 한 번만 다운로드, 실패해도 업로드는 계속)
+  let fpReady = false;
+  try { $("#msg").textContent = "준비 중… (처음 한 번만 조금 걸려요)"; await loadFingerprint(); fpReady = true; } catch { /* 지문 없이 진행 */ }
   const tick = () => { $("#bar").style.width = `${(n / files.length) * 100}%`; $("#msg").textContent = `올리는 중… ${n} / ${files.length}`; };
   tick();
   // 20장씩 묶어서: 주소 받기 → 올리기 → 등록
@@ -152,7 +156,8 @@ $("#file").addEventListener("change", async (e) => {
         try {
           const [full, small, taken] = await Promise.all([resize(file, 1600, 0.85), resize(file, 640, 0.8), exifTime(file)]);
           const st = await imageStats(small).catch(() => ({}));
-          prepared.push({ id: crypto.randomUUID(), full, small, taken_at: taken, ...st });
+          const vec = fpReady ? await fingerprint(small) : null;
+          prepared.push({ id: crypto.randomUUID(), full, small, taken_at: taken, vec, ...st });
         } catch { failed++; n++; tick(); }
       });
       if (!prepared.length) continue;
@@ -166,7 +171,7 @@ $("#file").addEventListener("change", async (e) => {
         n++; tick();
       });
       if (ok.length) {
-        const r = await call({ action: "done", items: ok.map(({ id, taken_at, phash, sharp }) => ({ id, taken_at, phash, sharp })) });
+        const r = await call({ action: "done", items: ok.map(({ id, taken_at, phash, sharp, vec }) => ({ id, taken_at, phash, sharp, vec })) });
         added += r.added; skipped += r.skipped;
       }
     } catch (err) {

@@ -1,5 +1,6 @@
 import { createClient } from "https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/+esm";
 import { SUPABASE_URL, SUPABASE_ANON_KEY } from "./config.js";
+import { loadFingerprint, fingerprint } from "./fp.js";
 
 const sb = createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 const $ = (s, el = document) => el.querySelector(s);
@@ -326,7 +327,7 @@ async function renderPhotos() {
   const P = state.photos;
   const done = P.filter((p) => p.status === "done");
   const unsorted = P.filter((p) => p.status === "review" || p.status === "error");
-  const pending = P.filter((p) => p.status === "pending");
+  const pending = P.filter((p) => p.status === "pending" || p.status === "working");
 
   $("#summary").innerHTML = P.length
     ? `<span><b>${P.length}</b>장</span>
@@ -825,6 +826,7 @@ $("#file").addEventListener("change", async (e) => {
       const id = crypto.randomUUID();
       const [full, small, taken] = await Promise.all([resize(file, 1600, 0.85), resize(file, 640, 0.8), exifTime(file)]);
       const st = await imageStats(small).catch(() => ({}));
+      st.vec = await fingerprint(small);
       const t = taken ? +new Date(taken) : null;
       if (isDup(st.phash, t)) { dupes++; n++; progress("사진 올리는 중… 창을 닫지 마세요", n, files.length, `똑같은 사진 ${dupes}장 건너뜀`); return; }
       seen.push({ h: st.phash, t });
@@ -874,31 +876,11 @@ async function classifyOne(photoId, recheck = false) {
 // 같은 아이가 여러 그룹으로 생기지 않도록 한 장씩 차례로 분류
 async function classifyPending() {
   if (state.busy) return;
-  const { data } = await sb.from("photos").select("id, phash, sharp, taken_at").eq("day", state.day).eq("status", "pending").order("created_at");
-  const all = data || [];
-  // 연속으로 찍은 거의 같은 사진(5초 안, 이미지 거의 같음)은 가장 선명한 1장만 AI에게 보내고 결과를 나머지에 그대로 적용
-  const byTime = [...all].sort((a, b) => String(a.taken_at || "").localeCompare(String(b.taken_at || "")));
-  const twins = new Map(); // 대표 id → 같은 장면 id[]
-  const used = new Set();
-  for (let i = 0; i < byTime.length; i++) {
-    const a = byTime[i];
-    if (used.has(a.id)) continue;
-    const grp = [a];
-    for (let j = i + 1; j < byTime.length; j++) {
-      const b = byTime[j];
-      if (!a.taken_at || !b.taken_at) break;
-      if (Math.abs(new Date(b.taken_at) - new Date(grp[grp.length - 1].taken_at)) > 5000) break;
-      if (!used.has(b.id) && hamming(a.phash, b.phash) <= 12) grp.push(b);
-    }
-    grp.forEach((x) => used.add(x.id));
-    const rep = grp.reduce((m, x) => ((x.sharp || 0) > (m.sharp || 0) ? x : m), grp[0]);
-    twins.set(rep.id, grp.filter((x) => x.id !== rep.id).map((x) => x.id));
-  }
-  const list = all.filter((p) => twins.has(p.id));
-  if (!list.length) { $("#progress").classList.add("hidden"); await render(); return; }
+  const { count: waiting } = await sb.from("photos").select("id", { count: "exact", head: true }).eq("day", state.day).eq("status", "pending");
+  if (!waiting) { $("#progress").classList.add("hidden"); await render(); return; }
   // 명단부터: 오늘 온 아이들 안에서만 찾아야 빠르고 정확함
   if (state.draft) {
-    progress(`사진 ${list.length}장이 기다리고 있어요`, 0, list.length,
+    progress(`사진 ${waiting}장이 기다리고 있어요`, 0, waiting,
       "위의 '명단 확정'을 먼저 눌러 주세요. 확정하면 오늘 온 아이들 안에서만 찾아서 훨씬 빠르고 정확해요. 누르면 바로 이어서 분류해요.");
     await render();
     return;
@@ -906,40 +888,55 @@ async function classifyPending() {
   state.busy = true;
   const noRoll = !state.attendance.size;
   lastError = "";
-  let ok = 0, fail = 0, done = 0, stop = false;
-  const saved = all.length - list.length;
-  const tick = () => progress("AI가 강아지별로 묶는 중… 창을 닫지 마세요", done, list.length,
+  // 서버 작업자와 나눠서 처리: 12장씩 '가져가서' 처리하므로 같은 사진을 두 번 분류하지 않음
+  let total = waiting, ok = 0, fail = 0, done = 0, stop = false, saved = 0, first = true;
+  const tick = () => progress("AI가 강아지별로 묶는 중… 창을 닫지 마세요", Math.min(done, total), total,
     noRoll ? "오늘 출석 명단이 없어서 등록된 모든 아이와 비교해요 (느려요). 출석 보드를 먼저 올리면 빨라져요."
            : `아래 목록이 조금씩 채워져요${saved ? ` · 연속 사진 ${saved}장은 같은 장면이라 함께 처리` : ""}`);
   tick();
-  // 처음 몇 장은 한 장씩(새 아이 그룹이 겹치지 않게), 그다음은 6장씩 동시에
-  const runOne = async (id) => {
-    if (stop) return;
-    if (await classifyOne(id)) {
-      ok++;
-      const sibs = twins.get(id) || [];
-      if (sibs.length) {
-        const { data: r } = await sb.from("photos").select("dog_ids, status, confidence, rotation").eq("id", id).single();
-        if (r) {
-          await sb.from("photos").update({ ...r, ai_note: "연속 사진: 바로 앞 사진과 같은 분류" }).in("id", sibs);
-          ok += sibs.length;
+  while (!stop) {
+    const { data: batch, error } = await sb.rpc("claim_pending", { p_day: state.day, p_n: first ? 4 : 12 });
+    if (error || !batch?.length) break;
+    // 연속으로 찍은 거의 같은 사진(5초 안, 이미지 거의 같음)은 가장 선명한 1장만 판단하고 결과를 나머지에 적용
+    const sorted = [...batch].sort((a, b) => String(a.taken_at || "").localeCompare(String(b.taken_at || "")));
+    const groups = [];
+    for (const p of sorted) {
+      const g = groups[groups.length - 1];
+      const last = g?.[g.length - 1];
+      if (g && p.taken_at && last?.taken_at && Math.abs(new Date(p.taken_at) - new Date(last.taken_at)) <= 5000 && hamming(g[0].phash, p.phash) <= 12) g.push(p);
+      else groups.push([p]);
+    }
+    const runGroup = async (g) => {
+      if (stop) { await sb.from("photos").update({ status: "pending", claimed_at: null }).in("id", g.map((x) => x.id)); return; }
+      const rep = g.reduce((m, x) => ((x.sharp || 0) > (m.sharp || 0) ? x : m), g[0]);
+      const sibs = g.filter((x) => x.id !== rep.id).map((x) => x.id);
+      if (await classifyOne(rep.id)) {
+        ok++;
+        if (sibs.length) {
+          const { data: r } = await sb.from("photos").select("dog_ids, status, confidence, rotation").eq("id", rep.id).single();
+          if (r) { await sb.from("photos").update({ ...r, ai_note: "연속 사진: 바로 앞 사진과 같은 분류", claimed_at: null }).in("id", sibs); ok += sibs.length; saved += sibs.length; }
         }
+      } else {
+        await sb.from("photos").update({ status: "pending", claimed_at: null }).in("id", g.map((x) => x.id)).eq("status", "working");
+        if (++fail >= 3 && !ok) stop = true;    // 설정 문제면 바로 멈춤
       }
-    } else if (++fail >= 3 && !ok) stop = true;    // 설정 문제면 바로 멈춤
-    done++;
-    tick();
-    if (done % 12 === 0 && state.tab === "photos") { await loadDogs(); await loadPhotos(); await renderPhotos(); }
-  };
-  const head = list.slice(0, 6), rest = list.slice(6);
-  for (const p of head) await runOne(p.id);
-  if (!stop) await pool(rest, 6, (p) => runOne(p.id));
+      done += g.length;
+      tick();
+    };
+    // 처음 몇 장은 한 장씩(새 아이 그룹이 겹치지 않게), 그다음은 6장씩 동시에
+    if (first) { for (const g of groups) await runGroup(g); first = false; }
+    else await pool(groups, 6, runGroup);
+    if (state.tab === "photos") { await loadDogs(); await loadPhotos(); await renderPhotos(); }
+    const { count: left } = await sb.from("photos").select("id", { count: "exact", head: true }).eq("day", state.day).in("status", ["pending", "working"]);
+    total = done + (left || 0);
+  }
   state.busy = false;
   if (rescanAgain) { rescanAgain = false; queueRescan(); }
   else if (!stop) await recheckAutoGroups();
   if (fail && lastError) {
-    progress("분류를 멈췄어요", ok, list.length, lastError);
+    progress("분류를 멈췄어요", ok, total, lastError);
   } else {
-    progress(`완료! ${ok}장 분류했어요`, list.length, list.length, saved ? `연속 사진 ${saved}장은 함께 처리해서 시간을 줄였어요` : "");
+    progress(`완료! ${ok}장 분류했어요`, total, total, saved ? `연속 사진 ${saved}장은 함께 처리해서 시간을 줄였어요` : "");
     setTimeout(() => $("#progress").classList.add("hidden"), 4000);
   }
   await render();
@@ -1461,7 +1458,7 @@ async function renderSide() {
     let done = 0, unsorted = 0, pending = 0;
     state.photos.forEach((p) => {
       if (p.status === "done") { done++; p.dog_ids.forEach((d) => { if (!per.has(d)) per.set(d, []); per.get(d).push(p); }); }
-      else if (p.status === "pending") pending++;
+      else if (p.status === "pending" || p.status === "working") pending++;
       else unsorted++;
     });
     for (const [d, list] of per) count.set(d, splitSimilar(list).shown.length); // 비슷한 사진 정리 후 장수
@@ -1983,6 +1980,42 @@ setInterval(async () => {
   toast(`선생님이 올린 사진 ${count}장을 분류할게요`);
   classifyPending();
 }, 30000);
+
+// ---- 사진 지문 채우기: 대표 사진·지난 60일 분류된 사진 중 지문이 없는 것을 화면이 켜져 있는 동안 조금씩
+const fpJob = { running: false, done: 0, total: 0 };
+async function backfillFingerprints(manual = false) {
+  if (fpJob.running) return;
+  fpJob.running = true;
+  const msg = (t) => { const el = $("#fp-msg"); if (el) el.textContent = t; };
+  try {
+    await loadFingerprint((t) => t && msg(t));
+    const since = shiftDay(kstToday(), -60);
+    const { data: refs } = await sb.from("dog_refs").select("id, path").is("vec", null).limit(5000);
+    const { data: photos } = await sb.from("photos").select("id, thumb_path, rotation").is("vec", null).gte("day", since).limit(5000);
+    const todo = [...(photos || []).map((p) => ({ kind: "p", ...p })), ...(refs || []).map((r) => ({ kind: "r", ...r }))];
+    fpJob.total = todo.length; fpJob.done = 0;
+    if (!todo.length) { msg("모든 사진에 지문이 있어요 ✓"); return; }
+    for (const it of todo) {
+      if (document.hidden && !manual) await new Promise((r) => setTimeout(r, 2000));
+      try {
+        const { data: blob } = await sb.storage.from(it.kind === "p" ? "photos" : "refs").download(it.kind === "p" ? it.thumb_path : it.path);
+        if (blob) {
+          const v = await fingerprint(blob);
+          if (v) await sb.from(it.kind === "p" ? "photos" : "dog_refs").update({ vec: v }).eq("id", it.id);
+        }
+      } catch (e) { console.warn(e); }
+      fpJob.done++;
+      if (fpJob.done % 5 === 0 || fpJob.done === fpJob.total) msg(`사진 지문 만드는 중 ${fpJob.done} / ${fpJob.total} (이 화면을 켜 두면 계속 진행돼요)`);
+    }
+    msg(`사진 지문 ${fpJob.total}장 완료 ✓`);
+  } catch (e) {
+    msg("사진 지문 기능을 불러오지 못했어요. 인터넷 연결을 확인해 주세요.");
+  } finally { fpJob.running = false; }
+}
+$("#fp-run").addEventListener("click", () => backfillFingerprints(true));
+// 로그인되어 있으면 1분 뒤 조용히 시작 (분류에 방해되지 않게)
+setTimeout(async () => { const { data } = await sb.auth.getSession(); if (data.session) backfillFingerprints(); }, 60000);
+setInterval(async () => { const { data } = await sb.auth.getSession(); if (data.session) backfillFingerprints(); }, 30 * 60000);
 
 $("#purge").addEventListener("click", async () => {
   const cutoff = shiftDay(kstToday(), -+$("#purge-days").value);
