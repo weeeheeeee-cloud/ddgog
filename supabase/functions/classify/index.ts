@@ -42,11 +42,13 @@ similar dogs, look for each listed point in the new photo. If the point that wou
 visible (e.g. the tail is hidden) and two look-alikes still fit, set confidence "low".
 
 The photos are sent to each dog's owner, so decide which dogs this photo should be sent to.
-- A photo with several dogs goes to EVERY dog that is properly shown in it: clearly visible,
-  recognizable, and a meaningful part of the picture (playing together, sitting side by side,
-  walking as a group, group shots). Owners like seeing their dog with friends.
-- Leave out only dogs that are barely in it: tiny far in the background, mostly cut off at the edge,
-  heavily blurred, or only a paw/tail showing. Those owners would not recognize their dog.
+- The photo's main subject (the dog the photo was clearly taken of: biggest, in focus, centred) always counts,
+  even if its face is hidden (back of the head, back, from above). Identify it from body, coat and clothes.
+- Any OTHER dog in the photo counts only if its FACE is clearly visible (eyes and muzzle seen) and it is a
+  real part of the picture (posing or playing together with the main dog, side by side, a group shot).
+- Leave out every other dog: dogs in the background, dogs whose face is not visible (sniffing the ground,
+  turned away, head down or cut off), dogs that are small, blurred or cut off at the edge. Their owners
+  would not want this photo, so do NOT list them in "dogs" and do NOT count them in "unknown_main".
 In the reply, "MAIN dogs" means exactly these dogs that are properly shown.
 
 Reply with JSON only, no other text:
