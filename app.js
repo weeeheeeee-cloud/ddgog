@@ -456,8 +456,8 @@ function blobToBase64(blob) {
 
 // 보드 이름 → 명단의 아이. "구름"처럼 같은 이름이 여럿(구름(포메라니안)·구름(비숑 프리제))이면 고르게 함
 const baseName = (s) => norm(String(s || "").replace(/\s*\(.*\)\s*$/, ""));
-function matchDog(n, draft = state.draft) {
-  const pick = draft?.pick?.[norm(n)];
+function matchDog(n, draft = state.draft, usePick = true) {
+  const pick = usePick && draft?.pick?.[norm(n)];
   if (pick) return { dog: dogById(pick) };
   const named = state.dogs.filter((d) => !d.auto);
   const exact = named.filter((d) => norm(d.name) === norm(n));
@@ -482,7 +482,15 @@ async function renderRoll() {
   if (state.draft) {
     const d = state.draft;
     count.textContent = `${d.names.length}마리 읽음`;
+    const amb = d.names.map((n, i) => ({ n, i, c: matchDog(n, d, false).choices })).filter((x) => x.c);
+    const ambRef = amb.length ? await signed("refs", amb.flatMap((x) => x.c.map((c) => c.ref_path))) : null;
     body.innerHTML = `
+      ${amb.length ? `<div class="same-name">
+        <b>이름이 같은 아이가 있어요 — 오늘 온 아이를 눌러 주세요</b>
+        ${amb.map(({ n, i, c }) => `<div class="same-row"><span class="same-label">${esc(n)}${d.guessed?.has(norm(n)) && d.pick?.[norm(n)] ? ` <small class="muted">(최근 자주 온 아이로 골라 둠)</small>` : ""}</span>
+          <div class="same-opts">${c.map((x) => `<button class="same-opt ${d.pick?.[norm(n)] === x.id ? "on" : ""}" data-same="${i}" data-id="${x.id}">
+            ${x.ref_path ? `<img src="${ambRef(x.ref_path)}" alt="">` : ""}<span>${esc(x.name)}</span></button>`).join("")}</div></div>`).join("")}
+      </div>` : ""}
       ${d.img ? `<img class="board-preview" src="${d.img}" alt="출석 보드">${d.more ? `<p class="muted small" style="margin:-4px 0 8px">외 ${d.more}장 함께 읽음</p>` : ""}` : ""}
       <p class="small">읽은 이름이 맞는지 확인해 주세요. <b>이름을 누르면 고칠 수 있고</b>, ×로 뺄 수 있어요.
         ${d.names.some((n) => isNewName(n) && !isHotelName(d, n)) ? `<em class="tag-new">새 아이</em>는 명단에 없는 이름이라 확정 후 대표 사진을 받을게요.` : ""}
@@ -514,6 +522,12 @@ async function renderRoll() {
       renderRoll();
     }));
     $$("[data-del]", body).forEach((el) => el.addEventListener("click", () => { d.names.splice(+el.dataset.del, 1); renderRoll(); }));
+    $$("[data-same]", body).forEach((el) => el.addEventListener("click", () => {
+      const k = norm(d.names[+el.dataset.same]);
+      d.pick = { ...(d.pick || {}), [k]: el.dataset.id };
+      d.guessed?.delete(k);
+      renderRoll();
+    }));
     $$("[data-pick]", body).forEach((el) => el.addEventListener("change", () => {
       if (!el.value) return;
       d.pick = { ...(d.pick || {}), [norm(d.names[+el.dataset.pick])]: el.value };
@@ -606,12 +620,33 @@ $("#board-file").addEventListener("change", async (e) => {
     }
     state.draft = { names: data.names || [], unsure: data.unsure || [], hotel: data.hotel || [], img: URL.createObjectURL(blobs[0]), more: blobs.length - 1 };
     if (!state.draft.names.length) toast("이름을 찾지 못했어요. 직접 추가해 주세요.");
+    await suggestPicks(state.draft);
   } catch (err) {
     toast(err.message || "읽지 못했어요. 다시 시도해 주세요.");
     if (!state.draft) state.draft = { names: [], unsure: [], img: "" };
   }
   renderRoll();
 });
+
+// 이름이 같은 아이가 여럿이면: 최근에 자주 온 아이를 미리 골라 둠 (바꿀 수 있음)
+async function suggestPicks(d) {
+  const amb = d.names.map((n) => [n, matchDog(n, d, false).choices]).filter(([, c]) => c);
+  if (!amb.length) return;
+  const ids = amb.flatMap(([, c]) => c.map((x) => x.id));
+  const { data } = await sb.from("assignments").select("dog_id, day").in("dog_id", ids).lt("day", state.day)
+    .order("day", { ascending: false }).limit(1000);
+  const score = new Map();
+  (data || []).forEach((a) => score.set(a.dog_id, (score.get(a.dog_id) || 0) + 1));
+  d.pick = d.pick || {};
+  d.guessed = new Set();
+  for (const [n, c] of amb) {
+    const best = [...c].sort((a, b) => (score.get(b.id) || 0) - (score.get(a.id) || 0));
+    if ((score.get(best[0].id) || 0) > (score.get(best[1].id) || 0)) {
+      d.pick[norm(n)] = best[0].id;
+      d.guessed.add(norm(n));
+    }
+  }
+}
 
 // 명단 확정 → 아는 아이는 연결, 처음 보는 이름은 새로 등록
 async function confirmRoll() {
