@@ -322,3 +322,16 @@ h3.sec small { display: block; font-weight: 400; font-size: 12px; margin-top: 2p
 .side-row.zero .cnt { color: var(--danger); }
 .side-row.zero .nm { color: var(--muted); }
 .dog-group.flash { outline: 3px solid var(--yellow); outline-offset: 2px; }
+
+/* 알림장 사진 일괄 등록 */
+.import-card .tree { background: var(--bg); border-radius: 10px; padding: 8px 12px; font-size: 12px; margin: 8px 0 10px; color: var(--muted); }
+.import-list { display: grid; gap: 4px; max-height: 360px; overflow-y: auto; margin-top: 6px; }
+.import-row { display: flex; align-items: center; gap: 8px; padding: 6px 8px; border: 1px solid var(--line); border-radius: 10px; font-size: 14px; flex-wrap: wrap; }
+.import-row.off { opacity: .45; }
+.import-row input { width: auto; }
+.import-row b[data-rn] { cursor: pointer; }
+.imp-st { flex-basis: 100%; font-size: 12px; color: var(--muted); padding-left: 26px; }
+.imp-st.ok { color: var(--ok); }
+.imp-st.warn { color: #b7791f; }
+.imp-st.err { color: var(--danger); }
+#import-max { width: auto; padding: 6px 8px; }

@@ -88,6 +88,21 @@
           <button class="btn primary block" type="submit">등록</button>
         </form>
       </div>
+      <div class="card import-card">
+        <h2>📦 지난 알림장 사진으로 한꺼번에 등록</h2>
+        <p class="muted small">강아지 이름으로 된 폴더에 그 아이 알림장 사진을 모아 두고, 그 폴더들이 든 <b>상위 폴더 하나</b>를 고르세요.
+          AI가 아이마다 혼자 잘 나온 사진을 여러 각도로 골라 대표 사진으로 등록하고, 생김새 메모도 적어요.</p>
+        <pre class="tree">알림장/
+ ├ 뽀롱/  사진들…
+ ├ 까미/  사진들…
+ └ 장군/  사진들…</pre>
+        <label class="btn primary block file-btn">
+          <input id="import-dir" type="file" webkitdirectory directory multiple hidden>
+          📁 폴더 고르기
+        </label>
+        <div id="import-body"></div>
+      </div>
+
       <input id="roster-search" class="roster-search" placeholder="🔍 이름 검색">
       <div id="roster-list"></div>
       <div id="roster-auto"></div>

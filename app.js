@@ -995,6 +995,137 @@ $("#roster-file").addEventListener("change", async (e) => {
   renderRoster();
 });
 
+// ---------- 지난 알림장 사진으로 한꺼번에 등록 ----------
+// 폴더 구조: 상위폴더/강아지이름/사진들  (상위폴더 없이 바로 강아지 폴더 하나를 골라도 됨)
+let importPlan = null; // [{ name, files, existing }]
+const IMG_RE = /\.(jpe?g|png|heic|heif|webp|gif|bmp)$/i;
+
+$("#import-dir").addEventListener("change", (e) => {
+  const files = [...e.target.files].filter((f) => IMG_RE.test(f.name) || (f.type || "").startsWith("image/"));
+  e.target.value = "";
+  if (!files.length) { toast("사진을 찾지 못했어요"); return; }
+  const groups = new Map();
+  for (const f of files) {
+    const parts = (f.webkitRelativePath || f.name).split("/").filter(Boolean);
+    // 사진 바로 위 폴더 이름 = 강아지 이름
+    const name = (parts.length >= 2 ? parts[parts.length - 2] : "").trim();
+    if (!name) continue;
+    if (!groups.has(name)) groups.set(name, []);
+    groups.get(name).push(f);
+  }
+  importPlan = [...groups].map(([name, fs]) => ({
+    name,
+    files: fs.sort((a, b) => a.name.localeCompare(b.name)),
+    existing: state.dogs.find((d) => !d.auto && norm(d.name) === norm(name)) || null,
+    on: true,
+  })).sort((a, b) => a.name.localeCompare(b.name, "ko"));
+  renderImport();
+});
+
+function renderImport(statusMap = null) {
+  const box = $("#import-body");
+  if (!importPlan) { box.innerHTML = ""; return; }
+  const on = importPlan.filter((x) => x.on);
+  box.innerHTML = `
+    <p class="small" style="margin-top:12px"><b>${importPlan.length}마리</b>, 사진 ${importPlan.reduce((a, x) => a + x.files.length, 0)}장을 찾았어요.
+      이름이 틀렸으면 눌러서 고치고, 빼고 싶은 아이는 체크를 풀어 주세요.</p>
+    <div class="import-list">${importPlan.map((x, i) => {
+      const st = statusMap?.get(i);
+      return `<label class="import-row ${x.on ? "" : "off"}">
+        <input type="checkbox" data-on="${i}" ${x.on ? "checked" : ""} ${statusMap ? "disabled" : ""}>
+        <b class="grow" data-rn="${i}">${esc(x.name)}</b>
+        ${x.existing ? `<span class="tag today">명단에 있음 · 사진 추가</span>` : `<span class="tag-new">새로 등록</span>`}
+        <small class="muted">${x.files.length}장</small>
+        ${st ? `<span class="imp-st ${st.cls || ""}">${st.text}</span>` : ""}
+      </label>`;
+    }).join("")}</div>
+    <div class="row" style="margin-top:10px">
+      <span class="small">아이당 대표 사진</span>
+      <select id="import-max" ${statusMap ? "disabled" : ""}>${[6, 8, 10, 12, 15, 20].map((n) => `<option ${n === 12 ? "selected" : ""}>${n}</option>`).join("")}</select>
+      <span class="small">장까지</span>
+    </div>
+    ${statusMap ? "" : `<div class="row" style="margin-top:10px">
+      <button id="import-go" class="btn primary grow" ${on.length ? "" : "disabled"}>${on.length}마리 등록 시작</button>
+      <button id="import-cancel" class="btn ghost">취소</button></div>
+      <p class="muted small">한 마리에 10~20초 정도 걸려요. 진행 중에는 창을 닫지 마세요.</p>`}`;
+  if (statusMap) return;
+  $$("[data-on]", box).forEach((c) => c.addEventListener("change", () => { importPlan[+c.dataset.on].on = c.checked; renderImport(); }));
+  $$("[data-rn]", box).forEach((b) => b.addEventListener("click", (e) => {
+    e.preventDefault();
+    const x = importPlan[+b.dataset.rn];
+    const v = prompt("강아지 이름", x.name);
+    if (!v || !v.trim()) return;
+    x.name = v.trim();
+    x.existing = state.dogs.find((d) => !d.auto && norm(d.name) === norm(x.name)) || null;
+    renderImport();
+  }));
+  $("#import-cancel").addEventListener("click", () => { importPlan = null; renderImport(); });
+  $("#import-go").addEventListener("click", runImport);
+}
+
+async function runImport() {
+  const max = +$("#import-max").value || 12;
+  const status = new Map();
+  const set = (i, text, cls = "") => { status.set(i, { text, cls }); renderImport(status); };
+  state.busy = true;
+  let made = 0, added = 0, failed = 0;
+  for (let i = 0; i < importPlan.length; i++) {
+    const x = importPlan[i];
+    if (!x.on) continue;
+    try {
+      set(i, "사진 준비 중…");
+      // 너무 많으면 고르게 40장만 후보로
+      const pool40 = x.files.length <= 40 ? x.files
+        : Array.from({ length: 40 }, (_, k) => x.files[Math.floor((k * x.files.length) / 40)]);
+      const blobs = [];
+      for (const f of pool40) { try { blobs.push(await resize(f, 512, 0.82)); } catch { /* 못 여는 사진 건너뜀 */ } }
+      if (!blobs.length) throw new Error("열 수 있는 사진이 없어요");
+      const images = await Promise.all(blobs.map(blobToBase64));
+
+      set(i, "AI가 고르는 중…");
+      let res = null;
+      for (let t = 0; t < 4 && !res; t++) {
+        const { data, error } = await sb.functions.invoke("pick-refs", { body: { name: x.name, images, max } });
+        if (!error) res = data;
+        else if ([503, 429].includes(error.context?.status)) await sleep(3000 * 2 ** t);
+        else throw new Error("AI 오류");
+      }
+      if (!res) throw new Error("AI가 바빠요");
+      if (!res.picks.length) { set(i, "쓸 만한 사진 없음", "warn"); failed++; continue; }
+
+      let dog = x.existing;
+      if (!dog) {
+        const { data, error } = await sb.from("dogs")
+          .insert({ name: x.name, note: res.note || null, auto: false, active: true }).select().single();
+        if (error) throw error;
+        dog = data;
+        dog.dog_refs = [];
+        state.dogs.push(dog);
+        made++;
+      } else if (!dog.note && res.note) {
+        await sb.from("dogs").update({ note: res.note }).eq("id", dog.id);
+        dog.note = res.note;
+      }
+      set(i, `대표 사진 저장 중 0/${res.picks.length}`);
+      const chosen = res.picks.map((k) => new File([blobs[k]], `ref${k}.jpg`, { type: "image/jpeg" }));
+      const n = await addRefs(dog, chosen, (k) => set(i, `대표 사진 저장 중 ${k}/${chosen.length}`));
+      added += n;
+      set(i, `✓ ${n}장 등록${res.consistent === false ? " (사진이 섞여 있어 확인 필요)" : ""}`, res.consistent === false ? "warn" : "ok");
+    } catch (err) {
+      console.error(err);
+      failed++;
+      set(i, err.message || "실패", "err");
+    }
+  }
+  state.busy = false;
+  state.dogs.sort(dogOrder);
+  toast(`새로 등록 ${made}마리 · 대표 사진 ${added}장${failed ? ` · 실패 ${failed}` : ""}`);
+  $("#import-body").insertAdjacentHTML("beforeend",
+    `<div class="row" style="margin-top:10px"><button id="import-done" class="btn ghost block">닫기</button></div>`);
+  $("#import-done").addEventListener("click", () => { importPlan = null; renderImport(); });
+  renderRoster();
+}
+
 // 새 강아지 등록 (이름 + 여러 각도 사진)
 $("#new-dog-files").addEventListener("change", (e) => {
   const n = e.target.files.length;
