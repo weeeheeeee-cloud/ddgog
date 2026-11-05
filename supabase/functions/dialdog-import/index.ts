@@ -5,7 +5,7 @@
 //                 → 이전 다이얼독 대표 사진 교체 + 부위별 특징(features) 학습 → { dogId, added, created, features }
 
 import { createClient } from "jsr:@supabase/supabase-js@2";
-import { decodeBase64 } from "jsr:@std/encoding@1/base64";
+import { decodeBase64, encodeBase64 as encodeB64 } from "jsr:@std/encoding@1/base64";
 
 const ANTHROPIC_KEY = Deno.env.get("ANTHROPIC_API_KEY") ?? "";
 const PICK_MODEL = Deno.env.get("IMPORT_PICK_MODEL") ?? "claude-sonnet-5-5";
@@ -87,6 +87,31 @@ Deno.serve(async (req) => {
       return json({ dogs: data ?? [] });
     }
 
+    // ---- 형제를 한 이름으로 등록한 경우(예: 비비모모): 대표 사진에서 아이들을 나눠 각자 특징 정리
+    if (body.action === "siblings") {
+      const { data: d } = await admin.from("dogs").select("id, name, note, tips, dog_refs(path, created_at)").eq("id", String(body.dogId)).single();
+      if (!d) return json({ error: "no dog" }, 404);
+      const refs = (d.dog_refs ?? []).sort((a, b) => b.created_at.localeCompare(a.created_at)).slice(0, 24);
+      const content: Record<string, unknown>[] = [{ type: "text", text: `Name: ${d.name} (this name covers SEVERAL dogs from the same family, e.g. 비비모모 = 비비 + 모모)` }];
+      for (const r of refs) {
+        const { data } = await admin.storage.from("refs").download(r.path);
+        if (data) content.push({ type: "image", source: { type: "base64", media_type: "image/jpeg", data: encodeB64(new Uint8Array(await data.arrayBuffer())) } });
+      }
+      const text = await claude(FEATURE_MODEL, `These reference photos belong to ONE name that covers 2 or more sibling dogs living together.
+Work out how many different dogs appear and describe EACH so a vision model recognizes any of them, even from behind or above.
+Never use clothes. Korean. Reply JSON only:
+{"count":<n>,"note":"<한 줄 40자: 예 '프렌치불독 두 마리: ①점박이 ②블랙탄'>",
+ "tips":"<이 이름에 속하는 아이들 각각의 핵심 구분점, 160자 이내>",
+ "features":"※ 여러 마리를 한 이름으로 등록. 아래 중 하나와 맞으면 이 이름\n[아이 ①: …]\n얼굴: …\n…\n[아이 ②: …]\n… (각 아이: 얼굴/정수리·뒤통수·귀/등·몸통/꼬리/다리/체형·털, 전체 600자 이내)"}`, content, 5000);
+      const f = parseJson(text);
+      const upd: Record<string, unknown> = {};
+      if (typeof f.features === "string" && f.features.length > 40) upd.features = f.features.slice(0, 900);
+      if (typeof f.note === "string") upd.note = f.note.slice(0, 80);
+      if (typeof f.tips === "string") upd.tips_ai = f.tips.slice(0, 200);
+      if (Object.keys(upd).length) await admin.from("dogs").update(upd).eq("id", d.id);
+      return json({ name: d.name, count: f.count, note: f.note, tips: f.tips });
+    }
+
     const images = (Array.isArray(body.images) ? body.images : []).filter(Boolean) as string[];
     if (!name || !images.length) return json({ error: "name and images required" }, 400);
 
@@ -101,7 +126,9 @@ Deno.serve(async (req) => {
         content.push({ type: "text", text: `Photo ${i + 1}:` });
         content.push({ type: "image", source: { type: "base64", media_type: "image/jpeg", data } });
       });
-      const text = await claude(PICK_MODEL, PICK_SYSTEM, content, 4000);
+      const sys = body.multi ? PICK_SYSTEM + `\nIMPORTANT: this name actually covers 2 or more SIBLING dogs that live together (e.g. 비비모모 = 비비 + 모모).
+Treat each of them as a subject: pick good photos of EACH sibling (balanced), including photos where they are together.` : PICK_SYSTEM;
+      const text = await claude(PICK_MODEL, sys, content, 4000);
       const p = parseJson(text);
       const picks = [...new Set((Array.isArray(p.picks) ? p.picks : []).map(Number)
         .filter((n: number) => n >= 1 && n <= imgs.length))].slice(0, max).map((n) => (n as number) - 1);
