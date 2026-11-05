@@ -333,7 +333,7 @@ async function renderPhotos() {
        ${unsorted.length ? `<span class="warn">분류 안 됨 <b>${unsorted.length}</b></span>` : ""}
        ${pending.length && !state.busy ? `<button id="resume" class="btn primary sm">남은 ${pending.length}장 분류하기</button>` : ""}
        ${!state.busy && done.some((p) => p.dog_ids.some((d) => dogById(d)?.auto)) ? `<button id="recheck-auto" class="btn ghost sm">새 강아지 다시 분류</button>` : ""}
-       ${done.length ? `<button id="save-all" class="btn ghost sm">${CAN_FOLDER ? "전체 폴더별 저장" : "전체 ZIP 받기"}</button>` : ""}`
+       ${done.length ? `<button id="save-all" class="btn primary sm">📥 전체 다운로드</button>` : ""}`
     : "";
   $("#resume")?.addEventListener("click", () => classifyPending());
   $("#recheck-auto")?.addEventListener("click", () => { autoChecked.clear(); recheckAutoGroups(); });
@@ -1213,15 +1213,15 @@ async function saveDogPhotos(dog, photos, btn, mode) {
   btn.disabled = true;
   try {
     let root = null;
-    if (mode === "folder") root = await window.showDirectoryPicker({ mode: "readwrite", id: "ddgog" });
+    if (mode === "folder") root = await (await saveFolder()).getDirectoryHandle(state.day, { create: true });
     let n = 0;
     const files = await photoFiles(dog, photos, () => { btn.textContent = `${++n}/${photos.length}`; });
     if (mode === "share") {
       await navigator.share({ files, title: `${dog.name} ${state.day}` });
     } else if (mode === "folder") {
-      const dir = await root.getDirectoryHandle(`${state.day}_${safeName(dog.name)}`, { create: true });
+      const dir = await root.getDirectoryHandle(safeName(dog.name), { create: true });
       await writeToFolder(dir, files);
-      toast(`${dog.name} ${files.length}장을 폴더에 저장했어요`);
+      toast(`'${state.day}/${dog.name}' 폴더에 ${files.length}장을 저장했어요`);
     } else {
       const zip = new JSZip();
       files.forEach((f) => zip.file(f.name, f));
@@ -1235,6 +1235,38 @@ async function saveDogPhotos(dog, photos, btn, mode) {
 }
 
 // 이 날짜 전체를 강아지별 폴더로
+// 저장 폴더(보통 '다운로드')를 한 번 고르면 기억해 두고 다음부터 바로 저장
+function idb(op, val) {
+  return new Promise((res) => {
+    try {
+      const r = indexedDB.open("ddgog", 1);
+      r.onupgradeneeded = () => r.result.createObjectStore("kv");
+      r.onsuccess = () => {
+        const tx = r.result.transaction("kv", op === "get" ? "readonly" : "readwrite");
+        const st = tx.objectStore("kv");
+        const q = op === "get" ? st.get("saveDir") : st.put(val, "saveDir");
+        q.onsuccess = () => res(q.result);
+        q.onerror = () => res(null);
+      };
+      r.onerror = () => res(null);
+    } catch { res(null); }
+  });
+}
+async function saveFolder() {
+  const saved = await idb("get");
+  if (saved) {
+    try {
+      const ok = (await saved.queryPermission({ mode: "readwrite" })) === "granted" ||
+        (await saved.requestPermission({ mode: "readwrite" })) === "granted";
+      if (ok) return saved;
+    } catch { /* 다시 고르기 */ }
+  }
+  toast("저장할 폴더를 골라 주세요 (보통 '다운로드'). 한 번 고르면 다음부터는 바로 저장돼요");
+  const picked = await window.showDirectoryPicker({ mode: "readwrite", id: "ddgog", startIn: "downloads" });
+  await idb("put", picked);
+  return picked;
+}
+
 async function saveAll(btn) {
   const groups = new Map();
   state.photos.filter((p) => p.status === "done").forEach((p) => p.dog_ids.forEach((d) => {
@@ -1252,8 +1284,9 @@ async function saveAll(btn) {
   try {
     let root = null;
     if (CAN_FOLDER) {
-      const picked = await window.showDirectoryPicker({ mode: "readwrite", id: "ddgog" });
+      const picked = await saveFolder();
       root = await picked.getDirectoryHandle(state.day, { create: true });
+      window.__saveDirName = picked.name;
     }
     const zip = CAN_FOLDER ? null : new JSZip();
     const total = [...groups.values()].reduce((a, g) => a + g.length, 0);
@@ -1262,10 +1295,10 @@ async function saveAll(btn) {
       const dog = dogById(id);
       const files = await photoFiles(dog, photos, () => { btn.textContent = `저장 중 ${++n}/${total}`; });
       if (root) await writeToFolder(await root.getDirectoryHandle(safeName(dog.name), { create: true }), files);
-      else files.forEach((f) => zip.file(`${safeName(dog.name)}/${f.name}`, f));
+      else files.forEach((f) => zip.file(`${state.day}/${safeName(dog.name)}/${f.name}`, f));
     }
-    if (zip) downloadBlob(await zip.generateAsync({ type: "blob" }), `댕겨올개_${state.day}.zip`);
-    else toast(`강아지 ${groups.size}마리, ${total}장을 폴더별로 저장했어요`);
+    if (zip) downloadBlob(await zip.generateAsync({ type: "blob" }), `${state.day}.zip`);
+    else toast(`'${window.__saveDirName || "다운로드"}' 폴더 안 '${state.day}' 폴더에 강아지 ${groups.size}마리, ${total}장을 저장했어요`);
   } catch (err) {
     if (err?.name !== "AbortError") toast("저장하지 못했어요. 다시 시도해 주세요.");
   }
