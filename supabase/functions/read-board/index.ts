@@ -1,5 +1,6 @@
 // 출석 보드 사진에서 강아지 이름 읽기
-// body: { image: base64 JPEG, known: string[] }  →  { names: string[], unsure: string[] }
+// body: { images: base64 JPEG[] (또는 image 하나), known: string[] }  →  { names: string[], unsure: string[] }
+// 출석 보드 사진뿐 아니라 다이얼독 등 앱의 알림장·예약 목록 캡처도 읽음
 
 import { createClient } from "jsr:@supabase/supabase-js@2";
 
@@ -14,11 +15,16 @@ const CORS = {
 const json = (body: unknown, status = 200) =>
   new Response(JSON.stringify(body), { status, headers: { ...CORS, "Content-Type": "application/json" } });
 
-const SYSTEM = `You read a photo of a whiteboard (or paper) used for daily attendance at a Korean dog daycare / dog hotel.
-It lists the names of the dogs present today, usually handwritten in Korean, sometimes with extra notes
-(owner names, times, sections like 데이케어 / 호텔링 / 미용, checkmarks, arrows).
+const SYSTEM = `You read images that list the dogs present today at a Korean dog daycare / dog hotel.
+Each image is either a photo of a whiteboard or paper attendance list (usually handwritten Korean),
+or a screenshot of a pet-care app (e.g. 다이얼독) showing today's 알림장 / reservations / check-ins.
+There may be several images (e.g. scrolled screenshots); combine them and remove duplicates.
+Lists can include extra notes (owner names, times, phone numbers, breeds, sections like 데이케어 / 호텔링 / 미용,
+buttons and menu labels in app screenshots, checkmarks, arrows).
 Extract ONLY the dogs' names.
-- Ignore section headers, times, dates, prices, owner names, phone numbers and other notes.
+- Ignore section headers, times, dates, prices, owner names, phone numbers, breeds and other notes.
+- In app screenshots, ignore UI text (tabs, buttons, menu items, status labels like 작성완료/미작성).
+- Names in an app may be written with the breed or owner, e.g. "콩이(말티즈)" or "콩이 / 김OO" → just "콩이".
 - If a list of known dog names is given and a handwritten word is plausibly one of them, use the known spelling.
 - Keep each name exactly once.
 Reply with JSON only:
@@ -37,25 +43,28 @@ Deno.serve(async (req) => {
   const { data: { user } } = await supa.auth.getUser();
   if (!user) return json({ error: "로그인이 필요해요" }, 401);
 
-  let image = "", known: string[] = [];
+  let images: string[] = [], known: string[] = [];
   try {
-    ({ image, known = [] } = await req.json());
+    const body = await req.json();
+    images = Array.isArray(body.images) ? body.images : body.image ? [body.image] : [];
+    known = body.known ?? [];
   } catch {
     return json({ error: "bad request" }, 400);
   }
-  if (!image) return json({ error: "사진이 없어요" }, 400);
+  images = images.filter(Boolean).slice(0, 10);
+  if (!images.length) return json({ error: "사진이 없어요" }, 400);
 
   const res = await fetch("https://api.anthropic.com/v1/messages", {
     method: "POST",
     headers: { "x-api-key": ANTHROPIC_KEY, "anthropic-version": "2023-06-01", "content-type": "application/json" },
     body: JSON.stringify({
       model: MODEL,
-      max_tokens: 1500,
+      max_tokens: 2000,
       system: SYSTEM,
       messages: [{
         role: "user",
         content: [
-          { type: "image", source: { type: "base64", media_type: "image/jpeg", data: image } },
+          ...images.map((data) => ({ type: "image", source: { type: "base64", media_type: "image/jpeg", data } })),
           { type: "text", text: known.length ? `Known dog names: ${known.join(", ")}` : "No known dog names yet." },
         ],
       }],

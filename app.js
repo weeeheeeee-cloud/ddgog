@@ -325,7 +325,7 @@ async function renderRoll() {
     const d = state.draft;
     count.textContent = `${d.names.length}마리 읽음`;
     body.innerHTML = `
-      ${d.img ? `<img class="board-preview" src="${d.img}" alt="출석 보드">` : ""}
+      ${d.img ? `<img class="board-preview" src="${d.img}" alt="출석 보드">${d.more ? `<p class="muted small" style="margin:-4px 0 8px">외 ${d.more}장 함께 읽음</p>` : ""}` : ""}
       <p class="small">읽은 이름이 맞는지 확인해 주세요. <b>이름을 누르면 고칠 수 있고</b>, ×로 뺄 수 있어요.
         ${d.names.some(isNewName) ? `<em class="tag-new">새 아이</em>는 명단에 없는 이름이라 확정 후 대표 사진을 받을게요.` : ""}
         ${d.unsure.length ? `<span class="q-legend">?</span> 표시는 글씨가 애매했던 이름이에요.` : ""}</p>
@@ -369,12 +369,14 @@ async function renderRoll() {
   if (!roll.length) {
     count.textContent = "";
     body.innerHTML = `
-      <p class="muted small">출석 보드를 찍어 올리면 AI가 이름을 읽어 명단을 만들어요. 명단이 있으면 분류가 더 정확해져요. (안 해도 분류는 돼요)</p>
+      <p class="muted small">출석 보드 사진이나 <b>다이얼독 알림장 목록 캡처</b>를 올리면 AI가 이름을 읽어 명단을 만들어요. 캡처는 여러 장을 한 번에 골라도 돼요. (안 해도 분류는 돼요)</p>
       <div class="row">
-        <button id="roll-board" class="btn primary grow">출석 보드 사진 올리기</button>
+        <button id="roll-board" class="btn primary grow">📋 출석 보드 사진</button>
+        <button id="roll-app" class="btn primary grow">📱 다이얼독 캡처</button>
         <button id="roll-manual" class="btn ghost">직접 입력</button>
       </div>`;
     $("#roll-board").addEventListener("click", () => $("#board-file").click());
+    $("#roll-app").addEventListener("click", () => $("#board-file").click());
     $("#roll-manual").addEventListener("click", () => { state.draft = { names: [], unsure: [], img: "" }; renderRoll(); });
     return;
   }
@@ -393,7 +395,7 @@ async function renderRoll() {
       <span class="known" title="얼굴 기억함"><img src="${ref(dg.ref_path)}" alt="">${esc(dg.name)}<i>✓</i></span>`).join("")}</div>` : ""}
     <div class="row" style="margin-top:10px">
       <button id="roll-edit" class="btn ghost sm">명단 수정</button>
-      <button id="roll-board" class="btn ghost sm">보드 다시 읽기</button>
+      <button id="roll-board" class="btn ghost sm">보드·캡처 다시 읽기</button>
     </div>`;
   $$("[data-ref-for]", body).forEach((b) => b.addEventListener("click", () => {
     refTarget = b.dataset.refFor;
@@ -406,24 +408,24 @@ async function renderRoll() {
   $("#roll-board").addEventListener("click", () => $("#board-file").click());
 }
 
-// 보드 사진 → 이름 읽기
+// 보드 사진·앱 캡처(여러 장) → 이름 읽기
 $("#board-file").addEventListener("change", async (e) => {
-  const f = e.target.files[0];
+  const files = [...e.target.files].slice(0, 10);
   e.target.value = "";
-  if (!f) return;
+  if (!files.length) return;
   const body = $("#roll-body");
-  body.innerHTML = `<div class="reading"><span class="spinner"></span> 출석 보드를 읽는 중… (10초 정도 걸려요)</div>`;
+  body.innerHTML = `<div class="reading"><span class="spinner"></span> ${files.length > 1 ? `${files.length}장에서 ` : ""}이름을 읽는 중… (10~20초 걸려요)</div>`;
   try {
-    const blob = await resize(f, 1600, 0.85);
-    const image = await blobToBase64(blob);
+    const blobs = await Promise.all(files.map((f) => resize(f, 1600, 0.85)));
+    const images = await Promise.all(blobs.map(blobToBase64));
     const known = state.dogs.filter((d) => !d.auto).map((d) => d.name);
-    const { data, error } = await sb.functions.invoke("read-board", { body: { image, known } });
+    const { data, error } = await sb.functions.invoke("read-board", { body: { images, known } });
     if (error) {
       let msg = "";
       try { msg = (await error.context.json()).error || ""; } catch { /* 무시 */ }
-      throw new Error(msg || (error.context?.status === 404 ? "보드 읽기 기능을 찾을 수 없어요" : "읽지 못했어요"));
+      throw new Error(msg || (error.context?.status === 404 ? "이름 읽기 기능을 찾을 수 없어요" : "읽지 못했어요"));
     }
-    state.draft = { names: data.names || [], unsure: data.unsure || [], img: URL.createObjectURL(blob) };
+    state.draft = { names: data.names || [], unsure: data.unsure || [], img: URL.createObjectURL(blobs[0]), more: blobs.length - 1 };
     if (!state.draft.names.length) toast("이름을 찾지 못했어요. 직접 추가해 주세요.");
   } catch (err) {
     toast(err.message || "읽지 못했어요. 다시 시도해 주세요.");
