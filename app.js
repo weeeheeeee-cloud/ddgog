@@ -773,9 +773,12 @@ async function openSheet(photoId, list = sheetList, key = sheetKey) {
   const chipDogs = state.dogs.filter((d) => d.active)
     .sort((a, b) => (state.attendance.has(b.id) - state.attendance.has(a.id)) || dogOrder(a, b));
   $("#sheet-chips").innerHTML = chipDogs.map((d) =>
-    `<button data-dog="${d.id}" class="${p.dog_ids.includes(d.id) ? "on" : ""}">${esc(d.name)}</button>`).join("")
+    `<button data-dog="${d.id}" data-name="${esc(norm(d.name))}" class="${p.dog_ids.includes(d.id) ? "on" : ""}">${esc(d.name)}</button>`).join("")
     || `<span class="muted small">아직 강아지 그룹이 없어요. '새 강아지로'를 눌러 주세요.</span>`;
-  $$("#sheet-chips button").forEach((b) => b.addEventListener("click", () => b.classList.toggle("on")));
+  $$("#sheet-chips button").forEach((b) => b.addEventListener("click", () => { b.classList.toggle("on"); renderPicked(); }));
+  $("#sheet-search").value = "";
+  filterChips();
+  renderPicked();
   const inGroup = sheetKey && sheetKey !== "unsorted" && p.dog_ids.includes(sheetKey);
   $("#sheet-out").classList.toggle("hidden", !inGroup);
   $("#sheet-out").textContent = inGroup ? `${dogById(sheetKey)?.name || ""}에서 빼기` : "여기서 빼기";
@@ -787,6 +790,57 @@ async function openSheet(photoId, list = sheetList, key = sheetKey) {
   const next = nextId && state.photos.find((x) => x.id === nextId);
   if (next) signed("photos", [next.path]).then((u) => { new Image().src = u(next.path); });
 }
+// 고른 아이들을 위에 한 줄로 (× 로 빼기)
+function renderPicked() {
+  const on = $$("#sheet-chips button.on");
+  $("#sheet-picked").innerHTML = on.length
+    ? on.map((b) => `<span class="tag" data-un="${b.dataset.dog}">${esc(b.textContent)} <b>×</b></span>`).join("")
+    : `<span class="muted small">아직 고른 아이가 없어요</span>`;
+  $$("#sheet-picked [data-un]").forEach((t) => t.addEventListener("click", () => {
+    $(`#sheet-chips button[data-dog="${t.dataset.un}"]`)?.classList.remove("on");
+    renderPicked();
+  }));
+}
+function filterChips() {
+  const q = norm($("#sheet-search").value || "");
+  $$("#sheet-chips button").forEach((b) => b.classList.toggle("hidden", !!q && !b.dataset.name.includes(q)));
+}
+$("#sheet-search").addEventListener("input", filterChips);
+$("#sheet-search").addEventListener("keydown", (e) => {
+  if (e.key !== "Enter" || e.isComposing) return;
+  e.preventDefault();
+  const q = norm(e.target.value || "");
+  if (!q) return;
+  const vis = $$("#sheet-chips button:not(.hidden)");
+  const b = vis.find((x) => x.dataset.name === q) || vis.find((x) => !x.classList.contains("on")) || vis[0];
+  if (!b) { toast("그 이름은 명단에 없어요"); return; }
+  b.classList.add("on");
+  e.target.value = "";
+  filterChips();
+  renderPicked();
+});
+
+// 사람이 고쳐 준 사진 = AI가 틀리거나 망설인 사진 → 그 아이 대표 사진으로 배워 둠 (한 마리만 나온 사진, 아이당 하루 4장까지)
+const learned = new Map();
+async function learnFrom(p, ids, before) {
+  if (ids.length !== 1) return;
+  const id = ids[0];
+  const wasRight = before.status === "done" && before.ids.length === 1 && before.ids[0] === id;
+  if (wasRight) return;
+  const k = `${state.day}:${id}`;
+  if ((learned.get(k) || 0) >= 4) return;
+  learned.set(k, (learned.get(k) || 0) + 1);
+  try {
+    const { data: blob } = await sb.storage.from("photos").download(p.thumb_path);
+    const path = `${id}-learn-${Date.now()}.jpg`;
+    const up = await sb.storage.from("refs").upload(path, await rotated(blob, p.rotation || 0), { contentType: "image/jpeg" });
+    if (up.error) return;
+    const { data: row } = await sb.from("dog_refs").insert({ dog_id: id, path }).select().single();
+    const dog = dogById(id);
+    if (dog && row) dog.dog_refs = [...(dog.dog_refs || []), row];
+  } catch (err) { console.error(err); }
+}
+
 function stepSheet(d) {
   const i = sheetList.indexOf(sheetPhoto?.id);
   const id = sheetList[i + d];
@@ -868,7 +922,9 @@ $("#sheet").addEventListener("click", (e) => { if (e.target.id === "sheet") clos
 $("#sheet-save").addEventListener("click", async () => {
   const ids = $$("#sheet-chips button.on").map((b) => b.dataset.dog);
   if (!ids.length) { toast("강아지를 한 마리 이상 골라 주세요"); return; }
+  const before = { status: sheetPhoto.status, ids: [...sheetPhoto.dog_ids] };
   await sb.from("photos").update({ dog_ids: ids, status: "done", confidence: "manual" }).eq("id", sheetPhoto.id);
+  learnFrom(sheetPhoto, ids, before);
   Object.assign(sheetPhoto, { dog_ids: ids, status: "done" });
   toast("분류를 저장했어요");
   const i = sheetList.indexOf(sheetPhoto.id);

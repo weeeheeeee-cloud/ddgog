@@ -145,7 +145,12 @@ Deno.serve(async (req) => {
   const perDog = Math.max(1, Math.min(6, Math.floor(MAX_REF_IMAGES / Math.max(1, withRefs.length))));
   const spread = (arr: string[], k: number) =>
     arr.length <= k ? arr : Array.from({ length: k }, (_, i) => arr[Math.floor((i * arr.length) / k)]);
-  const refs = withRefs.map((d) => ({ ...d, paths: spread(d.paths, perDog) }));
+  // 직원이 고쳐 준 최근 사진(-learn-)은 꼭 포함: 가장 최근 2장 + 나머지에서 고르게
+  const pickRefs = (arr: string[], k: number) => {
+    if (arr.length <= k || k < 3) return spread(arr, k);
+    return [...spread(arr.slice(0, -2), k - 2), ...arr.slice(-2)];
+  };
+  const refs = withRefs.map((d) => ({ ...d, paths: pickRefs(d.paths, perDog) }));
 
   // 대표 사진을 한꺼번에(16장씩 동시에) 미리 불러옴. 한 장씩 받으면 사진 1장 분류에 1분 넘게 걸림
   const needPaths = [...new Set(refs.flatMap((d) => d.paths))].filter((p) => !refCache.has(p));
