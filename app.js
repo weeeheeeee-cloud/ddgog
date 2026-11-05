@@ -317,7 +317,7 @@ async function render() {
   await Promise.all([loadDogs(), loadAttendance()]);
   if (state.tab === "photos") { await loadPhotos(); await renderPhotos(); }
   else if (state.tab === "roster") renderRoster();
-  else if (state.tab === "admin") renderUpLinks();
+  else if (state.tab === "admin") { renderUpLinks(); loadPractice(); }
   renderSide();
 }
 
@@ -908,7 +908,8 @@ async function classifyPending() {
   }
   // 명단 없음 = 연습 모드: 사진 지문으로 전체 아이 중 닮은 10마리를 추려서 비교 (지문이 없으면 먼저 만듦)
   state.busy = true;
-  const noRoll = !state.attendance.size;
+  await loadPractice();
+  const noRoll = !state.attendance.size || state.practice;
   lastError = "";
   // 서버 작업자와 나눠서 처리: 12장씩 '가져가서' 처리하므로 같은 사진을 두 번 분류하지 않음
   let total = waiting, ok = 0, fail = 0, done = 0, stop = false, saved = 0, first = true;
@@ -2061,6 +2062,23 @@ async function backfillFingerprints(manual = false) {
   } finally { fpJob.running = false; }
 }
 $("#fp-run").addEventListener("click", () => backfillFingerprints(true));
+
+// ---- 연습 모드 스위치
+async function loadPractice() {
+  const { data } = await sb.from("app_settings").select("value").eq("name", "practice").maybeSingle();
+  state.practice = data?.value?.on === true;
+  const cb = $("#practice-on");
+  if (cb) cb.checked = state.practice;
+  document.body.classList.toggle("practice", state.practice);
+}
+$("#practice-on").addEventListener("change", async (e) => {
+  const on = e.target.checked;
+  const { error } = await sb.from("app_settings").update({ value: { on } }).eq("name", "practice");
+  if (error) { toast("바꾸지 못했어요"); e.target.checked = !on; return; }
+  state.practice = on;
+  document.body.classList.toggle("practice", on);
+  toast(on ? "연습 모드를 켰어요. 명단 없이 모든 아이 중에서 찾아요" : "연습 모드를 껐어요. 다시 출석 명단 기준으로 분류해요");
+});
 // 로그인되어 있으면 1분 뒤 조용히 시작 (분류에 방해되지 않게)
 setTimeout(async () => { const { data } = await sb.auth.getSession(); if (data.session) backfillFingerprints(); }, 60000);
 setInterval(async () => { const { data } = await sb.auth.getSession(); if (data.session) backfillFingerprints(); }, 30 * 60000);

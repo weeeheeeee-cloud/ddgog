@@ -34,7 +34,8 @@ Deno.serve(async (req) => {
 
   const day = kstToday();
   const { count } = await admin.from("assignments").select("dog_id", { count: "exact", head: true }).eq("day", day);
-  if (!count) return json({ skipped: "no roster" });
+  const { data: pm } = await admin.from("app_settings").select("value").eq("name", "practice").maybeSingle();
+  if (!count && pm?.value?.on !== true) return json({ skipped: "no roster" });
 
   const started = Date.now();
   let done = 0, copied = 0, failed = 0;

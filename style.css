@@ -431,3 +431,8 @@ img.rot270 { transform: rotate(270deg); }
 @keyframes plusup{0%{opacity:0;transform:translateY(6px)}15%{opacity:1;transform:translateY(0)}80%{opacity:1}100%{opacity:0;transform:translateY(-8px)}}
 .side-item:has(.cnt.bump) .side-row{animation:rowflash 1.6s ease-out}
 @keyframes rowflash{0%{background:#fff4b3}100%{background:transparent}}
+
+.switch-row{display:flex;align-items:center;gap:8px;font-size:15px;cursor:pointer;margin-top:6px}
+.switch-row input{width:20px;height:20px}
+body.practice header.top::after{content:"🧪 연습 모드";position:absolute;right:12px;bottom:-12px;background:#7c3aed;color:#fff;font-size:12px;font-weight:700;padding:3px 10px;border-radius:999px}
+body.practice header.top{position:relative}

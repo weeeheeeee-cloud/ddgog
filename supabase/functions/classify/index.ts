@@ -143,7 +143,11 @@ Deno.serve(async (req) => {
   if (pErr || !photo) return json({ error: "사진을 찾을 수 없어요" }, 404);
 
   // 후보: 그날 담당이 지정된 강아지 + 이름 안 붙은 자동 그룹. 담당 지정이 없으면 활성 강아지 전체
-  const { data: assigned } = await supa.from("assignments").select("dog_id").eq("day", photo.day);
+  // 연습 모드(관리 탭에서 켬): 출석 명단을 무시하고 전체 아이 중 지문으로 추려서 분류
+  const { data: pm } = await supa.from("app_settings").select("value").eq("name", "practice").maybeSingle();
+  const practiceOn = pm?.value?.on === true;
+  const { data: assignedRaw } = await supa.from("assignments").select("dog_id").eq("day", photo.day);
+  const assigned = practiceOn ? [] : assignedRaw;
   let q = supa.from("dogs").select("id, name, auto, note, tips, tips_ai, features, ref_path, dog_refs(path, created_at)")
     .eq("active", true).order("created_at");
   // recheck: '새 강아지' 그룹 사진을 이름 있는 아이들과만 다시 비교
