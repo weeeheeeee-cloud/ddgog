@@ -158,10 +158,10 @@ Deno.serve(async (req) => {
     q = q.eq("auto", false);
   }
   let { data: dogs } = await q;
-  // 연습 모드(명단 없음): 지문으로 전체 중 가장 닮은 10마리만 후보로 → 아이당 대표 사진을 많이 볼 수 있어 정확해짐
+  // 학습 모드(명단 없음): 지문으로 전체 중 가장 닮은 16마리만 후보로 (흰 아이들처럼 서로 닮은 무리가 많아 넉넉히) → 아이당 대표 사진을 많이 볼 수 있어 정확해짐
   let practice = false;
   if (!(assigned && assigned.length) && !recheck && photo.vec && (dogs ?? []).length > 12) {
-    const { data: top } = await supa.rpc("fp_top", { q: photo.vec, dogs: (dogs ?? []).map((d) => d.id), k: 10 });
+    const { data: top } = await supa.rpc("fp_top", { q: photo.vec, dogs: (dogs ?? []).map((d) => d.id), k: 16 });
     if (top?.length) {
       const keep = new Set(top.map((t: { dog_id: string }) => t.dog_id));
       dogs = (dogs ?? []).filter((d) => keep.has(d.id));
