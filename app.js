@@ -1012,6 +1012,27 @@ $("#sheet-search").addEventListener("keydown", (e) => {
 
 // 사람이 고쳐 준 사진 = AI가 틀리거나 망설인 사진 → 그 아이 대표 사진으로 배워 둠 (한 마리만 나온 사진, 아이당 하루 4장까지)
 const learned = new Map();
+// 직원이 고친 사진과 거의 똑같은 사진(같은 장면·같은 옷, 지문 0.93 이상)이 고치기 전 분류 그대로면 같이 고쳐 줌
+async function followCorrection(p, before, ids) {
+  try {
+    if (!p.vec) {
+      const { data: blob } = await sb.storage.from("photos").download(p.thumb_path);
+      const v = blob && await fingerprint(blob);
+      if (v) await sb.from("photos").update({ vec: v }).eq("id", p.id);
+      else return;
+    }
+    if (before.conf === "manual" || (before.ids.length === ids.length && before.ids.every((x) => ids.includes(x)))) return;
+    const { data: sim } = await sb.rpc("fp_similar", { p_photo: p.id, min_sim: 0.93 });
+    const same = (a, b) => a.length === b.length && a.every((x) => b.includes(x));
+    const targets = (sim || []).filter((x) => x.confidence !== "manual" && same(x.dog_ids || [], before.ids));
+    if (!targets.length) return;
+    await sb.from("photos").update({ dog_ids: ids, status: "done", confidence: "high", ai_note: "직원이 고친 비슷한 사진을 따라 고침" })
+      .in("id", targets.map((x) => x.id));
+    toast(`거의 같은 사진 ${targets.length}장도 똑같이 고쳤어요`);
+    await loadPhotos();
+    renderPhotos();
+  } catch (e) { console.warn(e); }
+}
 function learnMistake(photo_id, wrong_id, right_id) {
   sb.functions.invoke("learn-mistake", { body: { photo_id, wrong_id, right_id } }).catch(() => {});
 }
@@ -1029,7 +1050,8 @@ async function learnFrom(p, ids, before) {
     const path = `${id}-learn-${Date.now()}.jpg`;
     const up = await sb.storage.from("refs").upload(path, await rotated(blob, p.rotation || 0), { contentType: "image/jpeg" });
     if (up.error) return;
-    const { data: row } = await sb.from("dog_refs").insert({ dog_id: id, path }).select().single();
+    const vec = await fingerprint(blob);
+    const { data: row } = await sb.from("dog_refs").insert({ dog_id: id, path, vec }).select("id, path, created_at").single();
     const dog = dogById(id);
     if (dog && row) dog.dog_refs = [...(dog.dog_refs || []), row];
     queueRescan();
@@ -1083,7 +1105,7 @@ $("#sheet-rot").addEventListener("click", async () => {
   p.rotation = ((p.rotation || 0) + 90) % 360;
   const url = await signed("photos", [p.path]);
   showSheetImage(p, url(p.path));
-  const { error } = await sb.from("photos").update({ rotation: p.rotation }).eq("id", p.id);
+  const { error } = await sb.from("photos").update({ rotation: p.rotation, rotation_checked: true }).eq("id", p.id);
   if (error) toast("저장하지 못했어요");
   const t = document.querySelector(`[data-photo="${p.id}"]`);
   if (t) t.className = `rot${p.rotation}`;
@@ -1129,6 +1151,7 @@ $("#sheet-save").addEventListener("click", async () => {
     added.filter((a, i) => !(wrong.length && (added.length === 1 || i < wrong.length))).forEach((a) => learnMistake(sheetPhoto.id, null, a));
   }
   sheetPhoto.confidence = "manual";
+  followCorrection(sheetPhoto, before, ids);
   // 명단에 없던 아이를 직접 골랐으면 오늘 명단에 넣어서 AI도 그 아이를 후보로 보게 함
   const extra = ids.filter((id) => !state.attendance.has(id));
   if (extra.length && state.attendance.size) {

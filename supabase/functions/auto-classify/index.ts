@@ -3,6 +3,15 @@
 // 출석 명단이 확정된 날만 동작 (명단 없이 전체와 비교하면 느리고 부정확)
 
 import { createClient } from "jsr:@supabase/supabase-js@2";
+import { encodeBase64 } from "jsr:@std/encoding@1/base64";
+
+const ANTHROPIC_KEY = Deno.env.get("ANTHROPIC_API_KEY") ?? "";
+const ROT_MODEL = Deno.env.get("ROTATE_MODEL") ?? "claude-haiku-5-5";
+const ROT_SYSTEM = `You check whether a photo from a dog daycare is upright. Phone photos are often saved sideways or upside down.
+Decide how many degrees the photo must be turned CLOCKWISE so it looks natural: floor/grass/ground at the bottom,
+walls and furniture vertical, people standing upright, dogs' legs pointing down to the floor, any text readable.
+Dogs lying on their side or photographed from directly above can look odd: rely on the floor, furniture and people.
+Reply with JSON only: {"rotate":0|90|180|270,"sure":true|false}`;
 
 const URL = Deno.env.get("SUPABASE_URL")!;
 const json = (b: unknown, s = 200) => new Response(JSON.stringify(b), { status: s, headers: { "Content-Type": "application/json" } });
@@ -70,5 +79,41 @@ Deno.serve(async (req) => {
       await admin.from("photos").update({ status: "pending", claimed_at: null }).in("id", sibs);
     }));
   }
-  return json({ day, done, copied, failed });
+  // 회전 전용 확인: 분류된 사진 중 아직 회전을 따로 확인하지 않은 것 (직원이 돌린 사진은 제외)
+  let rotated = 0, checked = 0;
+  if (ANTHROPIC_KEY && Date.now() - started < 100_000) {
+    const { data: rot } = await admin.from("photos").select("id, thumb_path, rotation")
+      .eq("day", day).eq("status", "done").eq("rotation_checked", false).limit(30);
+    const list = rot ?? [];
+    let i = 0;
+    await Promise.all(Array.from({ length: Math.min(6, list.length) }, async () => {
+      while (i < list.length && Date.now() - started < 130_000) {
+        const p = list[i++];
+        try {
+          const { data: b } = await admin.storage.from("photos").download(p.thumb_path);
+          if (!b) continue;
+          const res = await fetch("https://api.anthropic.com/v1/messages", {
+            method: "POST",
+            headers: { "x-api-key": ANTHROPIC_KEY, "anthropic-version": "2023-06-01", "content-type": "application/json" },
+            body: JSON.stringify({ model: ROT_MODEL, max_tokens: 1500, system: ROT_SYSTEM, messages: [{ role: "user", content: [
+              { type: "image", source: { type: "base64", media_type: "image/jpeg", data: encodeBase64(new Uint8Array(await b.arrayBuffer())) } },
+              { type: "text", text: "How many degrees clockwise to make it upright?" },
+            ] }] }),
+          });
+          if (!res.ok) continue;
+          const out = await res.json();
+          const text: string = (out.content ?? []).map((c: { text?: string }) => c.text ?? "").join("");
+          const m = text.match(/\{[\s\S]*\}/);
+          const j = m ? JSON.parse(m[0]) : {};
+          const r = [0, 90, 180, 270].includes(Number(j.rotate)) ? Number(j.rotate) : null;
+          const upd: Record<string, unknown> = { rotation_checked: true };
+          if (r !== null && j.sure !== false && r !== (p.rotation ?? 0)) { upd.rotation = r; rotated++; }
+          // 다시 확인한 사이 직원이 돌렸으면 덮어쓰지 않음
+          await admin.from("photos").update(upd).eq("id", p.id).eq("rotation_checked", false);
+          checked++;
+        } catch { /* 다음 번에 다시 */ }
+      }
+    }));
+  }
+  return json({ day, done, copied, failed, checked, rotated });
 });
