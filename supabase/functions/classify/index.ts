@@ -153,7 +153,17 @@ Deno.serve(async (req) => {
   } else if (recheck) {
     q = q.eq("auto", false);
   }
-  const { data: dogs } = await q;
+  let { data: dogs } = await q;
+  // 연습 모드(명단 없음): 지문으로 전체 중 가장 닮은 10마리만 후보로 → 아이당 대표 사진을 많이 볼 수 있어 정확해짐
+  let practice = false;
+  if (!(assigned && assigned.length) && !recheck && photo.vec && (dogs ?? []).length > 12) {
+    const { data: top } = await supa.rpc("fp_top", { q: photo.vec, dogs: (dogs ?? []).map((d) => d.id), k: 10 });
+    if (top?.length) {
+      const keep = new Set(top.map((t: { dog_id: string }) => t.dog_id));
+      dogs = (dogs ?? []).filter((d) => keep.has(d.id));
+      practice = true;
+    }
+  }
   // 오늘 명단에 있지만 대표 사진이 없는 아이 수 (호텔링 손님 등)
   const faceless = assigned && assigned.length
     ? (dogs ?? []).filter((d) => !(d.dog_refs ?? []).length && !d.ref_path && assigned.some((a) => a.dog_id === d.id)).length
@@ -262,6 +272,10 @@ Deno.serve(async (req) => {
           content.push({ type: "image", source: { type: "base64", media_type: "image/jpeg", data: b64 } });
         }
       }
+    }
+    if (practice) {
+      content.push({ type: "text", text: "Note: no attendance list today. These candidates were pre-selected by visual similarity " +
+        "from ALL registered dogs, so the right dog is usually among them, but not always: if none truly matches, use new_dog / unknown_main." });
     }
     if (faceless) {
       content.push({ type: "text", text: `Note: ${faceless} dog(s) here today have NO reference photos yet (e.g. hotel guests). ` +

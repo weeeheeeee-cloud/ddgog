@@ -885,6 +885,16 @@ async function classifyOne(photoId, recheck = false) {
 }
 
 // 같은 아이가 여러 그룹으로 생기지 않도록 한 장씩 차례로 분류
+// 사진에 지문이 없으면 만들어서 저장 (연습 모드에서 후보를 추리는 데 필요)
+async function ensureVec(id) {
+  try {
+    const { data: p } = await sb.from("photos").select("thumb_path, vec").eq("id", id).single();
+    if (!p || p.vec) return;
+    const { data: blob } = await sb.storage.from("photos").download(p.thumb_path);
+    const v = blob && await fingerprint(blob);
+    if (v) await sb.from("photos").update({ vec: v }).eq("id", id);
+  } catch (e) { console.warn(e); }
+}
 async function classifyPending() {
   if (state.busy) return;
   const { count: waiting } = await sb.from("photos").select("id", { count: "exact", head: true }).eq("day", state.day).eq("status", "pending");
@@ -896,20 +906,14 @@ async function classifyPending() {
     await render();
     return;
   }
-  // 명단 없이 148마리 전체와 비교하면 엉뚱한 아이로 들어감 → 명단부터
-  if (!state.attendance.size) {
-    progress(`사진 ${waiting}장이 기다리고 있어요`, 0, waiting,
-      "이 날짜의 출석 명단이 아직 없어요. 위에서 출석 보드 사진이나 다이얼독 캡처를 올리고 '명단 확정'을 누르면 바로 분류해요.");
-    await render();
-    return;
-  }
+  // 명단 없음 = 연습 모드: 사진 지문으로 전체 아이 중 닮은 10마리를 추려서 비교 (지문이 없으면 먼저 만듦)
   state.busy = true;
   const noRoll = !state.attendance.size;
   lastError = "";
   // 서버 작업자와 나눠서 처리: 12장씩 '가져가서' 처리하므로 같은 사진을 두 번 분류하지 않음
   let total = waiting, ok = 0, fail = 0, done = 0, stop = false, saved = 0, first = true;
   const tick = () => progress("AI가 강아지별로 묶는 중… 창을 닫지 마세요", Math.min(done, total), total,
-    noRoll ? "오늘 출석 명단이 없어서 등록된 모든 아이와 비교해요 (느려요). 출석 보드를 먼저 올리면 빨라져요."
+    noRoll ? "연습 모드(명단 없음): 사진 지문으로 닮은 아이 10마리를 추려서 비교해요. 틀린 건 고쳐 주면 그대로 학습해요."
            : `아래 목록이 조금씩 채워져요${saved ? ` · 연속 사진 ${saved}장은 같은 장면이라 함께 처리` : ""}`);
   tick();
   while (!stop) {
@@ -928,6 +932,7 @@ async function classifyPending() {
       if (stop) { await sb.from("photos").update({ status: "pending", claimed_at: null }).in("id", g.map((x) => x.id)); return; }
       const rep = g.reduce((m, x) => ((x.sharp || 0) > (m.sharp || 0) ? x : m), g[0]);
       const sibs = g.filter((x) => x.id !== rep.id).map((x) => x.id);
+      if (noRoll) await ensureVec(rep.id);
       if (await classifyOne(rep.id)) {
         ok++;
         if (sibs.length) {
@@ -2034,7 +2039,8 @@ async function backfillFingerprints(manual = false) {
     const { data: refs } = await sb.from("dog_refs").select("id, path").is("vec", null).limit(5000);
     const { data: photos } = await sb.from("photos").select("id, thumb_path, rotation").is("vec", null).gte("day", since).limit(5000);
     const { data: les } = await sb.from("lessons").select("id, path").is("vec", null).limit(2000);
-    const todo = [...(les || []).map((l) => ({ kind: "l", ...l })), ...(photos || []).map((p) => ({ kind: "p", ...p })), ...(refs || []).map((r) => ({ kind: "r", ...r }))];
+    // 대표 사진 먼저 (명단 없이 연습할 때 후보를 추리는 기준), 그다음 실수 기록·분류된 사진
+    const todo = [...(refs || []).map((r) => ({ kind: "r", ...r })), ...(les || []).map((l) => ({ kind: "l", ...l })), ...(photos || []).map((p) => ({ kind: "p", ...p }))];
     fpJob.total = todo.length; fpJob.done = 0;
     if (!todo.length) { msg("모든 사진에 지문이 있어요 ✓"); return; }
     for (const it of todo) {
