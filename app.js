@@ -454,7 +454,23 @@ function blobToBase64(blob) {
   });
 }
 
-const isNewName = (n) => !state.dogs.some((d) => !d.auto && norm(d.name) === norm(n));
+// 보드 이름 → 명단의 아이. "구름"처럼 같은 이름이 여럿(구름(포메라니안)·구름(비숑 프리제))이면 고르게 함
+const baseName = (s) => norm(String(s || "").replace(/\s*\(.*\)\s*$/, ""));
+function matchDog(n, draft = state.draft) {
+  const pick = draft?.pick?.[norm(n)];
+  if (pick) return { dog: dogById(pick) };
+  const named = state.dogs.filter((d) => !d.auto);
+  const exact = named.filter((d) => norm(d.name) === norm(n));
+  const withRefs = (arr) => arr.filter((d) => refCount(d) > 0);
+  if (withRefs(exact).length === 1) return { dog: withRefs(exact)[0] };
+  const same = named.filter((d) => baseName(d.name) === baseName(n));
+  const good = withRefs(same);
+  if (good.length === 1) return { dog: good[0] };
+  if (good.length > 1) return { choices: good };
+  if (exact.length) return { dog: exact[0] };
+  return {};
+}
+const isNewName = (n) => { const m = matchDog(n); return !m.dog && !m.choices; };
 const isHotelName = (draft, n) => (draft.hotel || []).some((h) => norm(h) === norm(n));
 
 async function renderRoll() {
@@ -473,14 +489,19 @@ async function renderRoll() {
         <span class="tag-h">H</span> 표시는 호텔링이에요. 눌러서 켜고 끌 수 있어요. 호텔링 아이는 대표 사진 없이 분류하고, 모르는 아이는 '새 강아지'로 묶어 두면 나중에 이름을 붙이면 돼요.
         ${d.unsure.length ? `<span class="q-legend">?</span> 표시는 글씨가 애매했던 이름이에요.` : ""}</p>
       <div class="chips roll-chips">${d.names.map((n, i) => `
-        <span class="${d.unsure.includes(n) ? "unsure" : ""} ${isNewName(n) && !isHotelName(d, n) ? "new" : ""} ${isHotelName(d, n) ? "hotel" : ""}"><b data-h="${i}" class="h-toggle" title="호텔링 켜기/끄기">H</b><b data-edit="${i}">${esc(n)}</b>${isNewName(n) && !isHotelName(d, n) ? `<em class="tag-new">새 아이</em>` : ""}<b class="x" data-del="${i}">×</b></span>`).join("")
+        <span class="${d.unsure.includes(n) ? "unsure" : ""} ${isNewName(n) && !isHotelName(d, n) ? "new" : ""} ${isHotelName(d, n) ? "hotel" : ""}"><b data-h="${i}" class="h-toggle" title="호텔링 켜기/끄기">H</b><b data-edit="${i}">${esc(n)}</b>${(() => {
+          const m = matchDog(n, d);
+          if (m.choices) return `<select data-pick="${i}" class="pick-dog"><option value="">어느 아이?</option>${m.choices.map((c) => `<option value="${c.id}">${esc(c.name)}</option>`).join("")}</select>`;
+          if (m.dog && norm(m.dog.name) !== norm(n)) return `<small class="muted"> → ${esc(m.dog.name)}</small>`;
+          return "";
+        })()}${isNewName(n) && !isHotelName(d, n) ? `<em class="tag-new">새 아이</em>` : ""}<b class="x" data-del="${i}">×</b></span>`).join("")
         || `<span class="muted small">아직 이름이 없어요</span>`}</div>
       <form id="roll-add" class="row">
         <input id="roll-add-name" class="grow" placeholder="빠진 이름 추가">
         <button class="btn ghost" type="submit">추가</button>
       </form>
       <div class="row" style="margin-top:10px">
-        <button id="roll-confirm" class="btn primary grow" ${d.names.length ? "" : "disabled"}>명단 확정 (${d.names.length}마리)</button>
+        <button id="roll-confirm" class="btn primary grow" ${d.names.length && !d.names.some((n) => matchDog(n, d).choices) ? "" : "disabled"}>${d.names.some((n) => matchDog(n, d).choices) ? "이름이 같은 아이를 먼저 골라 주세요" : `명단 확정 (${d.names.length}마리)`}</button>
         <button id="roll-retake" class="btn ghost">다시 찍기</button>
         <button id="roll-cancel" class="btn ghost">취소</button>
       </div>`;
@@ -493,6 +514,11 @@ async function renderRoll() {
       renderRoll();
     }));
     $$("[data-del]", body).forEach((el) => el.addEventListener("click", () => { d.names.splice(+el.dataset.del, 1); renderRoll(); }));
+    $$("[data-pick]", body).forEach((el) => el.addEventListener("change", () => {
+      if (!el.value) return;
+      d.pick = { ...(d.pick || {}), [norm(d.names[+el.dataset.pick])]: el.value };
+      renderRoll();
+    }));
     $$("[data-h]", body).forEach((el) => el.addEventListener("click", () => {
       const n = d.names[+el.dataset.h];
       d.hotel = d.hotel || [];
@@ -596,7 +622,7 @@ async function confirmRoll() {
     const ids = [];
     const hotelIds = new Set();
     for (const name of state.draft.names) {
-      let dog = state.dogs.find((d) => !d.auto && norm(d.name) === norm(name));
+      let dog = matchDog(name).dog;
       if (!dog) {
         const { data, error } = await sb.from("dogs").insert({ name, auto: false, active: true }).select().single();
         if (error) throw error;
@@ -925,6 +951,12 @@ $("#sheet-save").addEventListener("click", async () => {
   const before = { status: sheetPhoto.status, ids: [...sheetPhoto.dog_ids] };
   await sb.from("photos").update({ dog_ids: ids, status: "done", confidence: "manual" }).eq("id", sheetPhoto.id);
   learnFrom(sheetPhoto, ids, before);
+  // 명단에 없던 아이를 직접 골랐으면 오늘 명단에 넣어서 AI도 그 아이를 후보로 보게 함
+  const extra = ids.filter((id) => !state.attendance.has(id));
+  if (extra.length && state.attendance.size) {
+    await sb.from("assignments").insert(extra.map((dog_id) => ({ day: state.day, dog_id })));
+    extra.forEach((id) => state.attendance.add(id));
+  }
   Object.assign(sheetPhoto, { dog_ids: ids, status: "done" });
   toast("분류를 저장했어요");
   const i = sheetList.indexOf(sheetPhoto.id);
