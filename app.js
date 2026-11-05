@@ -268,7 +268,7 @@ async function loadPhotos() {
   const all = [];
   for (let from = 0; ; from += 1000) {
     const { data } = await sb.from("photos")
-      .select("id, path, thumb_path, dog_ids, status, ai_note, created_at, taken_at, phash, sharp, rotation")
+      .select("id, path, thumb_path, dog_ids, status, ai_note, confidence, created_at, taken_at, phash, sharp, rotation")
       .eq("day", state.day).order("created_at").range(from, from + 999);
     all.push(...(data || []));
     if (!data || data.length < 1000) break;
@@ -422,7 +422,19 @@ async function renameDog(dog) {
   const name = prompt(`강아지 이름${hint}`, dog.auto ? "" : dog.name);
   if (!name || !name.trim()) return false;
   const nm = name.trim();
-  const same = state.dogs.find((d) => d.id !== dog.id && norm(d.name) === norm(nm));
+  let same = state.dogs.find((d) => d.id !== dog.id && norm(d.name) === norm(nm));
+  if (!same) {
+    // "구름"이라고만 써도 명단의 구름(포메라니안) 등과 연결
+    const m = matchDog(nm, null);
+    if (m.dog && m.dog.id !== dog.id) same = m.dog;
+    else if (m.choices) {
+      const list = m.choices.filter((c) => c.id !== dog.id);
+      const v = prompt(`'${nm}' 이름의 아이가 여럿이에요. 번호를 골라 주세요 (새 아이면 0)\n` +
+        list.map((c, i) => `${i + 1}. ${c.name}`).join("\n"), "1");
+      if (v === null) return false;
+      same = list[+v - 1] || null;
+    }
+  }
   if (same) {
     if (!confirm(`'${same.name}'(이)가 이미 있어요. 이 그룹 사진을 '${same.name}'(으)로 합칠까요?`)) return false;
     const moved = refCount(same) === 0 && refCount(dog) > 0;  // 얼굴을 몰랐던 아이 → 이 그룹 사진으로 기억
@@ -435,13 +447,43 @@ async function renameDog(dog) {
       if (p.dog_ids.includes(dog.id)) p.dog_ids = [...new Set(p.dog_ids.map((x) => (x === dog.id ? same.id : x)))];
     });
     toast(`'${same.name}'(으)로 합쳤어요${moved ? " · 얼굴도 기억했어요" : ""}`);
+    await addToToday(same.id);
+    queueRescan();
     return true;
   }
   const { error } = await sb.from("dogs").update({ name: nm, auto: false }).eq("id", dog.id);
   if (error) { toast("저장하지 못했어요"); return false; }
   Object.assign(dog, { name: nm, auto: false });
   state.dogs.sort(dogOrder);
+  await addToToday(dog.id);
+  queueRescan();
   return true;
+}
+
+// 이름이 붙은 아이는 오늘 명단에 넣어 AI 후보가 되게 함
+async function addToToday(id) {
+  if (!state.attendance.size || state.attendance.has(id)) return;
+  await sb.from("assignments").insert({ day: state.day, dog_id: id });
+  state.attendance.add(id);
+}
+
+// 이름이 정해지거나 얼굴을 새로 배우면, '분류 안 된 사진'을 잠시 뒤 다시 훑어서 그 아이 사진을 꺼내 옴
+// (직원이 직접 뺀 사진은 건드리지 않음)
+let rescanTimer = null, rescanAgain = false;
+function queueRescan() {
+  clearTimeout(rescanTimer);
+  rescanTimer = setTimeout(rescanUnsorted, 30000);
+}
+async function rescanUnsorted() {
+  if (state.busy) { rescanAgain = true; return; }
+  const ids = state.photos.filter((p) => (p.status === "review" || p.status === "error") && p.confidence !== "manual").map((p) => p.id);
+  if (!ids.length) return;
+  for (let i = 0; i < ids.length; i += 200) {
+    await sb.from("photos").update({ status: "pending" }).in("id", ids.slice(i, i + 200)).in("status", ["review", "error"]);
+  }
+  toast(`분류 안 된 사진 ${ids.length}장을 새로 배운 얼굴로 다시 살펴볼게요`);
+  await loadPhotos();
+  classifyPending();
 }
 
 /* ---------- 오늘 출석 (보드 사진 → 명단 → 대표 사진) ---------- */
@@ -804,6 +846,7 @@ async function classifyPending() {
   for (const p of head) await runOne(p.id);
   if (!stop) await pool(rest, 3, (p) => runOne(p.id));
   state.busy = false;
+  if (rescanAgain) { rescanAgain = false; queueRescan(); }
   if (fail && lastError) {
     progress("분류를 멈췄어요", ok, list.length, lastError);
   } else {
@@ -899,6 +942,7 @@ async function learnFrom(p, ids, before) {
     const { data: row } = await sb.from("dog_refs").insert({ dog_id: id, path }).select().single();
     const dog = dogById(id);
     if (dog && row) dog.dog_refs = [...(dog.dog_refs || []), row];
+    queueRescan();
   } catch (err) { console.error(err); }
 }
 
@@ -1017,6 +1061,8 @@ $("#sheet-new").addEventListener("click", async () => {
   await sb.from("photos").update({ dog_ids: ids, status: "done", confidence: "manual" }).eq("id", p.id);
   closeSheet();
   toast(`${dog.name} 그룹을 만들었어요`);
+  if (!dog.auto) await addToToday(dog.id);
+  queueRescan();
   render();
 });
 
