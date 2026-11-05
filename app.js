@@ -873,8 +873,27 @@ async function classifyOne(photoId, recheck = false) {
 // 같은 아이가 여러 그룹으로 생기지 않도록 한 장씩 차례로 분류
 async function classifyPending() {
   if (state.busy) return;
-  const { data } = await sb.from("photos").select("id").eq("day", state.day).eq("status", "pending").order("created_at");
-  const list = data || [];
+  const { data } = await sb.from("photos").select("id, phash, sharp, taken_at").eq("day", state.day).eq("status", "pending").order("created_at");
+  const all = data || [];
+  // 연속으로 찍은 거의 같은 사진(5초 안, 이미지 거의 같음)은 가장 선명한 1장만 AI에게 보내고 결과를 나머지에 그대로 적용
+  const byTime = [...all].sort((a, b) => String(a.taken_at || "").localeCompare(String(b.taken_at || "")));
+  const twins = new Map(); // 대표 id → 같은 장면 id[]
+  const used = new Set();
+  for (let i = 0; i < byTime.length; i++) {
+    const a = byTime[i];
+    if (used.has(a.id)) continue;
+    const grp = [a];
+    for (let j = i + 1; j < byTime.length; j++) {
+      const b = byTime[j];
+      if (!a.taken_at || !b.taken_at) break;
+      if (Math.abs(new Date(b.taken_at) - new Date(grp[grp.length - 1].taken_at)) > 5000) break;
+      if (!used.has(b.id) && hamming(a.phash, b.phash) <= 12) grp.push(b);
+    }
+    grp.forEach((x) => used.add(x.id));
+    const rep = grp.reduce((m, x) => ((x.sharp || 0) > (m.sharp || 0) ? x : m), grp[0]);
+    twins.set(rep.id, grp.filter((x) => x.id !== rep.id).map((x) => x.id));
+  }
+  const list = all.filter((p) => twins.has(p.id));
   if (!list.length) { $("#progress").classList.add("hidden"); await render(); return; }
   // 명단부터: 오늘 온 아이들 안에서만 찾아야 빠르고 정확함
   if (state.draft) {
@@ -887,29 +906,39 @@ async function classifyPending() {
   const noRoll = !state.attendance.size;
   lastError = "";
   let ok = 0, fail = 0, done = 0, stop = false;
+  const saved = all.length - list.length;
   const tick = () => progress("AI가 강아지별로 묶는 중… 창을 닫지 마세요", done, list.length,
     noRoll ? "오늘 출석 명단이 없어서 등록된 모든 아이와 비교해요 (느려요). 출석 보드를 먼저 올리면 빨라져요."
-           : "아래 목록이 조금씩 채워져요");
+           : `아래 목록이 조금씩 채워져요${saved ? ` · 연속 사진 ${saved}장은 같은 장면이라 함께 처리` : ""}`);
   tick();
-  // 처음 몇 장은 한 장씩(새 아이 그룹이 겹치지 않게), 그다음은 3장씩 동시에
+  // 처음 몇 장은 한 장씩(새 아이 그룹이 겹치지 않게), 그다음은 6장씩 동시에
   const runOne = async (id) => {
     if (stop) return;
-    if (await classifyOne(id)) ok++;
-    else if (++fail >= 3 && !ok) stop = true;    // 설정 문제면 바로 멈춤
+    if (await classifyOne(id)) {
+      ok++;
+      const sibs = twins.get(id) || [];
+      if (sibs.length) {
+        const { data: r } = await sb.from("photos").select("dog_ids, status, confidence, rotation").eq("id", id).single();
+        if (r) {
+          await sb.from("photos").update({ ...r, ai_note: "연속 사진: 바로 앞 사진과 같은 분류" }).in("id", sibs);
+          ok += sibs.length;
+        }
+      }
+    } else if (++fail >= 3 && !ok) stop = true;    // 설정 문제면 바로 멈춤
     done++;
     tick();
     if (done % 12 === 0 && state.tab === "photos") { await loadDogs(); await loadPhotos(); await renderPhotos(); }
   };
-  const head = list.slice(0, 10), rest = list.slice(10);
+  const head = list.slice(0, 6), rest = list.slice(6);
   for (const p of head) await runOne(p.id);
-  if (!stop) await pool(rest, 3, (p) => runOne(p.id));
+  if (!stop) await pool(rest, 6, (p) => runOne(p.id));
   state.busy = false;
   if (rescanAgain) { rescanAgain = false; queueRescan(); }
   else if (!stop) await recheckAutoGroups();
   if (fail && lastError) {
     progress("분류를 멈췄어요", ok, list.length, lastError);
   } else {
-    progress(`완료! ${ok}장 분류했어요`, list.length, list.length);
+    progress(`완료! ${ok}장 분류했어요`, list.length, list.length, saved ? `연속 사진 ${saved}장은 함께 처리해서 시간을 줄였어요` : "");
     setTimeout(() => $("#progress").classList.add("hidden"), 4000);
   }
   await render();
