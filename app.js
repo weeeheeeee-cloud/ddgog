@@ -185,6 +185,8 @@ $("#today").addEventListener("click", () => setDay(kstToday()));
 $$(".tabs button").forEach((b) => b.addEventListener("click", () => { state.tab = b.dataset.tab; render(); }));
 
 async function render() {
+  // 왼쪽 명단 칸은 명단 탭에서만
+  document.querySelector(".layout")?.classList.toggle("with-side", state.tab === "roster");
   $$(".tabs button").forEach((b) => b.classList.toggle("on", b.dataset.tab === state.tab));
   $$(".tab").forEach((s) => s.classList.toggle("hidden", s.id !== "tab-" + state.tab));
   await Promise.all([loadDogs(), loadAttendance()]);
@@ -825,10 +827,7 @@ async function renderSide() {
     (autos.length ? `<p class="side-sec">이름 없는 그룹 ${autos.length}</p>` + autos.map(row).join("") : "");
   $$("[data-side]", $("#side-list")).forEach((b) => b.addEventListener("click", async () => {
     const id = b.dataset.side;
-    if (state.tab === "photos" && document.querySelector(`[data-list="${id}"]`)) {
-      document.querySelector(`[data-list="${id}"]`).scrollIntoView({ behavior: "smooth", block: "start" });
-    } else {
-      if (state.tab !== "roster") { state.tab = "roster"; await render(); }
+    {
       const card = document.querySelector(`.dog-card[data-id="${id}"]`);
       card?.scrollIntoView({ behavior: "smooth", block: "center" });
       card?.classList.add("flash");
