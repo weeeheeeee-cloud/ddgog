@@ -2015,7 +2015,8 @@ async function backfillFingerprints(manual = false) {
     const since = shiftDay(kstToday(), -60);
     const { data: refs } = await sb.from("dog_refs").select("id, path").is("vec", null).limit(5000);
     const { data: photos } = await sb.from("photos").select("id, thumb_path, rotation").is("vec", null).gte("day", since).limit(5000);
-    const todo = [...(photos || []).map((p) => ({ kind: "p", ...p })), ...(refs || []).map((r) => ({ kind: "r", ...r }))];
+    const { data: les } = await sb.from("lessons").select("id, path").is("vec", null).limit(2000);
+    const todo = [...(les || []).map((l) => ({ kind: "l", ...l })), ...(photos || []).map((p) => ({ kind: "p", ...p })), ...(refs || []).map((r) => ({ kind: "r", ...r }))];
     fpJob.total = todo.length; fpJob.done = 0;
     if (!todo.length) { msg("모든 사진에 지문이 있어요 ✓"); return; }
     for (const it of todo) {
@@ -2024,7 +2025,7 @@ async function backfillFingerprints(manual = false) {
         const { data: blob } = await sb.storage.from(it.kind === "p" ? "photos" : "refs").download(it.kind === "p" ? it.thumb_path : it.path);
         if (blob) {
           const v = await fingerprint(blob);
-          if (v) await sb.from(it.kind === "p" ? "photos" : "dog_refs").update({ vec: v }).eq("id", it.id);
+          if (v) await sb.from({ p: "photos", r: "dog_refs", l: "lessons" }[it.kind]).update({ vec: v }).eq("id", it.id);
         }
       } catch (e) { console.warn(e); }
       fpJob.done++;
