@@ -422,3 +422,12 @@ img.rot270 { transform: rotate(270deg); }
 .live-bar.receiving .dot{animation:livepulse 1s infinite}
 @keyframes livepulse{0%{box-shadow:0 0 0 0 rgba(74,222,128,.7)}100%{box-shadow:0 0 0 10px rgba(74,222,128,0)}}
 .live-bar button{background:none;border:0;color:#fff;font-size:18px;cursor:pointer;opacity:.7}
+
+.side-row .cnt{position:relative;display:inline-block}
+.side-row .cnt.bump{animation:cntpop .9s ease-out;color:#e11d48}
+@keyframes cntpop{0%{transform:scale(1)}25%{transform:scale(1.6)}50%{transform:scale(.92)}75%{transform:scale(1.12)}100%{transform:scale(1)}}
+.side-row .cnt .plus{position:absolute;right:-2px;top:-14px;font-style:normal;font-size:11px;font-weight:800;color:#16a34a;
+  animation:plusup 2.4s ease-out forwards;pointer-events:none}
+@keyframes plusup{0%{opacity:0;transform:translateY(6px)}15%{opacity:1;transform:translateY(0)}80%{opacity:1}100%{opacity:0;transform:translateY(-8px)}}
+.side-item:has(.cnt.bump) .side-row{animation:rowflash 1.6s ease-out}
+@keyframes rowflash{0%{background:#fff4b3}100%{background:transparent}}

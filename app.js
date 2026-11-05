@@ -1444,6 +1444,9 @@ async function addNameToToday(name, hotel) {
   await render();
 }
 
+// 왼쪽 명단 장수: 늘어난 아이는 숫자가 톡 튀고 +N 표시
+const sideCounts = new Map();
+let sideCountsDay = null;
 async function renderSide() {
   const layout = document.querySelector(".layout");
   const ref = await signed("refs", state.dogs.map((d) => d.ref_path));
@@ -1473,15 +1476,21 @@ async function renderSide() {
     const row = (d) => {
       const n = count.get(d.id) || 0;
       const inToday = state.attendance.has(d.id);
+      const prev = sideCounts.get(d.id);
+      const up = prev !== undefined && n > prev ? n - prev : 0;
       return `<div class="side-item"><button class="side-row ${n ? "" : "zero"}" data-side="${d.id}" title="${esc(d.name)}">
         ${d.ref_path ? `<img src="${ref(d.ref_path)}" alt="">` : `<span class="noimg">?</span>`}
         <span class="nm">${state.hotel.has(d.id) ? `<b class="tag-h">H</b>` : ""}${esc(d.name)}</span>
-        <b class="cnt">${n}<small>장</small></b>
+        <b class="cnt ${up ? "bump" : ""}">${n}<small>장</small>${up ? `<i class="plus">+${up}</i>` : ""}</b>
       </button>${inToday ? `<button class="side-x" data-unroll="${d.id}" title="오늘 명단에서 빼기">×</button>` : ""}</div>`;
     };
-    $("#side-list").innerHTML = today.map(row).join("") +
+    const keyDay = state.day;
+    if (sideCountsDay !== keyDay) { sideCounts.clear(); sideCountsDay = keyDay; }
+    const html = today.map(row).join("") +
       (extra.length ? `<p class="side-sec">명단 밖 ${extra.length}</p>` + extra.map(row).join("") : "") +
       `<form id="side-add" class="side-add"><input id="side-add-name" placeholder="이름 추가 (호텔링은 H 이름)"><button class="btn ghost sm">추가</button></form>`;
+    $("#side-list").innerHTML = html;
+    [...today, ...extra].forEach((d) => sideCounts.set(d.id, count.get(d.id) || 0));
     $$("[data-unroll]", $("#side-list")).forEach((b) => b.addEventListener("click", () => removeFromToday(dogById(b.dataset.unroll))));
     $("#side-add").addEventListener("submit", async (e) => {
       e.preventDefault();
