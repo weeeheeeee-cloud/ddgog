@@ -2045,7 +2045,7 @@ $("#reset-all").addEventListener("click", async () => {
 
 /* ================= 새 버전 알림 ================= */
 // 화면 파일이 바뀌면(제가 수정해서 올리면) 위에 알림 띄우기
-async function fingerprint() {
+async function siteVersion() {
   const t = Date.now();
   const parts = await Promise.all(["app.js", "style.css", "shell.html", "index.html"].map((f) =>
     fetch(`./${f}?check=${t}`, { cache: "no-store" }).then((r) => (r.ok ? r.text() : "")).catch(() => "")));
@@ -2057,7 +2057,7 @@ async function fingerprint() {
 }
 let baseFp = null;
 async function checkUpdate() {
-  const fp = await fingerprint();
+  const fp = await siteVersion();
   if (fp === null) return;
   if (baseFp === null) { baseFp = fp; return; }
   if (fp !== baseFp) $("#update-bar").classList.remove("hidden");
