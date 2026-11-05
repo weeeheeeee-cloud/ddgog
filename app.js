@@ -10,6 +10,7 @@ const state = {
   tab: "photos",
   dogs: [],
   photos: [],
+  expanded: new Set(), // 비슷한 사진을 펼쳐 둔 아이
   attendance: new Set(), // 오늘 출석한 강아지 id (assignments 테이블에 저장)
   draft: null,           // 출석 보드에서 읽은 명단 (확정 전) { names, unsure, img }
   busy: false, // 업로드·분류 진행 중
@@ -34,6 +35,108 @@ function toast(msg) {
   toastTimer = setTimeout(() => t.classList.add("hidden"), 2600);
 }
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+
+/* ---------- 비슷한 사진 판별: 이미지 지문(dHash)·선명도·촬영 시각 ---------- */
+const SIM_DIST = 22;               // 지문 차이가 이 값 이하면 같은 장면 (실측: 연속 촬영 9~19, 다른 장면 31+)
+const SIM_GAP = 3 * 60 * 1000;     // 3분 안에 찍힌 것끼리만 묶음
+const SIM_KEEP = 3;                // 비슷한 사진 묶음마다 아이별로 보여줄 장수
+async function imageStats(blob) {
+  const bmp = await createImageBitmap(blob);
+  const c = document.createElement("canvas");
+  const g = c.getContext("2d", { willReadFrequently: true });
+  // dHash 9x8: 먼저 72x64로 줄인 뒤 8x8 칸씩 평균 (바로 9x8로 줄이면 깨져서 비교가 부정확)
+  c.width = 72; c.height = 64;
+  g.imageSmoothingEnabled = true;
+  g.imageSmoothingQuality = "high";
+  g.drawImage(bmp, 0, 0, 72, 64);
+  const d = g.getImageData(0, 0, 72, 64).data;
+  const cell = new Float32Array(72);
+  for (let y = 0; y < 64; y++) for (let x = 0; x < 72; x++) {
+    const i = (y * 72 + x) * 4;
+    cell[(y >> 3) * 9 + (x >> 3)] += d[i] * 0.299 + d[i + 1] * 0.587 + d[i + 2] * 0.114;
+  }
+  let hex = "", nib = 0, bits = 0;
+  for (let y = 0; y < 8; y++) for (let x = 0; x < 8; x++) {
+    nib = (nib << 1) | (cell[y * 9 + x + 1] > cell[y * 9 + x] ? 1 : 0);
+    if (++bits % 4 === 0) { hex += nib.toString(16); nib = 0; }
+  }
+  // 선명도: 256px 회색조 라플라시안 분산
+  const sc = Math.min(1, 256 / Math.max(bmp.width, bmp.height));
+  const w = Math.max(3, Math.round(bmp.width * sc)), h = Math.max(3, Math.round(bmp.height * sc));
+  c.width = w; c.height = h;
+  g.drawImage(bmp, 0, 0, w, h);
+  bmp.close?.();
+  const p = g.getImageData(0, 0, w, h).data;
+  const G = new Float32Array(w * h);
+  for (let i = 0; i < w * h; i++) G[i] = p[i * 4] * 0.299 + p[i * 4 + 1] * 0.587 + p[i * 4 + 2] * 0.114;
+  let sum = 0, sum2 = 0, n = 0;
+  for (let y = 1; y < h - 1; y++) for (let x = 1; x < w - 1; x++) {
+    const i = y * w + x;
+    const L = 4 * G[i] - G[i - 1] - G[i + 1] - G[i - w] - G[i + w];
+    sum += L; sum2 += L * L; n++;
+  }
+  return { phash: hex, sharp: n ? sum2 / n - (sum / n) ** 2 : 0 };
+}
+function hamming(a, b) {
+  if (!a || !b || a.length !== b.length) return 99;
+  let d = 0;
+  for (let i = 0; i < a.length; i++) {
+    let x = parseInt(a[i], 16) ^ parseInt(b[i], 16);
+    while (x) { d += x & 1; x >>= 1; }
+  }
+  return d;
+}
+// 사진 원본에서 촬영 시각(EXIF DateTimeOriginal) 읽기, 한국 시간 기준
+async function exifTime(file) {
+  try {
+    const buf = new DataView(await file.slice(0, 256 * 1024).arrayBuffer());
+    if (buf.getUint16(0) !== 0xffd8) return null;
+    let off = 2;
+    while (off < buf.byteLength - 4) {
+      const marker = buf.getUint16(off), len = buf.getUint16(off + 2);
+      if (marker === 0xffe1 && buf.getUint32(off + 4) === 0x45786966) {
+        const t = off + 10, le = buf.getUint16(t) === 0x4949;
+        const u16 = (o) => buf.getUint16(t + o, le), u32 = (o) => buf.getUint32(t + o, le);
+        const readTag = (ifd, tag) => {
+          const n = u16(ifd);
+          for (let i = 0; i < n; i++) {
+            const e = ifd + 2 + i * 12;
+            if (u16(e) === tag) return { count: u32(e + 4), val: u32(e + 8) };
+          }
+          return null;
+        };
+        const exif = readTag(u32(4), 0x8769);
+        const dt = exif && readTag(exif.val, 0x9003);
+        if (!dt) return null;
+        let str = "";
+        for (let i = 0; i < 19; i++) str += String.fromCharCode(buf.getUint8(t + dt.val + i));
+        const m = str.match(/(\d{4}):(\d{2}):(\d{2}) (\d{2}):(\d{2}):(\d{2})/);
+        return m ? `${m[1]}-${m[2]}-${m[3]}T${m[4]}:${m[5]}:${m[6]}+09:00` : null;
+      }
+      if ((marker & 0xff00) !== 0xff00) break;
+      off += 2 + len;
+    }
+  } catch { /* 못 읽으면 없음 */ }
+  return null;
+}
+// 한 아이의 사진들을 비슷한 장면끼리 묶어, 묶음마다 가장 선명한 3장만 보여줌
+function splitSimilar(list) {
+  const t = (p) => new Date(p.taken_at || p.created_at).getTime();
+  const sorted = [...list].sort((a, b) => t(a) - t(b));
+  const clusters = [];
+  for (const p of sorted) {
+    let home = null;
+    for (let k = clusters.length - 1; k >= Math.max(0, clusters.length - 4) && !home; k--) {
+      if (clusters[k].some((q) => p.phash && q.phash && hamming(p.phash, q.phash) <= SIM_DIST && Math.abs(t(p) - t(q)) <= SIM_GAP)) home = clusters[k];
+    }
+    if (home) home.push(p); else clusters.push([p]);
+  }
+  const keep = new Set();
+  for (const c of clusters) {
+    [...c].sort((a, b) => (b.sharp || 0) - (a.sharp || 0)).slice(0, SIM_KEEP).forEach((p) => keep.add(p.id));
+  }
+  return { shown: sorted.filter((p) => keep.has(p.id)), extra: sorted.filter((p) => !keep.has(p.id)) };
+}
 
 async function resize(file, maxSide, quality) {
   let bmp;
@@ -163,12 +266,33 @@ async function loadPhotos() {
   const all = [];
   for (let from = 0; ; from += 1000) {
     const { data } = await sb.from("photos")
-      .select("id, path, thumb_path, dog_ids, status, ai_note, created_at")
+      .select("id, path, thumb_path, dog_ids, status, ai_note, created_at, taken_at, phash, sharp")
       .eq("day", state.day).order("created_at").range(from, from + 999);
     all.push(...(data || []));
     if (!data || data.length < 1000) break;
   }
   state.photos = all;
+  backfillStats();
+}
+
+// 지문이 없는 예전 사진은 썸네일로 계산해서 채워 둠 (한 번만)
+let backfilling = false;
+async function backfillStats() {
+  const need = state.photos.filter((p) => !p.phash);
+  if (backfilling || !need.length) return;
+  backfilling = true;
+  try {
+    const url = await signed("photos", need.map((p) => p.thumb_path));
+    await pool(need, 4, async (p) => {
+      try {
+        const blob = await fetch(url(p.thumb_path)).then((r) => r.blob());
+        const st = await imageStats(blob);
+        await sb.from("photos").update(st).eq("id", p.id);
+        Object.assign(p, st);
+      } catch { /* 다음에 다시 */ }
+    });
+  } finally { backfilling = false; }
+  if (state.tab === "photos") renderPhotos();
 }
 
 /* ================= 날짜·탭 ================= */
@@ -219,6 +343,9 @@ async function renderPhotos() {
     groups.get(d).push(p);
   }));
   const dogIds = [...groups.keys()].sort((a, b) => dogOrder(dogById(a), dogById(b)));
+  // 비슷한 사진은 3장까지만 보이고 저장 (펼치면 전부)
+  const sets = new Map(dogIds.map((id) => [id, splitSimilar(groups.get(id))]));
+  const visible = (id) => (state.expanded.has(id) ? [...sets.get(id).shown, ...sets.get(id).extra] : sets.get(id).shown);
 
   const box = $("#groups");
   if (!P.length) {
@@ -232,17 +359,20 @@ async function renderPhotos() {
 
   box.innerHTML = dogIds.map((id) => {
     const dog = dogById(id);
-    const list = groups.get(id);
+    const { shown, extra } = sets.get(id);
+    const open = state.expanded.has(id);
     return `<div class="dog-group" data-list="${id}">
       <div class="dog-head">
         ${dog.ref_path ? `<img class="avatar" src="${ref(dog.ref_path)}" alt="">` : `<span class="avatar"></span>`}
         <div class="grow">
           <button class="dog-name ${dog.auto ? "unnamed" : ""}" data-rename="${id}">${esc(dog.name)} <span>✎</span></button>
-          <small class="muted">${list.length}장</small>
+          <small class="muted">${shown.length}장${extra.length ? ` · 비슷한 사진 ${extra.length}장 ${open ? "펼침" : "접힘"}` : ""}</small>
         </div>
         <div class="save-btns">${saveButtons(id)}</div>
       </div>
-      <div class="grid">${list.map(img).join("")}</div>
+      <div class="grid">${shown.map(img).join("")}</div>
+      ${extra.length ? `<button class="more-sim" data-expand="${id}">${open ? "비슷한 사진 접기 ▲" : `비슷한 사진 ${extra.length}장 더 보기 ▼`}</button>
+        ${open ? `<div class="grid extra">${extra.map(img).join("")}</div>` : ""}` : ""}
     </div>`;
   }).join("") +
   (unsorted.length ? `<div class="dog-group unsorted" data-list="unsorted">
@@ -254,7 +384,12 @@ async function renderPhotos() {
   (!dogIds.length && !unsorted.length ? `<div class="empty">분류를 기다리는 사진이 있어요.</div>` : "");
 
   // 사진 넘겨보기용: 그룹별 사진 순서
-  const lists = new Map(dogIds.map((id) => [id, groups.get(id).map((p) => p.id)]));
+  const lists = new Map(dogIds.map((id) => [id, visible(id).map((p) => p.id)]));
+  $$("[data-expand]", box).forEach((b) => b.addEventListener("click", () => {
+    const id = b.dataset.expand;
+    state.expanded.has(id) ? state.expanded.delete(id) : state.expanded.add(id);
+    renderPhotos();
+  }));
   lists.set("unsorted", unsorted.map((p) => p.id));
   $$("[data-photo]", box).forEach((el) => el.addEventListener("click", () => {
     const key = el.closest("[data-list]")?.dataset.list;
@@ -272,7 +407,7 @@ async function renderPhotos() {
     if (await renameDog(dogById(b.dataset.rename))) renderPhotos();
   }));
   $$("[data-save]", box).forEach((b) => b.addEventListener("click", () =>
-    saveDogPhotos(dogById(b.dataset.save), groups.get(b.dataset.save), b, b.dataset.mode)));
+    saveDogPhotos(dogById(b.dataset.save), visible(b.dataset.save), b, b.dataset.mode)));
 }
 
 async function renameDog(dog) {
@@ -507,7 +642,8 @@ $("#file").addEventListener("change", async (e) => {
   await pool(files, 3, async (file) => {
     try {
       const id = crypto.randomUUID();
-      const [full, small] = await Promise.all([resize(file, 1600, 0.85), resize(file, 640, 0.8)]);
+      const [full, small, taken] = await Promise.all([resize(file, 1600, 0.85), resize(file, 640, 0.8), exifTime(file)]);
+      const st = await imageStats(small).catch(() => ({}));
       const path = `${day}/${id}.jpg`, thumbPath = `${day}/thumb/${id}.jpg`;
       const opt = { contentType: "image/jpeg", upsert: false };
       const [a, b] = await Promise.all([
@@ -515,7 +651,7 @@ $("#file").addEventListener("change", async (e) => {
         sb.storage.from("photos").upload(thumbPath, small, opt),
       ]);
       if (a.error || b.error) throw a.error || b.error;
-      const ins = await sb.from("photos").insert({ id, day, path, thumb_path: thumbPath });
+      const ins = await sb.from("photos").insert({ id, day, path, thumb_path: thumbPath, taken_at: taken, ...st });
       if (ins.error) throw ins.error;
     } catch (err) {
       console.error(err);
@@ -781,6 +917,10 @@ async function saveAll(btn) {
     if (!groups.has(d)) groups.set(d, []);
     groups.get(d).push(p);
   }));
+  for (const [id, list] of groups) {
+    const { shown, extra } = splitSimilar(list);
+    groups.set(id, state.expanded.has(id) ? [...shown, ...extra] : shown);
+  }
   const label = btn.textContent;
   btn.disabled = true;
   try {
@@ -819,12 +959,14 @@ async function renderSide() {
     layout?.classList.toggle("with-side", today.length > 0);
     if (!today.length) return;
     const count = new Map();
+    const per = new Map();
     let done = 0, unsorted = 0, pending = 0;
     state.photos.forEach((p) => {
-      if (p.status === "done") { done++; p.dog_ids.forEach((d) => count.set(d, (count.get(d) || 0) + 1)); }
+      if (p.status === "done") { done++; p.dog_ids.forEach((d) => { if (!per.has(d)) per.set(d, []); per.get(d).push(p); }); }
       else if (p.status === "pending") pending++;
       else unsorted++;
     });
+    for (const [d, list] of per) count.set(d, splitSimilar(list).shown.length); // 비슷한 사진 정리 후 장수
     const zero = today.filter((d) => !count.get(d.id)).length;
     // 명단 밖인데 사진이 분류된 아이 (자동 그룹 등)
     const extra = [...count.keys()].filter((id) => !state.attendance.has(id) && dogById(id)).map(dogById).sort(dogOrder);

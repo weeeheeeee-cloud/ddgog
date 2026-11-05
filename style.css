@@ -341,3 +341,8 @@ h3.sec small { display: block; font-weight: 400; font-size: 12px; margin-top: 2p
 .dog-card .tips b { color: var(--navy); margin-right: 2px; }
 .dog-card .tips .tips-ai { color: var(--muted); }
 .dog-card .tips i { font-style: normal; font-size: 11px; }
+
+/* 비슷한 사진 접기 */
+.more-sim { display: block; width: 100%; margin-top: 8px; padding: 7px; border: 1px dashed var(--line); background: var(--bg); border-radius: 10px; font: inherit; font-size: 13px; color: var(--muted); cursor: pointer; }
+.more-sim:hover { color: var(--navy); border-color: var(--navy); }
+.grid.extra { margin-top: 6px; opacity: .55; }
