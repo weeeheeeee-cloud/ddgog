@@ -45,9 +45,12 @@ The photos are sent to each dog's owner, so decide which dogs this photo should 
 In the reply, "MAIN dogs" means exactly these dogs that are properly shown.
 
 Reply with JSON only, no other text:
-{"dogs":[<reference numbers of MAIN dogs>],"new_dog":true|false,"unknown_main":<number>,"confidence":"high"|"low","rotate":0|90|180|270,"note":"<한국어 30자 이내: 판단 근거>"}
+{"dogs":[<reference numbers of MAIN dogs>],"sure":[<numbers from "dogs" you are confident about>],"new_dog":true|false,"unknown_main":<number>,"confidence":"high"|"low","rotate":0|90|180|270,"note":"<한국어 30자 이내: 판단 근거>"}
 Keep "note" very short (under 30 Korean characters).
-- "dogs": ALL known dogs properly shown in the new photo (one or several; [] if none).
+- "dogs": ALL known dogs properly shown in the new photo (one or several; [] if none). Include your best
+  guess for each properly shown dog even when unsure; list in "sure" only those you are confident about.
+  Judge each dog separately: an unknown or unclear second dog does NOT make you unsure about a dog you
+  clearly recognize. Only today's attendees are listed, so pick the best fit among them.
 - "unknown_main": how many properly shown dogs match none of the known dogs.
 - "new_dog": true if the photo has exactly one MAIN dog and you are fairly sure it is none of the
   known dogs (e.g. clearly different coat color, size or breed type), even if its face is hidden.
@@ -242,7 +245,15 @@ Deno.serve(async (req) => {
     let ids = [...new Set(nums.filter((n) => n >= 1 && n <= refs.length).map((n) => refs[n - 1].id))];
     // 주인공 중 모르는 아이가 섞여 있으면 사람이 확인하도록
     const unknownMain = Number(parsed.unknown_main) || 0;
-    let status = parsed.confidence === "high" && ids.length > 0 && unknownMain === 0 ? "done" : "review";
+    // 아이별로 판단: 확신한 아이가 다 맞으면 끝. 다른 아이가 애매해도 확신한 아이 사진은 보냄
+    const sureNums: number[] = Array.isArray(parsed.sure) ? parsed.sure.map(Number) : (parsed.confidence === "high" ? nums : []);
+    const sureIds = new Set(sureNums.filter((n) => n >= 1 && n <= refs.length).map((n) => refs[n - 1].id));
+    let status = "review";
+    if (ids.length && ids.every((id) => sureIds.has(id))) status = "done";
+    else if (sureIds.size > 0) {
+      ids = ids.filter((id) => sureIds.has(id)); // 확신한 아이만 보내고, 애매한 아이는 빼 둠
+      status = "done";
+    }
 
     // 처음 보는 강아지 → 새 그룹 자동 생성 (이 사진을 기준 사진으로)
     if (!ids.length && parsed.new_dog === true && unknownMain <= 1) {
