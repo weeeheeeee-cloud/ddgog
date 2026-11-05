@@ -1459,6 +1459,58 @@ async function renderSide() {
 }
 $("#side-toggle").addEventListener("click", () => $("#side").classList.toggle("open"));
 
+// 잘못 학습된 내용 정정: AI 구분 포인트·부위별 특징 고치기, 실수 기록 지우기, 학습 초기화
+async function openFix(dog, box) {
+  if (!box.classList.contains("hidden")) { box.classList.add("hidden"); return; }
+  box.classList.remove("hidden");
+  box.innerHTML = `<p class="muted small">불러오는 중…</p>`;
+  const { data: les } = await sb.from("lessons").select("id, wrong_dog, right_dog, path, note, created_at")
+    .or(`wrong_dog.eq.${dog.id},right_dog.eq.${dog.id}`).order("created_at", { ascending: false }).limit(60);
+  const url = await signed("refs", (les || []).map((l) => l.path));
+  const nm = (id) => (id ? dogById(id)?.name || "(다른 아이)" : "모름");
+  const learnedRefs = (dog.dog_refs || []).filter((r) => r.path.includes("-learn-"));
+  box.innerHTML = `
+    <label class="fix-l">🔍 AI가 정리한 구분 포인트 <small class="muted">(틀린 내용은 고치거나 지우세요)</small></label>
+    <textarea data-f="tips_ai" rows="2">${esc(dog.tips_ai || "")}</textarea>
+    <label class="fix-l">🐾 부위별 특징</label>
+    <textarea data-f="features" rows="6">${esc(dog.features || "")}</textarea>
+    <div class="row"><button class="btn primary mini" data-fix-save>저장</button></div>
+    <label class="fix-l">📝 실수 기록 ${les?.length || 0}개 <small class="muted">AI가 "이 사진은 A가 아니라 B"로 기억한 것. 기록 자체가 틀렸으면 ×로 지우세요</small></label>
+    <div class="lesson-list">${(les || []).map((l) => `<div class="lesson"><img src="${url(l.path)}" alt="">
+      <span><b>${esc(nm(l.wrong_dog))}</b> 아님 → <b>${esc(nm(l.right_dog))}</b>${l.note ? `<br><small>${esc(l.note)}</small>` : ""}</span>
+      <b class="x" data-del-lesson="${l.id}" title="이 기록 지우기">×</b></div>`).join("") || `<span class="muted small">없음</span>`}</div>
+    <p class="small" style="margin-top:8px">분류하면서 배운 사진 ${learnedRefs.length}장은 위 대표 사진 줄에 <i class="lb">학습</i>으로 표시돼 있어요. 다른 아이 사진이면 ×로 빼 주세요.</p>
+    <button class="btn ghost mini danger" data-fix-reset>이 아이 학습 초기화</button>
+    <small class="muted"> (배운 사진·실수 기록·AI 구분 포인트를 지우고, 다이얼독 대표 사진과 직원이 쓴 구분 포인트만 남김)</small>`;
+  $("[data-fix-save]", box).addEventListener("click", async () => {
+    const upd = {};
+    $$("textarea[data-f]", box).forEach((t) => { upd[t.dataset.f] = t.value.trim() || null; });
+    const { error } = await sb.from("dogs").update(upd).eq("id", dog.id);
+    if (error) { toast("저장하지 못했어요"); return; }
+    Object.assign(dog, upd);
+    toast("고쳤어요. 다음 분류부터 반영돼요");
+  });
+  $$("[data-del-lesson]", box).forEach((x) => x.addEventListener("click", async () => {
+    const l = les.find((y) => y.id === x.dataset.delLesson);
+    await sb.from("lessons").delete().eq("id", l.id);
+    await sb.storage.from("refs").remove([l.path]);
+    x.closest(".lesson").remove();
+    toast("실수 기록을 지웠어요");
+  }));
+  $("[data-fix-reset]", box).addEventListener("click", async () => {
+    if (!confirm(`${dog.name}의 학습 내용(배운 사진 ${learnedRefs.length}장, 실수 기록 ${les?.length || 0}개, AI 구분 포인트)을 지울까요?`)) return;
+    for (const r of learnedRefs) await removeRef(dog, r);
+    if (les?.length) {
+      await sb.from("lessons").delete().in("id", les.map((l) => l.id));
+      await sb.storage.from("refs").remove(les.map((l) => l.path));
+    }
+    await sb.from("dogs").update({ tips_ai: null }).eq("id", dog.id);
+    dog.tips_ai = null;
+    toast(`${dog.name} 학습을 초기화했어요`);
+    renderRoster();
+  });
+}
+
 async function renderRoster() {
   renderSide();
   const q = norm($("#roster-search").value);
@@ -1484,15 +1536,17 @@ async function renderRoster() {
         </div>
         <div class="row-actions">
           <button class="btn ${d.auto ? "primary" : "ghost"} mini" data-edit>${d.auto ? "이름" : "수정"}</button>
+          ${d.auto ? "" : `<button class="btn ghost mini" data-fix>학습 정정</button>`}
           <button class="btn ghost mini" data-merge>합치기</button>
           <button class="btn ghost mini" data-toggle>${d.active ? "숨기기" : "표시"}</button>
         </div>
       </div>
       <div class="ref-strip">
-        ${refs.map((r) => `<span class="ref-thumb"><img src="${ref(r.path)}" alt="">${r.id ? `<b class="x" data-del-ref="${r.id}" title="이 사진 빼기">×</b>` : ""}</span>`).join("")}
+        ${refs.map((r) => `<span class="ref-thumb ${r.path.includes("-learn-") ? "learned" : ""}"><img src="${ref(r.path)}" alt="">${r.path.includes("-learn-") ? `<i class="lb">학습</i>` : ""}${r.id ? `<b class="x" data-del-ref="${r.id}" title="이 아이가 아니면 빼기">×</b>` : ""}</span>`).join("")}
         <button class="ref-add" data-add-ref>＋<small>사진</small></button>
       </div>
       <p class="ref-hint ${refs.length >= 3 ? "ok" : ""}">대표 사진 ${refs.length}장${refs.length < 3 ? " · 여러 각도로 많이 올릴수록 정확해요" : refs.length > 10 ? " ✓ (AI는 매번 이 중 최대 10장을 골고루 골라 참고해요)" : " ✓ 더 올려도 돼요"}</p>
+      <div class="fix-box hidden"></div>
       <div class="merge-box hidden">
         <span class="small">이 강아지를</span>
         <select>${state.dogs.filter((o) => o.id !== d.id).map((o) => `<option value="${o.id}">${esc(o.name)}</option>`).join("")}</select>
@@ -1527,8 +1581,26 @@ async function renderRoster() {
     const dog = dogById(row.dataset.id);
     $("[data-add-ref]", row).addEventListener("click", () => { refTarget = dog.id; $("#roster-file").click(); });
     $$("[data-del-ref]", row).forEach((x) => x.addEventListener("click", async () => {
-      if (!confirm("이 대표 사진을 뺄까요?")) return;
-      await removeRef(dog, dog.dog_refs.find((r) => r.id === x.dataset.delRef));
+      const r = dog.dog_refs.find((y) => y.id === x.dataset.delRef);
+      const v = prompt(`${dog.name}에서 이 사진을 뺄게요.\n다른 아이 사진이면 그 아이 이름을 써 주세요 (그 아이 대표 사진으로 옮겨요).\n그냥 빼려면 비워 두고 확인`, "");
+      if (v === null) return;
+      if (v.trim()) {
+        const m = matchDog(v.trim(), null);
+        const to = m.dog || (m.choices && m.choices[(+prompt(m.choices.map((c, i) => `${i + 1}. ${c.name}`).join("\n"), "1") || 1) - 1]);
+        if (!to) { toast("그 이름을 명단에서 찾지 못했어요"); return; }
+        await sb.from("dog_refs").update({ dog_id: to.id }).eq("id", r.id);
+        dog.dog_refs = dog.dog_refs.filter((y) => y.id !== r.id);
+        to.dog_refs = [...(to.dog_refs || []), r];
+        if (dog.ref_path === r.path) {
+          const next = dog.dog_refs[0]?.path || null;
+          await sb.from("dogs").update({ ref_path: next }).eq("id", dog.id);
+          dog.ref_path = next;
+        }
+        if (!to.ref_path) { await sb.from("dogs").update({ ref_path: r.path }).eq("id", to.id); to.ref_path = r.path; }
+        toast(`${to.name}(으)로 옮겼어요`);
+      } else {
+        await removeRef(dog, r);
+      }
       renderRoster();
     }));
     $("[data-edit]", row).addEventListener("click", async () => {
@@ -1544,6 +1616,7 @@ async function renderRoster() {
       state.dogs.sort(dogOrder);
       renderRoster();
     });
+    $("[data-fix]", row)?.addEventListener("click", () => openFix(dog, $(".fix-box", row)));
     $("[data-toggle]", row).addEventListener("click", async () => {
       await sb.from("dogs").update({ active: !dog.active }).eq("id", dog.id);
       dog.active = !dog.active;

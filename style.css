@@ -395,3 +395,17 @@ img.rot270 { transform: rotate(270deg); }
 .side-add{display:flex;gap:6px;padding:10px 4px 4px}
 .side-add input{flex:1;min-width:0;padding:6px 10px;border:1px solid #ddd;border-radius:999px;font:inherit;font-size:13px}
 .side-row .nm .tag-h{margin-right:4px}
+
+.fix-box{margin-top:10px;padding:10px 12px;border:1px dashed #ccc;border-radius:10px;background:#fafafa}
+.fix-box textarea{width:100%;box-sizing:border-box;font:inherit;font-size:13px;padding:6px 8px;border:1px solid #ddd;border-radius:8px;margin:4px 0 8px}
+.fix-l{display:block;font-weight:700;font-size:13px;margin-top:6px}
+.lesson-list{display:flex;flex-direction:column;gap:6px;margin-top:4px}
+.lesson{display:flex;align-items:center;gap:8px;font-size:13px;background:#fff;border:1px solid #eee;border-radius:8px;padding:4px}
+.lesson img{width:48px;height:48px;object-fit:cover;border-radius:6px}
+.lesson span{flex:1}
+.lesson .x{cursor:pointer;color:#c33;padding:0 6px}
+.ref-thumb{position:relative}
+.ref-thumb.learned img{outline:2px solid #3b82f6;outline-offset:-2px}
+.ref-thumb .lb,.fix-box .lb{font-style:normal;font-size:10px;background:#3b82f6;color:#fff;border-radius:4px;padding:0 4px}
+.ref-thumb .lb{position:absolute;left:2px;bottom:2px}
+.btn.danger{color:#c33;border-color:#e5b4b4}
