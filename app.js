@@ -1094,10 +1094,12 @@ $("#sheet-save").addEventListener("click", async () => {
   await sb.from("photos").update({ dog_ids: ids, status: "done", confidence: "manual" }).eq("id", sheetPhoto.id);
   learnFrom(sheetPhoto, ids, before);
   // AI가 잘못 넣었던 아이 → 실수로 기억하고 두 아이 구분 포인트를 스스로 다시 정리
-  if (before.conf !== "manual") {
+  // 직원이 손으로 고친 부분은 매번 학습: 잘못 넣은 아이(A→B 정정)와 AI가 못 알아본 아이(직접 추가) 모두
+  {
     const wrong = before.ids.filter((id) => !ids.includes(id) && !dogById(id)?.auto);
-    const added = ids.filter((id) => !before.ids.includes(id));
-    wrong.forEach((w) => learnMistake(sheetPhoto.id, w, added.length === 1 ? added[0] : null));
+    const added = ids.filter((id) => !before.ids.includes(id) && !dogById(id)?.auto);
+    if (wrong.length) wrong.forEach((w, i) => learnMistake(sheetPhoto.id, w, added.length === 1 ? added[0] : (added[i] || null)));
+    added.filter((a, i) => !(wrong.length && (added.length === 1 || i < wrong.length))).forEach((a) => learnMistake(sheetPhoto.id, null, a));
   }
   sheetPhoto.confidence = "manual";
   // 명단에 없던 아이를 직접 골랐으면 오늘 명단에 넣어서 AI도 그 아이를 후보로 보게 함

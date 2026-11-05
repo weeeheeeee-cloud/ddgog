@@ -199,7 +199,7 @@ Deno.serve(async (req) => {
       const ids = refs.map((d) => d.id);
       const { data: les } = await supa.from("lessons").select("wrong_dog, right_dog, path, note")
         .or(`wrong_dog.in.(${ids.join(",")}),right_dog.in.(${ids.join(",")})`)
-        .order("created_at", { ascending: false }).limit(10);
+        .order("created_at", { ascending: false }).limit(16);
       const usable = (les ?? []).filter((l) => idx.has(l.wrong_dog) || idx.has(l.right_dog));
       if (usable.length) {
         await Promise.all(usable.filter((l) => !refCache.has(l.path)).map(async (l) => {
@@ -214,7 +214,10 @@ Deno.serve(async (req) => {
         for (const l of usable) {
           const b64 = refCache.get(l.path);
           if (!b64) continue;
-          content.push({ type: "text", text: `Was wrongly matched to ${nm(l.wrong_dog)}; it is actually ${nm(l.right_dog)}.${l.note ? ` ${l.note}` : ""}` });
+          const what = l.wrong_dog
+            ? `Was wrongly matched to ${nm(l.wrong_dog)}; it is actually ${nm(l.right_dog)}.`
+            : `Was missed before: this photo shows ${nm(l.right_dog)}.`;
+          content.push({ type: "text", text: `${what}${l.note ? ` ${l.note}` : ""}` });
           content.push({ type: "image", source: { type: "base64", media_type: "image/jpeg", data: b64 } });
         }
       }
