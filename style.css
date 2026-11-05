@@ -346,3 +346,10 @@ h3.sec small { display: block; font-weight: 400; font-size: 12px; margin-top: 2p
 .more-sim { display: block; width: 100%; margin-top: 8px; padding: 7px; border: 1px dashed var(--line); background: var(--bg); border-radius: 10px; font: inherit; font-size: 13px; color: var(--muted); cursor: pointer; }
 .more-sim:hover { color: var(--navy); border-color: var(--navy); }
 .grid.extra { margin-top: 6px; opacity: .55; }
+
+/* 사진 방향 (AI가 판단, 직접 돌리기 가능) */
+img.rot90 { transform: rotate(90deg); }
+img.rot180 { transform: rotate(180deg); }
+img.rot270 { transform: rotate(270deg); }
+.sheet-view { overflow: hidden; border-radius: 12px; background: #111; }
+.rot-btn { position: absolute; left: 8px; top: 8px; width: 40px; height: 40px; border-radius: 50%; border: 0; background: rgba(0,0,0,.55); color: #fff; font-size: 22px; cursor: pointer; }

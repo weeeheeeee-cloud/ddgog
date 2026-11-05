@@ -266,7 +266,7 @@ async function loadPhotos() {
   const all = [];
   for (let from = 0; ; from += 1000) {
     const { data } = await sb.from("photos")
-      .select("id, path, thumb_path, dog_ids, status, ai_note, created_at, taken_at, phash, sharp")
+      .select("id, path, thumb_path, dog_ids, status, ai_note, created_at, taken_at, phash, sharp, rotation")
       .eq("day", state.day).order("created_at").range(from, from + 999);
     all.push(...(data || []));
     if (!data || data.length < 1000) break;
@@ -355,7 +355,7 @@ async function renderPhotos() {
 
   const thumb = await signed("photos", P.map((p) => p.thumb_path));
   const ref = await signed("refs", dogIds.map((id) => dogById(id)?.ref_path));
-  const img = (p) => `<img loading="lazy" src="${thumb(p.thumb_path)}" data-photo="${p.id}" alt="">`;
+  const img = (p) => `<img loading="lazy" src="${thumb(p.thumb_path)}" data-photo="${p.id}" class="rot${p.rotation || 0}" alt="">`;
 
   box.innerHTML = dogIds.map((id) => {
     const dog = dogById(id);
@@ -722,7 +722,7 @@ async function openSheet(photoId, list = sheetList, key = sheetKey) {
   $("#sheet-prev").disabled = i <= 0;
   $("#sheet-next").disabled = i < 0 || i >= sheetList.length - 1;
   const url = await signed("photos", [p.path]);
-  $("#sheet-img").src = url(p.path);
+  await showSheetImage(p, url(p.path));
   $("#sheet-note").textContent = p.ai_note ? `AI 메모: ${p.ai_note}` : "";
   // 오늘 출석한 아이를 앞쪽에
   const chipDogs = state.dogs.filter((d) => d.active)
@@ -764,6 +764,37 @@ $("#sheet-img").addEventListener("touchend", (e) => {
   touchX = null;
   if (Math.abs(dx) > 50) stepSheet(dx < 0 ? 1 : -1);
 });
+// 크게 보기: 돌려야 하는 사진은 실제로 돌린 이미지를 보여줌 (가로·세로가 바뀌어도 화면에 맞게)
+let sheetObjUrl = null;
+async function showSheetImage(p, src) {
+  const el = $("#sheet-img");
+  if (sheetObjUrl) { URL.revokeObjectURL(sheetObjUrl); sheetObjUrl = null; }
+  el.className = "";
+  if (!p.rotation) { el.src = src; return; }
+  el.src = src;
+  el.className = `rot${p.rotation}`; // 불러오는 동안 임시로
+  try {
+    const blob = await rotated(await fetch(src).then((r) => r.blob()), p.rotation);
+    if (sheetPhoto !== p) return;
+    sheetObjUrl = URL.createObjectURL(blob);
+    el.className = "";
+    el.src = sheetObjUrl;
+  } catch { /* 임시 표시 유지 */ }
+}
+
+// AI가 방향을 잘못 잡았을 때 직접 돌리기 (시계 방향 90도씩)
+$("#sheet-rot").addEventListener("click", async () => {
+  const p = sheetPhoto;
+  if (!p) return;
+  p.rotation = ((p.rotation || 0) + 90) % 360;
+  const url = await signed("photos", [p.path]);
+  showSheetImage(p, url(p.path));
+  const { error } = await sb.from("photos").update({ rotation: p.rotation }).eq("id", p.id);
+  if (error) toast("저장하지 못했어요");
+  const t = document.querySelector(`[data-photo="${p.id}"]`);
+  if (t) t.className = `rot${p.rotation}`;
+});
+
 $("#sheet-dl").addEventListener("click", async (e) => {
   const p = sheetPhoto;
   const names = p.dog_ids.map((id) => dogById(id)?.name).filter(Boolean).join("_") || "사진";
@@ -771,7 +802,7 @@ $("#sheet-dl").addEventListener("click", async (e) => {
   btn.disabled = true;
   try {
     const { data } = await sb.storage.from("photos").download(p.path);
-    const file = new File([data], `${safeName(names)}_${state.day}_${p.id.slice(0, 4)}.jpg`, { type: "image/jpeg" });
+    const file = new File([await rotated(data, p.rotation || 0)], `${safeName(names)}_${state.day}_${p.id.slice(0, 4)}.jpg`, { type: "image/jpeg" });
     if (IS_MOBILE && navigator.canShare?.({ files: [file] })) await navigator.share({ files: [file] });
     else downloadBlob(file, file.name);
   } catch (err) {
@@ -863,12 +894,28 @@ function downloadBlob(blob, name) {
   a.click();
   setTimeout(() => URL.revokeObjectURL(a.href), 5000);
 }
+// 회전값만큼 실제로 돌린 JPEG 만들기 (저장·크게 보기용)
+async function rotated(blob, deg) {
+  if (!deg) return blob;
+  const bmp = await createImageBitmap(blob);
+  const c = document.createElement("canvas");
+  const side = deg === 90 || deg === 270;
+  c.width = side ? bmp.height : bmp.width;
+  c.height = side ? bmp.width : bmp.height;
+  const g = c.getContext("2d");
+  g.translate(c.width / 2, c.height / 2);
+  g.rotate((deg * Math.PI) / 180);
+  g.drawImage(bmp, -bmp.width / 2, -bmp.height / 2);
+  bmp.close?.();
+  return await new Promise((r) => c.toBlob(r, "image/jpeg", 0.92));
+}
+
 async function photoFiles(dog, photos, onEach) {
   const prefix = `${safeName(dog.name)}_${state.day}`;
   const out = [];
   await pool(photos, 4, async (p, i) => {
     const { data } = await sb.storage.from("photos").download(p.path);
-    out[i] = new File([data], `${prefix}_${String(i + 1).padStart(2, "0")}.jpg`, { type: "image/jpeg" });
+    out[i] = new File([await rotated(data, p.rotation || 0)], `${prefix}_${String(i + 1).padStart(2, "0")}.jpg`, { type: "image/jpeg" });
     onEach?.();
   });
   return out;
