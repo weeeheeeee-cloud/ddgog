@@ -316,6 +316,7 @@ async function render() {
   await Promise.all([loadDogs(), loadAttendance()]);
   if (state.tab === "photos") { await loadPhotos(); await renderPhotos(); }
   else if (state.tab === "roster") renderRoster();
+  else if (state.tab === "admin") renderUpLinks();
   renderSide();
 }
 
@@ -1895,6 +1896,53 @@ async function deletePhotos(applyFilter, onProgress) {
   }
   return removed;
 }
+
+// ---- 선생님 업로드 링크
+const upUrl = (t) => `${location.origin}${location.pathname.replace(/[^/]*$/, "")}up.html#k=${t}`;
+async function renderUpLinks() {
+  const { data } = await sb.from("upload_links").select("*").order("created_at", { ascending: false });
+  const list = data || [];
+  $("#up-links").innerHTML = list.length ? list.map((l) => `<div class="up-link ${l.active ? "" : "off"}">
+      <div class="grow"><b>${esc(l.label || "선생님 링크")}</b>${l.active ? "" : ` <span class="tag off">꺼짐</span>`}<br><small class="muted">${esc(upUrl(l.token))}</small></div>
+      ${l.active ? `<button class="btn primary mini" data-copy="${l.token}">링크 복사</button>` : ""}
+      <button class="btn ghost mini" data-onoff="${l.token}">${l.active ? "끄기" : "켜기"}</button>
+    </div>`).join("") : `<p class="muted small">아직 링크가 없어요.</p>`;
+  $$("[data-copy]").forEach((b) => b.addEventListener("click", async () => {
+    const url = upUrl(b.dataset.copy);
+    try { await navigator.clipboard.writeText(url); toast("링크를 복사했어요. 선생님 단톡방에 붙여 넣어 주세요"); }
+    catch { prompt("이 링크를 복사해 주세요", url); }
+  }));
+  $$("[data-onoff]").forEach((b) => b.addEventListener("click", async () => {
+    const l = list.find((x) => x.token === b.dataset.onoff);
+    if (l.active && !confirm("이 링크를 끄면 선생님들이 더 이상 올릴 수 없어요. 끌까요?")) return;
+    await sb.from("upload_links").update({ active: !l.active }).eq("token", l.token);
+    renderUpLinks();
+  }));
+}
+$("#up-new").addEventListener("click", async () => {
+  const label = prompt("링크 이름 (예: 선생님 단톡방)", "선생님 단톡방");
+  if (label === null) return;
+  const b = crypto.getRandomValues(new Uint8Array(18));
+  const token = btoa(String.fromCharCode(...b)).replace(/[+/=]/g, (c) => ({ "+": "-", "/": "_", "=": "" }[c]));
+  const { error } = await sb.from("upload_links").insert({ token, label: label.trim() || null });
+  if (error) { toast("만들지 못했어요"); return; }
+  await renderUpLinks();
+  try { await navigator.clipboard.writeText(upUrl(token)); toast("새 링크를 만들고 복사했어요"); } catch { /* 무시 */ }
+});
+
+// 선생님이 올린 사진: 오늘 화면이 켜져 있으면 30초마다 확인해서 자동 분류
+setInterval(async () => {
+  if (state.busy || state.draft || document.hidden || state.day !== kstToday()) return;
+  const { count } = await sb.from("photos").select("id", { count: "exact", head: true }).eq("day", state.day).eq("status", "pending");
+  if (!count) return;
+  if (!state.attendance.size) {
+    progress(`선생님이 올린 사진 ${count}장이 기다리고 있어요`, 0, count, "출석 보드를 올리고 명단을 확정하면 바로 분류해요");
+    return;
+  }
+  await loadPhotos();
+  toast(`선생님이 올린 사진 ${count}장을 분류할게요`);
+  classifyPending();
+}, 30000);
 
 $("#purge").addEventListener("click", async () => {
   const cutoff = shiftDay(kstToday(), -+$("#purge-days").value);

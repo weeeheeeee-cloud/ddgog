@@ -1,0 +1,185 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<meta name="theme-color" content="#003B89">
+<title>댕겨올개 사진 올리기</title>
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/orioncactus/pretendard@v1.3.9/dist/web/static/pretendard.min.css">
+<style>
+  :root { --navy:#003B89; --yellow:#FFD200; --ink:#1f2937; --muted:#6b7280; --bg:#f6f4ef; }
+  * { box-sizing: border-box; }
+  body { margin:0; font-family: Pretendard, -apple-system, sans-serif; background:var(--bg); color:var(--ink); }
+  header { background:var(--navy); color:#fff; padding:18px 16px 16px; }
+  header h1 { margin:0; font-size:20px; }
+  header p { margin:4px 0 0; opacity:.8; font-size:14px; }
+  main { max-width:520px; margin:0 auto; padding:16px; }
+  .card { background:#fff; border-radius:16px; padding:18px; box-shadow:0 1px 3px rgba(0,0,0,.06); }
+  .pick { display:block; text-align:center; background:var(--yellow); color:#111; font-weight:800; font-size:20px;
+          padding:28px 12px; border-radius:14px; cursor:pointer; }
+  .pick small { display:block; font-weight:500; font-size:13px; margin-top:6px; color:#333; }
+  input[type=file] { display:none; }
+  .bar { height:12px; background:#eee; border-radius:99px; overflow:hidden; margin:14px 0 6px; }
+  .bar i { display:block; height:100%; width:0; background:var(--navy); transition:width .2s; }
+  .msg { font-size:15px; min-height:22px; }
+  .done { background:#e8f6ec; color:#166534; padding:14px; border-radius:12px; font-weight:700; margin-top:14px; display:none; }
+  .err { background:#fdecec; color:#b91c1c; padding:14px; border-radius:12px; margin-top:14px; display:none; }
+  .tip { color:var(--muted); font-size:13px; line-height:1.6; margin-top:14px; }
+</style>
+</head>
+<body>
+<header>
+  <h1>🐾 댕겨올개 사진 올리기</h1>
+  <p id="day">오늘 찍은 아이들 사진을 올려 주세요</p>
+</header>
+<main>
+  <div class="card">
+    <label class="pick" id="pick-label">📷 사진 고르기<small>갤러리에서 여러 장 한꺼번에 선택하세요</small>
+      <input id="file" type="file" accept="image/*" multiple>
+    </label>
+    <div class="bar"><i id="bar"></i></div>
+    <div class="msg" id="msg"></div>
+    <div class="done" id="done"></div>
+    <div class="err" id="err"></div>
+    <p class="tip">· 같은 사진을 두 번 올려도 한 장만 들어가요.<br>· 올리는 동안 이 화면을 닫지 마세요.<br>· 다 올라가면 원장님 화면에서 아이별로 자동 분류돼요.</p>
+  </div>
+</main>
+<script type="module">
+import { createClient } from "https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/+esm";
+import { SUPABASE_URL, SUPABASE_ANON_KEY } from "./config.js";
+const sb = createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+const $ = (s) => document.querySelector(s);
+const token = new URLSearchParams(location.hash.slice(1)).get("k") || new URLSearchParams(location.search).get("k") || "";
+const FN = `${SUPABASE_URL}/functions/v1/teacher-upload`;
+async function call(body) {
+  for (let t = 0; t < 4; t++) {
+    try {
+      const r = await fetch(FN, { method: "POST", headers: { "content-type": "application/json", apikey: SUPABASE_ANON_KEY }, body: JSON.stringify({ token, ...body }) });
+      const j = await r.json();
+      if (r.status >= 500 && t < 3) { await new Promise((s) => setTimeout(s, 1500 * (t + 1))); continue; }
+      if (!r.ok) throw new Error(j.error || "오류");
+      return j;
+    } catch (e) { if (t === 3) throw e; await new Promise((s) => setTimeout(s, 1500 * (t + 1))); }
+  }
+}
+function showErr(m) { $("#err").textContent = m; $("#err").style.display = "block"; }
+
+async function resize(file, maxSide, quality) {
+  let bmp;
+  try { bmp = await createImageBitmap(file, { imageOrientation: "from-image" }); }
+  catch { bmp = await new Promise((res, rej) => { const i = new Image(); i.onload = () => res(i); i.onerror = rej; i.src = URL.createObjectURL(file); }); }
+  const s = Math.min(1, maxSide / Math.max(bmp.width, bmp.height));
+  const c = document.createElement("canvas");
+  c.width = Math.round(bmp.width * s); c.height = Math.round(bmp.height * s);
+  c.getContext("2d").drawImage(bmp, 0, 0, c.width, c.height);
+  bmp.close?.();
+  return await new Promise((r) => c.toBlob(r, "image/jpeg", quality));
+}
+async function imageStats(blob) {
+  const bmp = await createImageBitmap(blob);
+  const c = document.createElement("canvas");
+  const g = c.getContext("2d", { willReadFrequently: true });
+  c.width = 72; c.height = 64; g.imageSmoothingEnabled = true; g.imageSmoothingQuality = "high";
+  g.drawImage(bmp, 0, 0, 72, 64);
+  const d = g.getImageData(0, 0, 72, 64).data;
+  const cell = new Float32Array(72);
+  for (let y = 0; y < 64; y++) for (let x = 0; x < 72; x++) { const i = (y * 72 + x) * 4; cell[(y >> 3) * 9 + (x >> 3)] += d[i] * 0.299 + d[i + 1] * 0.587 + d[i + 2] * 0.114; }
+  let hex = "", nib = 0, bits = 0;
+  for (let y = 0; y < 8; y++) for (let x = 0; x < 8; x++) { nib = (nib << 1) | (cell[y * 9 + x + 1] > cell[y * 9 + x] ? 1 : 0); if (++bits % 4 === 0) { hex += nib.toString(16); nib = 0; } }
+  const sc = Math.min(1, 256 / Math.max(bmp.width, bmp.height));
+  const w = Math.max(3, Math.round(bmp.width * sc)), h = Math.max(3, Math.round(bmp.height * sc));
+  c.width = w; c.height = h; g.drawImage(bmp, 0, 0, w, h); bmp.close?.();
+  const p = g.getImageData(0, 0, w, h).data;
+  const G = new Float32Array(w * h);
+  for (let i = 0; i < w * h; i++) G[i] = p[i * 4] * 0.299 + p[i * 4 + 1] * 0.587 + p[i * 4 + 2] * 0.114;
+  let sum = 0, sum2 = 0, n = 0;
+  for (let y = 1; y < h - 1; y++) for (let x = 1; x < w - 1; x++) { const i = y * w + x; const L = 4 * G[i] - G[i - 1] - G[i + 1] - G[i - w] - G[i + w]; sum += L; sum2 += L * L; n++; }
+  return { phash: hex, sharp: n ? sum2 / n - (sum / n) ** 2 : 0 };
+}
+async function exifTime(file) {
+  try {
+    const buf = new DataView(await file.slice(0, 256 * 1024).arrayBuffer());
+    if (buf.getUint16(0) !== 0xffd8) return null;
+    let off = 2;
+    while (off < buf.byteLength - 4) {
+      const marker = buf.getUint16(off), len = buf.getUint16(off + 2);
+      if (marker === 0xffe1 && buf.getUint32(off + 4) === 0x45786966) {
+        const t = off + 10, le = buf.getUint16(t) === 0x4949;
+        const u16 = (o) => buf.getUint16(t + o, le), u32 = (o) => buf.getUint32(t + o, le);
+        const readTag = (ifd, tag) => { const n = u16(ifd); for (let i = 0; i < n; i++) { const e = ifd + 2 + i * 12; if (u16(e) === tag) return { count: u32(e + 4), val: u32(e + 8) }; } return null; };
+        const exif = readTag(u32(4), 0x8769);
+        const dt = exif && readTag(exif.val, 0x9003);
+        if (!dt) return null;
+        let str = ""; for (let i = 0; i < 19; i++) str += String.fromCharCode(buf.getUint8(t + dt.val + i));
+        const m = str.match(/(\d{4}):(\d{2}):(\d{2}) (\d{2}):(\d{2}):(\d{2})/);
+        return m ? `${m[1]}-${m[2]}-${m[3]}T${m[4]}:${m[5]}:${m[6]}+09:00` : null;
+      }
+      if ((marker & 0xff00) !== 0xff00) break;
+      off += 2 + len;
+    }
+  } catch { /* 없음 */ }
+  return null;
+}
+async function pool(items, limit, fn) {
+  let i = 0;
+  await Promise.all(Array.from({ length: Math.min(limit, items.length) }, async () => { while (i < items.length) { const k = i++; await fn(items[k], k); } }));
+}
+
+if (!token) { showErr("링크가 올바르지 않아요. 원장님께 받은 링크로 다시 들어와 주세요."); $("#pick-label").style.display = "none"; }
+else {
+  call({ action: "check" }).then((r) => {
+    const [y, m, d] = r.day.split("-");
+    $("#day").textContent = `${+m}월 ${+d}일 사진으로 올라가요`;
+  }).catch((e) => { showErr(e.message); $("#pick-label").style.display = "none"; });
+}
+
+$("#file").addEventListener("change", async (e) => {
+  const files = [...e.target.files];
+  e.target.value = "";
+  if (!files.length) return;
+  $("#done").style.display = "none"; $("#err").style.display = "none";
+  $("#pick-label").style.opacity = .5; $("#pick-label").style.pointerEvents = "none";
+  let n = 0, added = 0, skipped = 0, failed = 0;
+  const tick = () => { $("#bar").style.width = `${(n / files.length) * 100}%`; $("#msg").textContent = `올리는 중… ${n} / ${files.length}`; };
+  tick();
+  // 20장씩 묶어서: 주소 받기 → 올리기 → 등록
+  const chunks = [];
+  for (let i = 0; i < files.length; i += 20) chunks.push(files.slice(i, i + 20));
+  for (const chunk of chunks) {
+    try {
+      const prepared = [];
+      await pool(chunk, 3, async (file) => {
+        try {
+          const [full, small, taken] = await Promise.all([resize(file, 1600, 0.85), resize(file, 640, 0.8), exifTime(file)]);
+          const st = await imageStats(small).catch(() => ({}));
+          prepared.push({ id: crypto.randomUUID(), full, small, taken_at: taken, ...st });
+        } catch { failed++; n++; tick(); }
+      });
+      if (!prepared.length) continue;
+      const { urls } = await call({ action: "sign", items: prepared.map((p) => ({ id: p.id })) });
+      const ok = [];
+      await pool(prepared, 3, async (p) => {
+        const u = urls.find((x) => x.id === p.id);
+        const a = await sb.storage.from("photos").uploadToSignedUrl(u.fullPath, u.full, p.full, { contentType: "image/jpeg" });
+        const b = await sb.storage.from("photos").uploadToSignedUrl(u.thumbPath, u.thumb, p.small, { contentType: "image/jpeg" });
+        if (a.error || b.error) failed++; else ok.push(p);
+        n++; tick();
+      });
+      if (ok.length) {
+        const r = await call({ action: "done", items: ok.map(({ id, taken_at, phash, sharp }) => ({ id, taken_at, phash, sharp })) });
+        added += r.added; skipped += r.skipped;
+      }
+    } catch (err) {
+      failed += chunk.length; n = Math.min(files.length, n + chunk.length); tick();
+      showErr(err.message || "올리지 못한 사진이 있어요");
+    }
+  }
+  $("#bar").style.width = "100%";
+  $("#msg").textContent = "";
+  $("#done").innerHTML = `✅ 다 올렸어요! ${added}장${skipped ? `<br><small>이미 올라온 똑같은 사진 ${skipped}장은 건너뛰었어요</small>` : ""}${failed ? `<br><small style="color:#b91c1c">실패 ${failed}장 — 그 사진만 다시 골라 올려 주세요</small>` : ""}`;
+  $("#done").style.display = "block";
+  $("#pick-label").style.opacity = 1; $("#pick-label").style.pointerEvents = "";
+});
+</script>
+</body>
+</html>
