@@ -814,11 +814,19 @@ $("#file").addEventListener("change", async (e) => {
   const day = state.day;
   let n = 0, failed = 0;
   progress("사진 올리는 중… 창을 닫지 마세요", 0, files.length);
+  // 똑같은 사진(같은 파일을 두 번 올린 것)은 건너뜀: 같은 찍은 시각 + 거의 같은 이미지
+  await loadPhotos();
+  const seen = state.photos.filter((p) => p.phash).map((p) => ({ h: p.phash, t: p.taken_at ? +new Date(p.taken_at) : null }));
+  const isDup = (h, t) => h && seen.some((x) => x.t === t && hamming(x.h, h) <= 4);
+  let dupes = 0;
   await pool(files, 3, async (file) => {
     try {
       const id = crypto.randomUUID();
       const [full, small, taken] = await Promise.all([resize(file, 1600, 0.85), resize(file, 640, 0.8), exifTime(file)]);
       const st = await imageStats(small).catch(() => ({}));
+      const t = taken ? +new Date(taken) : null;
+      if (isDup(st.phash, t)) { dupes++; n++; progress("사진 올리는 중… 창을 닫지 마세요", n, files.length, `똑같은 사진 ${dupes}장 건너뜀`); return; }
+      seen.push({ h: st.phash, t });
       const path = `${day}/${id}.jpg`, thumbPath = `${day}/thumb/${id}.jpg`;
       const opt = { contentType: "image/jpeg", upsert: false };
       const [a, b] = await Promise.all([
@@ -1192,14 +1200,25 @@ async function rotated(blob, deg) {
 async function photoFiles(dog, photos, onEach) {
   const prefix = `${safeName(dog.name)}_${state.day}`;
   const out = [];
-  await pool(photos, 4, async (p, i) => {
+  // 파일 이름은 사진마다 고정(찍은 시각 + 사진 id) → 다시 받아도 같은 사진이 두 번 생기지 않음
+  const sorted = [...photos].sort((a, b) => String(a.taken_at || a.created_at).localeCompare(String(b.taken_at || b.created_at)));
+  await pool(sorted, 4, async (p, i) => {
     const { data } = await sb.storage.from("photos").download(p.path);
-    out[i] = new File([await rotated(data, p.rotation || 0)], `${prefix}_${String(i + 1).padStart(2, "0")}.jpg`, { type: "image/jpeg" });
+    const tm = new Date(p.taken_at || p.created_at);
+    const hhmm = isNaN(tm) ? "" : `${String(tm.getHours()).padStart(2, "0")}${String(tm.getMinutes()).padStart(2, "0")}${String(tm.getSeconds()).padStart(2, "0")}_`;
+    out[i] = new File([await rotated(data, p.rotation || 0)], `${prefix}_${hhmm}${p.id.slice(0, 6)}.jpg`, { type: "image/jpeg" });
     onEach?.();
   });
   return out;
 }
 async function writeToFolder(dir, files) {
+  // 이 폴더에 예전에 저장했던 사진 중 지금 목록에 없는 것(빠진 사진·옛 이름)은 지워서 중복이 남지 않게
+  const keep = new Set(files.map((f) => f.name));
+  try {
+    for await (const [name, h] of dir.entries()) {
+      if (h.kind === "file" && /\.jpe?g$/i.test(name) && !keep.has(name)) await dir.removeEntry(name);
+    }
+  } catch { /* 지우기 실패는 무시 */ }
   for (const f of files) {
     const fh = await dir.getFileHandle(f.name, { create: true });
     const w = await fh.createWritable();
