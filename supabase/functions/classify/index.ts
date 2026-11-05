@@ -45,13 +45,16 @@ The photos are sent to each dog's owner, so decide which dogs this photo should 
 In the reply, "MAIN dogs" means exactly these dogs that are properly shown.
 
 Reply with JSON only, no other text:
-{"dogs":[<reference numbers of MAIN dogs>],"new_dog":true|false,"unknown_main":<number>,"confidence":"high"|"low","note":"<한국어 30자 이내: 판단 근거>"}
+{"dogs":[<reference numbers of MAIN dogs>],"new_dog":true|false,"unknown_main":<number>,"confidence":"high"|"low","rotate":0|90|180|270,"note":"<한국어 30자 이내: 판단 근거>"}
 Keep "note" very short (under 30 Korean characters).
 - "dogs": ALL known dogs properly shown in the new photo (one or several; [] if none).
 - "unknown_main": how many properly shown dogs match none of the known dogs.
 - "new_dog": true if the photo has exactly one MAIN dog and you are fairly sure it is none of the
   known dogs (e.g. clearly different coat color, size or breed type), even if its face is hidden.
   Then "dogs" must be []. Do not set it when the dog could plausibly be one of the known dogs.
+- "rotate": how many degrees the NEW photo must be turned CLOCKWISE to stand upright (floor/ground at the
+  bottom, dogs and people the right way up). 0 if it is already upright. Phone photos are often saved
+  sideways (90 or 270) or upside down (180); judge from the floor, walls, furniture, people and the dogs' bodies.
 - "confidence": "high" when the clues clearly point to one dog. "low" if the dog is blurry or
   mostly hidden, or if two known dogs fit about equally for one of the dogs in the photo.`;
 
@@ -73,6 +76,7 @@ function parseReply(text: string) {
     try { return JSON.parse(m[0]); } catch { /* 아래에서 필드별로 시도 */ }
   }
   const dogs = text.match(/"dogs"\s*:\s*\[([^\]]*)\]/);
+  const rot = text.match(/"rotate"\s*:\s*(\d+)/);
   const conf = text.match(/"confidence"\s*:\s*"(high|low)"/);
   const nd = text.match(/"new_dog"\s*:\s*(true|false)/);
   const um = text.match(/"unknown_main"\s*:\s*(\d+)/);
@@ -82,6 +86,7 @@ function parseReply(text: string) {
     confidence: conf ? conf[1] : "low",
     new_dog: nd ? nd[1] === "true" : false,
     unknown_main: um ? Number(um[1]) : 0,
+    rotate: rot ? Number(rot[1]) : 0,
     note: null,
   };
 }
@@ -236,7 +241,9 @@ Deno.serve(async (req) => {
       status = "done";
     }
 
+    const rotation = [0, 90, 180, 270].includes(Number(parsed.rotate)) ? Number(parsed.rotate) : 0;
     await supa.from("photos").update({
+      rotation,
       dog_ids: ids,
       confidence: parsed.confidence ?? null,
       ai_note: note,
