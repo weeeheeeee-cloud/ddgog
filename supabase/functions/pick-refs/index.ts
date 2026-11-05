@@ -63,7 +63,7 @@ Deno.serve(async (req) => {
   const res = await fetch("https://api.anthropic.com/v1/messages", {
     method: "POST",
     headers: { "x-api-key": ANTHROPIC_KEY, "anthropic-version": "2023-06-01", "content-type": "application/json" },
-    body: JSON.stringify({ model: MODEL, max_tokens: 600, system: SYSTEM, messages: [{ role: "user", content }] }),
+    body: JSON.stringify({ model: MODEL, max_tokens: 3000, system: SYSTEM, messages: [{ role: "user", content }] }),
   });
   if (res.status === 429 || res.status === 529 || res.status >= 500) return json({ error: "busy", retryable: true }, 503);
   if (!res.ok) return json({ error: `Claude API ${res.status}` }, 500);
