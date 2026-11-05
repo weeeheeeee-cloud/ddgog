@@ -623,6 +623,7 @@ async function confirmRoll() {
     toast("저장하지 못했어요. 다시 시도해 주세요.");
   }
   renderPhotos();
+  classifyPending(); // 기다리던 사진이 있으면 바로 분류 시작
 }
 
 // 대표 사진 올리기 (한 번 올리면 계속 기억)
@@ -685,10 +686,15 @@ $("#file").addEventListener("change", async (e) => {
 let lastError = "";
 async function classifyOne(photoId) {
   for (let attempt = 0; attempt < 4; attempt++) {
-    const { error } = await sb.functions.invoke("classify", { body: { photo_id: photoId } });
+    // 2분 넘게 답이 없으면 멈춘 것으로 보고 다시 시도
+    const res = await Promise.race([
+      sb.functions.invoke("classify", { body: { photo_id: photoId } }),
+      sleep(120000).then(() => ({ error: { context: { status: 504 } } })),
+    ]);
+    const { error } = res;
     if (!error) return true;
     const status = error.context?.status;
-    if (status === 503 || status === 429) { await sleep(2000 * 2 ** attempt); continue; }
+    if (status === 503 || status === 429 || status === 504 || status === 546) { await sleep(2000 * 2 ** attempt); continue; }
     let detail = "";
     try { detail = (await error.context.json()).error || ""; } catch { /* 무시 */ }
     lastError = status === 404 || !status
@@ -703,18 +709,36 @@ async function classifyOne(photoId) {
 // 같은 아이가 여러 그룹으로 생기지 않도록 한 장씩 차례로 분류
 async function classifyPending() {
   if (state.busy) return;
-  state.busy = true;
   const { data } = await sb.from("photos").select("id").eq("day", state.day).eq("status", "pending").order("created_at");
   const list = data || [];
-  if (!list.length) { state.busy = false; $("#progress").classList.add("hidden"); await render(); return; }
-  lastError = "";
-  let ok = 0, fail = 0;
-  for (let i = 0; i < list.length; i++) {
-    progress("AI가 강아지별로 묶는 중… 창을 닫지 마세요", i, list.length, "아래 목록이 조금씩 채워져요");
-    if (await classifyOne(list[i].id)) ok++;
-    else if (++fail >= 3 && !ok) break;          // 설정 문제면 바로 멈춤
-    if ((i + 1) % 8 === 0 && state.tab === "photos") { await loadDogs(); await loadPhotos(); await renderPhotos(); }
+  if (!list.length) { $("#progress").classList.add("hidden"); await render(); return; }
+  // 명단부터: 오늘 온 아이들 안에서만 찾아야 빠르고 정확함
+  if (state.draft) {
+    progress(`사진 ${list.length}장이 기다리고 있어요`, 0, list.length,
+      "위의 '명단 확정'을 먼저 눌러 주세요. 확정하면 오늘 온 아이들 안에서만 찾아서 훨씬 빠르고 정확해요. 누르면 바로 이어서 분류해요.");
+    await render();
+    return;
   }
+  state.busy = true;
+  const noRoll = !state.attendance.size;
+  lastError = "";
+  let ok = 0, fail = 0, done = 0, stop = false;
+  const tick = () => progress("AI가 강아지별로 묶는 중… 창을 닫지 마세요", done, list.length,
+    noRoll ? "오늘 출석 명단이 없어서 등록된 모든 아이와 비교해요 (느려요). 출석 보드를 먼저 올리면 빨라져요."
+           : "아래 목록이 조금씩 채워져요");
+  tick();
+  // 처음 몇 장은 한 장씩(새 아이 그룹이 겹치지 않게), 그다음은 3장씩 동시에
+  const runOne = async (id) => {
+    if (stop) return;
+    if (await classifyOne(id)) ok++;
+    else if (++fail >= 3 && !ok) stop = true;    // 설정 문제면 바로 멈춤
+    done++;
+    tick();
+    if (done % 12 === 0 && state.tab === "photos") { await loadDogs(); await loadPhotos(); await renderPhotos(); }
+  };
+  const head = list.slice(0, 10), rest = list.slice(10);
+  for (const p of head) await runOne(p.id);
+  if (!stop) await pool(rest, 3, (p) => runOne(p.id));
   state.busy = false;
   if (fail && lastError) {
     progress("분류를 멈췄어요", ok, list.length, lastError);

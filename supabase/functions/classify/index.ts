@@ -140,11 +140,20 @@ Deno.serve(async (req) => {
   }).filter((d) => d.paths.length);
   // 한 번에 보내는 대표 사진은 최대 MAX_REF_IMAGES장 (요금이 비싸지는 길이를 넘지 않도록).
   // 강아지 수로 나눠 강아지당 최대 10장, 사진이 더 많으면 고르게 골라 다양한 각도가 들어가게 함
-  const MAX_REF_IMAGES = 180;
-  const perDog = Math.max(1, Math.min(10, Math.floor(MAX_REF_IMAGES / Math.max(1, withRefs.length))));
+  // 많이 보낼수록 느려짐: 명단 확정한 날(보통 20~30마리)은 아이당 4~6장, 명단 없으면 아이당 1장
+  const MAX_REF_IMAGES = 120;
+  const perDog = Math.max(1, Math.min(6, Math.floor(MAX_REF_IMAGES / Math.max(1, withRefs.length))));
   const spread = (arr: string[], k: number) =>
     arr.length <= k ? arr : Array.from({ length: k }, (_, i) => arr[Math.floor((i * arr.length) / k)]);
   const refs = withRefs.map((d) => ({ ...d, paths: spread(d.paths, perDog) }));
+
+  // 대표 사진을 한꺼번에(16장씩 동시에) 미리 불러옴. 한 장씩 받으면 사진 1장 분류에 1분 넘게 걸림
+  const needPaths = [...new Set(refs.flatMap((d) => d.paths))].filter((p) => !refCache.has(p));
+  for (let i = 0; i < needPaths.length; i += 16) {
+    await Promise.all(needPaths.slice(i, i + 16).map(async (path) => {
+      try { refCache.set(path, encodeBase64(await download(supa, "refs", path))); } catch { /* 없는 파일은 건너뜀 */ }
+    }));
+  }
 
   try {
     const content: Record<string, unknown>[] = [];
@@ -155,12 +164,8 @@ Deno.serve(async (req) => {
         const tips = [d.tips, d.tips_ai].filter(Boolean).join(" / ");
         content.push({ type: "text", text: `[${i + 1}] ${d.name}${d.note ? ` — ${d.note}` : ""}${tips ? ` | 구분: ${tips}` : ""}${d.paths.length > 1 ? ` (${d.paths.length} photos)` : ""}` });
         for (const path of d.paths) {
-          let b64 = refCache.get(path);
-          if (!b64) {
-            try { b64 = encodeBase64(await download(supa, "refs", path)); } catch { continue; }
-            refCache.set(path, b64);
-          }
-          content.push({ type: "image", source: { type: "base64", media_type: "image/jpeg", data: b64 } });
+          const b64 = refCache.get(path);
+          if (b64) content.push({ type: "image", source: { type: "base64", media_type: "image/jpeg", data: b64 } });
         }
       }
       content[content.length - 1].cache_control = { type: "ephemeral" };
@@ -187,12 +192,12 @@ Deno.serve(async (req) => {
       const looks = refs.map((d, i) => ({ n: i + 1, name: d.name, path: latest.get(d.id) })).filter((x) => x.path);
       if (looks.length) {
         content.push({ type: "text", text: "Today's look (same dogs, photographed today):" });
+        await Promise.all(looks.filter((x) => !refCache.has("today:" + x.path)).map(async (x) => {
+          try { refCache.set("today:" + x.path, encodeBase64(await download(supa, "photos", x.path!))); } catch { /* 건너뜀 */ }
+        }));
         for (const x of looks) {
-          let b64 = refCache.get("today:" + x.path);
-          if (!b64) {
-            b64 = encodeBase64(await download(supa, "photos", x.path!));
-            refCache.set("today:" + x.path, b64);
-          }
+          const b64 = refCache.get("today:" + x.path);
+          if (!b64) continue;
           content.push({ type: "text", text: `[${x.n}] ${x.name} — today` });
           content.push({ type: "image", source: { type: "base64", media_type: "image/jpeg", data: b64 } });
         }
