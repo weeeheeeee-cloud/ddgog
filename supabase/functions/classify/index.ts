@@ -128,6 +128,10 @@ Deno.serve(async (req) => {
     q = q.or(`id.in.(${assigned.map((a) => a.dog_id).join(",")}),auto.eq.true`);
   }
   const { data: dogs } = await q;
+  // 오늘 명단에 있지만 대표 사진이 없는 아이 수 (호텔링 손님 등)
+  const faceless = assigned && assigned.length
+    ? (dogs ?? []).filter((d) => !(d.dog_refs ?? []).length && !d.ref_path && assigned.some((a) => a.dog_id === d.id)).length
+    : 0;
   // 대표 사진이 하나라도 있는 강아지만 후보. 전체 이미지 수가 너무 많아지지 않게 강아지당 장수 조절
   const withRefs = (dogs ?? []).map((d) => {
     const paths = (d.dog_refs ?? []).sort((a, b) => a.created_at.localeCompare(b.created_at)).map((r) => r.path);
@@ -162,6 +166,11 @@ Deno.serve(async (req) => {
       content[content.length - 1].cache_control = { type: "ephemeral" };
     } else {
       content.push({ type: "text", text: "Reference dogs: none yet." });
+    }
+    if (faceless) {
+      content.push({ type: "text", text: `Note: ${faceless} dog(s) here today have NO reference photos yet (e.g. hotel guests). ` +
+        "So unfamiliar dogs are expected: if a dog does not clearly match a known dog, treat it as unknown " +
+        "(new_dog / unknown_main) instead of forcing it onto a similar-looking known dog." });
     }
 
     // 오늘 모습: 오늘 이미 분류된 사진 중 강아지별 가장 최근 1장 (옷·미용 상태가 그날 그대로라 큰 단서)

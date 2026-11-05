@@ -353,3 +353,10 @@ img.rot180 { transform: rotate(180deg); }
 img.rot270 { transform: rotate(270deg); }
 .sheet-view { overflow: hidden; border-radius: 12px; background: #111; }
 .rot-btn { position: absolute; left: 8px; top: 8px; width: 40px; height: 40px; border-radius: 50%; border: 0; background: rgba(0,0,0,.55); color: #fff; font-size: 22px; cursor: pointer; }
+
+/* 호텔링(H) */
+.tag-h { display: inline-grid; place-items: center; width: 18px; height: 18px; border-radius: 5px; background: #ede9fe; color: #6d28d9; font-size: 11px; font-weight: 800; font-style: normal; margin-right: 4px; }
+.roll-chips .h-toggle { display: inline-grid; place-items: center; width: 18px; height: 18px; border-radius: 5px; font-size: 11px; font-weight: 800; color: #c4c4c4; border: 1px dashed #d4d4d4; margin-right: 4px; cursor: pointer; }
+.roll-chips span.hotel { background: #f5f3ff; border-color: #c4b5fd; }
+.roll-chips span.hotel .h-toggle { background: #ede9fe; color: #6d28d9; border: 0; }
+.known.hotel { background: #f5f3ff; }

@@ -27,8 +27,10 @@ Extract ONLY the dogs' names.
 - Names in an app may be written with the breed or owner, e.g. "콩이(말티즈)" or "콩이 / 김OO" → just "콩이".
 - If a list of known dog names is given and a handwritten word is plausibly one of them, use the known spelling.
 - Keep each name exactly once.
+- Hotel guests (호텔링) are marked with an "H" (e.g. "H 콩이", "콩이(H)", "콩이 h", a circled H, or listed
+  under an H / 호텔 section). Do NOT include the H in the name; list those names in "hotel" as well.
 Reply with JSON only:
-{"names":["<이름>", ...],"unsure":["<읽기 애매한 이름>", ...]}
+{"names":["<이름>", ...],"unsure":["<읽기 애매한 이름>", ...],"hotel":["<H 표시된 이름>", ...]}
 "unsure" lists names (already included in "names") whose handwriting you were not sure about.`;
 
 Deno.serve(async (req) => {
@@ -76,9 +78,11 @@ Deno.serve(async (req) => {
   const out = await res.json();
   const text: string = (out.content ?? []).map((c: { text?: string }) => c.text ?? "").join("");
   const m = text.match(/\{[\s\S]*\}/);
-  let parsed: { names?: unknown; unsure?: unknown } = {};
+  let parsed: { names?: unknown; unsure?: unknown; hotel?: unknown } = {};
   try { parsed = m ? JSON.parse(m[0]) : {}; } catch { /* 아래에서 빈 값 */ }
   const clean = (a: unknown) =>
     [...new Set((Array.isArray(a) ? a : []).map((x) => String(x).trim()).filter(Boolean))];
-  return json({ names: clean(parsed.names), unsure: clean(parsed.unsure) });
+  const names = clean(parsed.names).map((n) => n.replace(/\s*\(?\s*[Hh]\s*\)?\s*$|^\s*[Hh]\s+/g, "").trim()).filter(Boolean);
+  const hotel = clean(parsed.hotel).map((n) => n.replace(/\s*\(?\s*[Hh]\s*\)?\s*$|^\s*[Hh]\s+/g, "").trim()).filter(Boolean);
+  return json({ names: [...new Set([...names, ...hotel])], unsure: clean(parsed.unsure), hotel: [...new Set(hotel)] });
 });

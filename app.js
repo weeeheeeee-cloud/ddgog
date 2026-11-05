@@ -11,6 +11,7 @@ const state = {
   dogs: [],
   photos: [],
   expanded: new Set(), // 비슷한 사진을 펼쳐 둔 아이
+  hotel: new Set(),    // 오늘 호텔링(H) 아이
   attendance: new Set(), // 오늘 출석한 강아지 id (assignments 테이블에 저장)
   draft: null,           // 출석 보드에서 읽은 명단 (확정 전) { names, unsure, img }
   busy: false, // 업로드·분류 진행 중
@@ -257,8 +258,9 @@ async function loadDogs() {
   state.dogs = (data || []).sort(dogOrder);
 }
 async function loadAttendance() {
-  const { data } = await sb.from("assignments").select("dog_id").eq("day", state.day);
+  const { data } = await sb.from("assignments").select("dog_id, hotel").eq("day", state.day);
   state.attendance = new Set((data || []).map((a) => a.dog_id));
+  state.hotel = new Set((data || []).filter((a) => a.hotel).map((a) => a.dog_id)); // 오늘 호텔링(H)
 }
 const norm = (s) => String(s || "").replace(/\s+/g, "").toLowerCase();
 
@@ -411,7 +413,8 @@ async function renderPhotos() {
 }
 
 async function renameDog(dog) {
-  const need = state.dogs.filter((d) => !d.auto && !d.ref_path && state.attendance.has(d.id)).map((d) => d.name);
+  const need = state.dogs.filter((d) => !d.auto && !d.ref_path && state.attendance.has(d.id))
+    .map((d) => (state.hotel.has(d.id) ? `${d.name}(H)` : d.name));
   const hint = need.length ? `\n(오늘 명단 중 얼굴을 아직 모르는 아이: ${need.join(", ")})` : "";
   const name = prompt(`강아지 이름${hint}`, dog.auto ? "" : dog.name);
   if (!name || !name.trim()) return false;
@@ -449,6 +452,7 @@ function blobToBase64(blob) {
 }
 
 const isNewName = (n) => !state.dogs.some((d) => !d.auto && norm(d.name) === norm(n));
+const isHotelName = (draft, n) => (draft.hotel || []).some((h) => norm(h) === norm(n));
 
 async function renderRoll() {
   renderSide();
@@ -462,10 +466,11 @@ async function renderRoll() {
     body.innerHTML = `
       ${d.img ? `<img class="board-preview" src="${d.img}" alt="출석 보드">${d.more ? `<p class="muted small" style="margin:-4px 0 8px">외 ${d.more}장 함께 읽음</p>` : ""}` : ""}
       <p class="small">읽은 이름이 맞는지 확인해 주세요. <b>이름을 누르면 고칠 수 있고</b>, ×로 뺄 수 있어요.
-        ${d.names.some(isNewName) ? `<em class="tag-new">새 아이</em>는 명단에 없는 이름이라 확정 후 대표 사진을 받을게요.` : ""}
+        ${d.names.some((n) => isNewName(n) && !isHotelName(d, n)) ? `<em class="tag-new">새 아이</em>는 명단에 없는 이름이라 확정 후 대표 사진을 받을게요.` : ""}
+        <span class="tag-h">H</span> 표시는 호텔링이에요. 눌러서 켜고 끌 수 있어요. 호텔링 아이는 대표 사진 없이 분류하고, 모르는 아이는 '새 강아지'로 묶어 두면 나중에 이름을 붙이면 돼요.
         ${d.unsure.length ? `<span class="q-legend">?</span> 표시는 글씨가 애매했던 이름이에요.` : ""}</p>
       <div class="chips roll-chips">${d.names.map((n, i) => `
-        <span class="${d.unsure.includes(n) ? "unsure" : ""} ${isNewName(n) ? "new" : ""}"><b data-edit="${i}">${esc(n)}</b>${isNewName(n) ? `<em class="tag-new">새 아이</em>` : ""}<b class="x" data-del="${i}">×</b></span>`).join("")
+        <span class="${d.unsure.includes(n) ? "unsure" : ""} ${isNewName(n) && !isHotelName(d, n) ? "new" : ""} ${isHotelName(d, n) ? "hotel" : ""}"><b data-h="${i}" class="h-toggle" title="호텔링 켜기/끄기">H</b><b data-edit="${i}">${esc(n)}</b>${isNewName(n) && !isHotelName(d, n) ? `<em class="tag-new">새 아이</em>` : ""}<b class="x" data-del="${i}">×</b></span>`).join("")
         || `<span class="muted small">아직 이름이 없어요</span>`}</div>
       <form id="roll-add" class="row">
         <input id="roll-add-name" class="grow" placeholder="빠진 이름 추가">
@@ -485,6 +490,12 @@ async function renderRoll() {
       renderRoll();
     }));
     $$("[data-del]", body).forEach((el) => el.addEventListener("click", () => { d.names.splice(+el.dataset.del, 1); renderRoll(); }));
+    $$("[data-h]", body).forEach((el) => el.addEventListener("click", () => {
+      const n = d.names[+el.dataset.h];
+      d.hotel = d.hotel || [];
+      d.hotel = isHotelName(d, n) ? d.hotel.filter((h) => norm(h) !== norm(n)) : [...d.hotel, n];
+      renderRoll();
+    }));
     $("#roll-add").addEventListener("submit", (e) => {
       e.preventDefault();
       const v = $("#roll-add-name").value.trim();
@@ -517,10 +528,11 @@ async function renderRoll() {
   }
 
   // ③ 확정된 명단: 얼굴 아는 아이 ✓ / 처음 보는 아이는 대표 사진 올리기
-  const known = roll.filter((dg) => refCount(dg));
-  const need = roll.filter((dg) => !refCount(dg));
-  count.textContent = `${roll.length}마리${need.length ? ` · 대표 사진 필요 ${need.length}` : " · 모두 얼굴 앎 ✓"}`;
-  const ref = await signed("refs", known.map((dg) => dg.ref_path));
+  const hotelDogs = roll.filter((dg) => state.hotel.has(dg.id));
+  const known = roll.filter((dg) => refCount(dg) && !state.hotel.has(dg.id));
+  const need = roll.filter((dg) => !refCount(dg) && !state.hotel.has(dg.id));
+  count.textContent = `${roll.length}마리${hotelDogs.length ? ` (호텔링 ${hotelDogs.length})` : ""}${need.length ? ` · 대표 사진 필요 ${need.length}` : ""}`;
+  const ref = await signed("refs", [...known, ...hotelDogs].map((dg) => dg.ref_path));
   body.innerHTML = `
     ${need.length ? `<p class="small">명단에 없던 아이예요. <b>대표 사진</b>을 올려 주세요. 정면·옆·뒤·엎드린 모습 등 <b>여러 장</b>을 한 번에 고를수록 더 잘 알아봐요. 한 번 올리면 다음부터는 묻지 않아요.</p>
     <div class="need-list">${need.map((dg) => `
@@ -528,6 +540,9 @@ async function renderRoll() {
         <button class="btn primary sm" data-ref-for="${dg.id}">대표 사진 올리기</button></div>`).join("")}</div>` : ""}
     ${known.length ? `<div class="known-list">${known.map((dg) => `
       <span class="known" title="얼굴 기억함"><img src="${ref(dg.ref_path)}" alt="">${esc(dg.name)}<i>✓</i></span>`).join("")}</div>` : ""}
+    ${hotelDogs.length ? `<p class="small" style="margin:10px 0 4px">🏨 <b>호텔링</b> · 대표 사진 없이 분류해요. AI가 모르는 아이는 '새 강아지'로 묶어 두니, 나중에 이 이름으로 붙이면 얼굴도 기억해요.</p>
+    <div class="known-list">${hotelDogs.map((dg) => `
+      <span class="known hotel">${dg.ref_path ? `<img src="${ref(dg.ref_path)}" alt="">` : ""}<b class="tag-h">H</b>${esc(dg.name)}</span>`).join("")}</div>` : ""}
     <div class="row" style="margin-top:10px">
       <button id="roll-edit" class="btn ghost sm">명단 수정</button>
       <button id="roll-board" class="btn ghost sm">보드·캡처 다시 읽기</button>
@@ -537,7 +552,7 @@ async function renderRoll() {
     $("#ref-file").click();
   }));
   $("#roll-edit").addEventListener("click", () => {
-    state.draft = { names: roll.map((dg) => dg.name), unsure: [], img: "" };
+    state.draft = { names: roll.map((dg) => dg.name), unsure: [], img: "", hotel: hotelDogs.map((dg) => dg.name) };
     renderRoll();
   });
   $("#roll-board").addEventListener("click", () => $("#board-file").click());
@@ -560,7 +575,7 @@ $("#board-file").addEventListener("change", async (e) => {
       try { msg = (await error.context.json()).error || ""; } catch { /* 무시 */ }
       throw new Error(msg || (error.context?.status === 404 ? "이름 읽기 기능을 찾을 수 없어요" : "읽지 못했어요"));
     }
-    state.draft = { names: data.names || [], unsure: data.unsure || [], img: URL.createObjectURL(blobs[0]), more: blobs.length - 1 };
+    state.draft = { names: data.names || [], unsure: data.unsure || [], hotel: data.hotel || [], img: URL.createObjectURL(blobs[0]), more: blobs.length - 1 };
     if (!state.draft.names.length) toast("이름을 찾지 못했어요. 직접 추가해 주세요.");
   } catch (err) {
     toast(err.message || "읽지 못했어요. 다시 시도해 주세요.");
@@ -576,6 +591,7 @@ async function confirmRoll() {
   btn.textContent = "저장 중…";
   try {
     const ids = [];
+    const hotelIds = new Set();
     for (const name of state.draft.names) {
       let dog = state.dogs.find((d) => !d.auto && norm(d.name) === norm(name));
       if (!dog) {
@@ -588,17 +604,19 @@ async function confirmRoll() {
         dog.active = true;
       }
       ids.push(dog.id);
+      if (isHotelName(state.draft, name)) hotelIds.add(dog.id);
     }
     await sb.from("assignments").delete().eq("day", state.day);
     const uniq = [...new Set(ids)];
     if (uniq.length) {
-      const { error } = await sb.from("assignments").insert(uniq.map((dog_id) => ({ day: state.day, dog_id })));
+      const { error } = await sb.from("assignments").insert(uniq.map((dog_id) => ({ day: state.day, dog_id, hotel: hotelIds.has(dog_id) })));
       if (error) throw error;
     }
     state.attendance = new Set(uniq);
+    state.hotel = hotelIds;
     state.draft = null;
     state.dogs.sort(dogOrder);
-    const need = uniq.filter((id) => !dogById(id)?.ref_path).length;
+    const need = uniq.filter((id) => !dogById(id)?.ref_path && !hotelIds.has(id)).length;
     toast(need ? `명단 저장! 대표 사진이 필요한 아이 ${need}마리` : "명단 저장! 모두 아는 얼굴이에요");
   } catch (err) {
     console.error(err);
