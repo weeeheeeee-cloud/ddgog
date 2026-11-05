@@ -1197,28 +1197,46 @@ async function rotated(blob, deg) {
   return await new Promise((r) => c.toBlob(r, "image/jpeg", 0.92));
 }
 
-async function photoFiles(dog, photos, onEach) {
-  const prefix = `${safeName(dog.name)}_${state.day}`;
+// 파일 이름은 사진마다 고정(찍은 시각 + 사진 id) → 다시 받아도 같은 사진이 두 번 생기지 않음
+function photoFileName(dog, p) {
+  const tm = new Date(p.taken_at || p.created_at);
+  const t = isNaN(tm) ? "" : `${String(tm.getHours()).padStart(2, "0")}${String(tm.getMinutes()).padStart(2, "0")}${String(tm.getSeconds()).padStart(2, "0")}_`;
+  return `${safeName(dog.name)}_${state.day}_${t}${p.id.slice(0, 6)}.jpg`;
+}
+async function photoFiles(dog, photos, onEach, skip = new Set()) {
   const out = [];
-  // 파일 이름은 사진마다 고정(찍은 시각 + 사진 id) → 다시 받아도 같은 사진이 두 번 생기지 않음
-  const sorted = [...photos].sort((a, b) => String(a.taken_at || a.created_at).localeCompare(String(b.taken_at || b.created_at)));
+  const sorted = [...photos].sort((a, b) => String(a.taken_at || a.created_at).localeCompare(String(b.taken_at || b.created_at)))
+    .filter((p) => !skip.has(photoFileName(dog, p)));
   await pool(sorted, 4, async (p, i) => {
     const { data } = await sb.storage.from("photos").download(p.path);
-    const tm = new Date(p.taken_at || p.created_at);
-    const hhmm = isNaN(tm) ? "" : `${String(tm.getHours()).padStart(2, "0")}${String(tm.getMinutes()).padStart(2, "0")}${String(tm.getSeconds()).padStart(2, "0")}_`;
-    out[i] = new File([await rotated(data, p.rotation || 0)], `${prefix}_${hhmm}${p.id.slice(0, 6)}.jpg`, { type: "image/jpeg" });
+    out[i] = new File([await rotated(data, p.rotation || 0)], photoFileName(dog, p), { type: "image/jpeg" });
     onEach?.();
   });
-  return out;
+  return out.filter(Boolean);
+}
+// 폴더 맞추기: 이미 받은 사진은 건너뛰고 새 사진만 받아서 넣음.
+// 이 아이에게서 빠진 사진(다른 아이로 옮겨짐 등)의 파일만 정리
+async function syncFolder(dir, dog, photos, onEach) {
+  const want = new Set(photos.map((p) => photoFileName(dog, p)));
+  const have = new Set();
+  let removed = 0;
+  const mine = `${safeName(dog.name)}_${state.day}_`;
+  for await (const [name, h] of dir.entries()) {
+    if (h.kind !== "file") continue;
+    if (want.has(name)) have.add(name);
+    else if (name.startsWith(mine) && /\.jpe?g$/i.test(name)) { try { await dir.removeEntry(name); removed++; } catch { /* 무시 */ } }
+  }
+  photos.filter((p) => have.has(photoFileName(dog, p))).forEach(() => onEach?.(true));
+  const files = await photoFiles(dog, photos, () => onEach?.(false), have);
+  for (const f of files) {
+    const fh = await dir.getFileHandle(f.name, { create: true });
+    const w = await fh.createWritable();
+    await w.write(f);
+    await w.close();
+  }
+  return { added: files.length, kept: have.size, removed };
 }
 async function writeToFolder(dir, files) {
-  // 이 폴더에 예전에 저장했던 사진 중 지금 목록에 없는 것(빠진 사진·옛 이름)은 지워서 중복이 남지 않게
-  const keep = new Set(files.map((f) => f.name));
-  try {
-    for await (const [name, h] of dir.entries()) {
-      if (h.kind === "file" && /\.jpe?g$/i.test(name) && !keep.has(name)) await dir.removeEntry(name);
-    }
-  } catch { /* 지우기 실패는 무시 */ }
   for (const f of files) {
     const fh = await dir.getFileHandle(f.name, { create: true });
     const w = await fh.createWritable();
@@ -1226,25 +1244,36 @@ async function writeToFolder(dir, files) {
     await w.close();
   }
 }
+function doneBanner(msg) {
+  progress("✅ 다운로드 완료", 1, 1, msg);
+  toast(msg);
+  setTimeout(() => $("#progress").classList.add("hidden"), 10000);
+}
 
 async function saveDogPhotos(dog, photos, btn, mode) {
   const label = btn.textContent;
   btn.disabled = true;
   try {
     let root = null;
-    if (mode === "folder") root = await (await saveFolder()).getDirectoryHandle(state.day, { create: true });
+    if (mode === "folder") {
+      root = await (await saveFolder()).getDirectoryHandle(state.day, { create: true });
+      const dir = await root.getDirectoryHandle(safeName(dog.name), { create: true });
+      let n = 0;
+      const r = await syncFolder(dir, dog, photos, () => { btn.textContent = `${++n}/${photos.length}`; });
+      doneBanner(`'${state.day}/${dog.name}' 폴더 · 새로 받은 사진 ${r.added}장${r.kept ? ` (이미 받은 ${r.kept}장은 건너뜀)` : ""}`);
+      btn.disabled = false;
+      btn.textContent = label;
+      return;
+    }
     let n = 0;
     const files = await photoFiles(dog, photos, () => { btn.textContent = `${++n}/${photos.length}`; });
     if (mode === "share") {
       await navigator.share({ files, title: `${dog.name} ${state.day}` });
-    } else if (mode === "folder") {
-      const dir = await root.getDirectoryHandle(safeName(dog.name), { create: true });
-      await writeToFolder(dir, files);
-      toast(`'${state.day}/${dog.name}' 폴더에 ${files.length}장을 저장했어요`);
     } else {
       const zip = new JSZip();
       files.forEach((f) => zip.file(f.name, f));
       downloadBlob(await zip.generateAsync({ type: "blob" }), `${safeName(dog.name)}_${state.day}.zip`);
+      doneBanner(`${dog.name} ${files.length}장 ZIP 다운로드 완료`);
     }
   } catch (err) {
     if (err?.name !== "AbortError") toast("저장하지 못했어요. 다시 시도해 주세요.");
@@ -1309,15 +1338,25 @@ async function saveAll(btn) {
     }
     const zip = CAN_FOLDER ? null : new JSZip();
     const total = [...groups.values()].reduce((a, g) => a + g.length, 0);
-    let n = 0;
+    let n = 0, added = 0, kept = 0;
+    const tick = () => { n++; btn.textContent = `저장 중 ${n}/${total}`; progress("📥 다운로드 중… 창을 닫지 마세요", n, total, `새로 받는 사진 ${added}장 · 이미 받은 사진 ${kept}장 건너뜀`); };
+    progress("📥 다운로드 중… 창을 닫지 마세요", 0, total);
     for (const [id, photos] of groups) {
       const dog = dogById(id);
-      const files = await photoFiles(dog, photos, () => { btn.textContent = `저장 중 ${++n}/${total}`; });
-      if (root) await writeToFolder(await root.getDirectoryHandle(safeName(dog.name), { create: true }), files);
-      else files.forEach((f) => zip.file(`${state.day}/${safeName(dog.name)}/${f.name}`, f));
+      if (root) {
+        const r = await syncFolder(await root.getDirectoryHandle(safeName(dog.name), { create: true }), dog, photos,
+          (skipped) => { skipped ? kept++ : added++; tick(); });
+      } else {
+        const files = await photoFiles(dog, photos, () => { added++; tick(); });
+        files.forEach((f) => zip.file(`${state.day}/${safeName(dog.name)}/${f.name}`, f));
+      }
     }
-    if (zip) downloadBlob(await zip.generateAsync({ type: "blob" }), `${state.day}.zip`);
-    else toast(`'${window.__saveDirName || "다운로드"}' 폴더 안 '${state.day}' 폴더에 강아지 ${groups.size}마리, ${total}장을 저장했어요`);
+    if (zip) {
+      downloadBlob(await zip.generateAsync({ type: "blob" }), `${state.day}.zip`);
+      doneBanner(`${state.day}.zip · 강아지 ${groups.size}마리, ${total}장`);
+    } else {
+      doneBanner(`'${window.__saveDirName || "다운로드"}/${state.day}' 폴더 · 강아지 ${groups.size}마리 · 새로 받은 사진 ${added}장${kept ? ` (이미 받은 ${kept}장은 건너뜀)` : ""}`);
+    }
   } catch (err) {
     if (err?.name !== "AbortError") toast("저장하지 못했어요. 다시 시도해 주세요.");
   }
