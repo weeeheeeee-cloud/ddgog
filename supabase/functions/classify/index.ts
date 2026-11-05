@@ -31,6 +31,9 @@ How to recognize a dog — the face is NOT required. Use every clue together:
   coat, body and clothes clearly fit one known dog and no other.
 Many dogs look alike (e.g. several white Maltese, several Australian Shepherds). Only match when the
 specific dog is the same. Clothes change from day to day, so the body itself decides.
+Many dogs come with "부위별 특징" (what the face, top of the head, back of the head, back, tail and legs look like).
+Staff photos often show only part of a dog (just the head from above, the back of the head, the back, the rear),
+so compare the visible part with that dog's matching body-part description and reference photos of the same view.
 Some dogs come with "구분" (distinguishing points) written by staff or found by comparing look-alikes,
 e.g. tail length, a spot on the face, ear color, size. These are DECISIVE: before choosing between
 similar dogs, look for each listed point in the new photo. If the point that would decide is not
@@ -125,7 +128,7 @@ Deno.serve(async (req) => {
 
   // 후보: 그날 담당이 지정된 강아지 + 이름 안 붙은 자동 그룹. 담당 지정이 없으면 활성 강아지 전체
   const { data: assigned } = await supa.from("assignments").select("dog_id").eq("day", photo.day);
-  let q = supa.from("dogs").select("id, name, note, tips, tips_ai, ref_path, dog_refs(path, created_at)")
+  let q = supa.from("dogs").select("id, name, note, tips, tips_ai, features, ref_path, dog_refs(path, created_at)")
     .eq("active", true).order("created_at");
   if (assigned && assigned.length) {
     q = q.or(`id.in.(${assigned.map((a) => a.dog_id).join(",")}),auto.eq.true`);
@@ -170,7 +173,7 @@ Deno.serve(async (req) => {
       for (let i = 0; i < refs.length; i++) {
         const d = refs[i];
         const tips = [d.tips, d.tips_ai].filter(Boolean).join(" / ");
-        content.push({ type: "text", text: `[${i + 1}] ${d.name}${d.note ? ` — ${d.note}` : ""}${tips ? ` | 구분: ${tips}` : ""}${d.paths.length > 1 ? ` (${d.paths.length} photos)` : ""}` });
+        content.push({ type: "text", text: `[${i + 1}] ${d.name}${d.note ? ` — ${d.note}` : ""}${tips ? ` | 구분: ${tips}` : ""}${d.paths.length > 1 ? ` (${d.paths.length} photos)` : ""}${d.features ? `\n  부위별 특징:\n  ${d.features.replace(/\n/g, "\n  ")}` : ""}` });
         for (const path of d.paths) {
           const b64 = refCache.get(path);
           if (b64) content.push({ type: "image", source: { type: "base64", media_type: "image/jpeg", data: b64 } });

@@ -1260,6 +1260,7 @@ async function renderRoster() {
           ${!d.active ? `<span class="tag off">숨김</span>` : ""}
           <small>${esc(d.note || "")}</small>
           ${d.tips || d.tips_ai ? `<div class="tips">🔍 <b>구분</b> ${esc(d.tips || "")}${d.tips && d.tips_ai ? "<br>" : ""}${d.tips_ai ? `<span class="tips-ai">${esc(d.tips_ai)} <i>(AI)</i></span>` : ""}</div>` : ""}
+          ${d.features ? `<details class="feat"><summary>🐾 부위별 특징 (AI 학습)</summary><div>${esc(d.features).replace(/\n/g, "<br>")}</div></details>` : ""}
         </div>
         <div class="row-actions">
           <button class="btn ${d.auto ? "primary" : "ghost"} mini" data-edit>${d.auto ? "이름" : "수정"}</button>
