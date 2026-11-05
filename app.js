@@ -902,6 +902,7 @@ async function renderRoster() {
           ${today ? `<span class="tag today">오늘 출석</span>` : ""}
           ${!d.active ? `<span class="tag off">숨김</span>` : ""}
           <small>${esc(d.note || "")}</small>
+          ${d.tips || d.tips_ai ? `<div class="tips">🔍 <b>구분</b> ${esc(d.tips || "")}${d.tips && d.tips_ai ? "<br>" : ""}${d.tips_ai ? `<span class="tips-ai">${esc(d.tips_ai)} <i>(AI)</i></span>` : ""}</div>` : ""}
         </div>
         <div class="row-actions">
           <button class="btn ${d.auto ? "primary" : "ghost"} mini" data-edit>${d.auto ? "이름" : "수정"}</button>
@@ -956,10 +957,12 @@ async function renderRoster() {
       if (dog.auto) { if (await renameDog(dog)) renderRoster(); return; }
       const name = prompt("이름", dog.name);
       if (name === null) return;
-      const note = prompt("특징 (견종·털색·무늬, 헷갈리는 아이면 자세히)", dog.note || "");
+      const note = prompt("특징 (견종·털색·무늬)", dog.note || "");
       if (note === null) return;
-      await sb.from("dogs").update({ name: name.trim() || dog.name, note: note.trim() }).eq("id", dog.id);
-      Object.assign(dog, { name: name.trim() || dog.name, note: note.trim() });
+      const tips = prompt("구분 포인트 (닮은 아이와 다른 점: 꼬리 길이, 얼굴 점, 귀 색 등)", dog.tips || "");
+      if (tips === null) return;
+      await sb.from("dogs").update({ name: name.trim() || dog.name, note: note.trim(), tips: tips.trim() || null }).eq("id", dog.id);
+      Object.assign(dog, { name: name.trim() || dog.name, note: note.trim(), tips: tips.trim() || null });
       state.dogs.sort(dogOrder);
       renderRoster();
     });

@@ -335,3 +335,9 @@ h3.sec small { display: block; font-weight: 400; font-size: 12px; margin-top: 2p
 .imp-st.warn { color: #b7791f; }
 .imp-st.err { color: var(--danger); }
 #import-max { width: auto; padding: 6px 8px; }
+
+/* 구분 포인트 */
+.dog-card .tips { margin-top: 6px; font-size: 12px; line-height: 1.45; background: #eef4ff; border-radius: 8px; padding: 6px 8px; color: var(--ink); }
+.dog-card .tips b { color: var(--navy); margin-right: 2px; }
+.dog-card .tips .tips-ai { color: var(--muted); }
+.dog-card .tips i { font-style: normal; font-size: 11px; }
