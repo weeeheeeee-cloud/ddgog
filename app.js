@@ -332,9 +332,11 @@ async function renderPhotos() {
        <span>분류 완료 <b>${done.length}</b></span>
        ${unsorted.length ? `<span class="warn">분류 안 됨 <b>${unsorted.length}</b></span>` : ""}
        ${pending.length && !state.busy ? `<button id="resume" class="btn primary sm">남은 ${pending.length}장 분류하기</button>` : ""}
+       ${!state.busy && done.some((p) => p.dog_ids.some((d) => dogById(d)?.auto)) ? `<button id="recheck-auto" class="btn ghost sm">새 강아지 다시 분류</button>` : ""}
        ${done.length ? `<button id="save-all" class="btn ghost sm">${CAN_FOLDER ? "전체 폴더별 저장" : "전체 ZIP 받기"}</button>` : ""}`
     : "";
   $("#resume")?.addEventListener("click", () => classifyPending());
+  $("#recheck-auto")?.addEventListener("click", () => { autoChecked.clear(); recheckAutoGroups(); });
   $("#save-all")?.addEventListener("click", (e) => saveAll(e.currentTarget));
 
   // 강아지별 묶기
@@ -357,7 +359,7 @@ async function renderPhotos() {
 
   const thumb = await signed("photos", P.map((p) => p.thumb_path));
   const ref = await signed("refs", dogIds.map((id) => dogById(id)?.ref_path));
-  const img = (p) => `<img loading="lazy" src="${thumb(p.thumb_path)}" data-photo="${p.id}" class="rot${p.rotation || 0}" alt="">`;
+  const img = (p) => `<img loading="lazy" src="${thumb(p.thumb_path)}" data-photo="${p.id}" class="rot${p.rotation || 0}${p.status === "done" && p.confidence === "low" ? " unsure" : ""}" alt=""${p.status === "done" && p.confidence === "low" ? ' title="AI가 확신하지 못한 사진 — 확인해 주세요"' : ""}>`;
 
   box.innerHTML = dogIds.map((id) => {
     const dog = dogById(id);
@@ -470,7 +472,55 @@ async function addToToday(id) {
 // 이름이 정해지거나 얼굴을 새로 배우면, '분류 안 된 사진'을 잠시 뒤 다시 훑어서 그 아이 사진을 꺼내 옴
 // (직원이 직접 뺀 사진은 건드리지 않음)
 let rescanTimer = null, rescanAgain = false;
+const autoChecked = new Set();
+
+// '새 강아지' 그룹 사진을 이름 있는 아이들과 다시 비교해서, 맞는 아이가 있으면 옮기고
+// 한 그룹의 사진이 대부분 같은 아이로 가면 그 그룹을 그 아이로 합침 (얼굴 사진도 함께)
+async function recheckAutoGroups() {
+  const autoIds = new Set(state.dogs.filter((d) => d.auto).map((d) => d.id));
+  if (!autoIds.size || !state.attendance.size) return;
+  await loadPhotos();
+  const list = state.photos.filter((p) => p.status === "done" && p.confidence !== "manual" &&
+    p.dog_ids.some((d) => autoIds.has(d)) && !autoChecked.has(p.id));
+  if (!list.length) return;
+  state.busy = true;
+  const before = new Map(list.map((p) => [p.id, p.dog_ids.filter((d) => autoIds.has(d))]));
+  let done = 0;
+  progress("새 강아지 그룹을 이름 있는 아이들과 다시 비교하는 중…", 0, list.length);
+  await pool(list, 3, async (p) => {
+    await classifyOne(p.id, true);
+    autoChecked.add(p.id);
+    progress("새 강아지 그룹을 이름 있는 아이들과 다시 비교하는 중…", ++done, list.length);
+  });
+  await loadPhotos();
+  const moved = new Map(); // 자동그룹 id → {total, to: Map(이름있는 아이 → 장수)}
+  for (const p of list) {
+    const now = state.photos.find((x) => x.id === p.id);
+    for (const a of before.get(p.id)) {
+      const m = moved.get(a) || { total: 0, to: new Map() };
+      m.total++;
+      if (now && !now.dog_ids.includes(a)) now.dog_ids.forEach((d) => m.to.set(d, (m.to.get(d) || 0) + 1));
+      moved.set(a, m);
+    }
+  }
+  let merged = 0, photosMoved = 0;
+  for (const [a, m] of moved) {
+    const [best, n] = [...m.to].sort((x, y) => y[1] - x[1])[0] || [];
+    photosMoved += [...m.to.values()].reduce((s, v) => s + v, 0);
+    if (best && n >= Math.max(1, Math.ceil(m.total * 0.6))) {
+      const { error } = await sb.rpc("merge_dogs", { src: a, dst: best });
+      if (!error) merged++;
+    }
+  }
+  state.busy = false;
+  await loadDogs();
+  await loadPhotos();
+  progress(`새 강아지 다시 확인 완료 · ${photosMoved}장 이름 있는 아이로 옮김${merged ? ` · 그룹 ${merged}개 합침` : ""}`, list.length, list.length);
+  setTimeout(() => $("#progress").classList.add("hidden"), 5000);
+  await render();
+}
 function queueRescan() {
+  autoChecked.clear();
   clearTimeout(rescanTimer);
   rescanTimer = setTimeout(rescanUnsorted, 30000);
 }
@@ -790,11 +840,11 @@ $("#file").addEventListener("change", async (e) => {
 });
 
 let lastError = "";
-async function classifyOne(photoId) {
+async function classifyOne(photoId, recheck = false) {
   for (let attempt = 0; attempt < 4; attempt++) {
     // 2분 넘게 답이 없으면 멈춘 것으로 보고 다시 시도
     const res = await Promise.race([
-      sb.functions.invoke("classify", { body: { photo_id: photoId } }),
+      sb.functions.invoke("classify", { body: { photo_id: photoId, recheck } }),
       sleep(120000).then(() => ({ error: { context: { status: 504 } } })),
     ]);
     const { error } = res;
@@ -847,6 +897,7 @@ async function classifyPending() {
   if (!stop) await pool(rest, 3, (p) => runOne(p.id));
   state.busy = false;
   if (rescanAgain) { rescanAgain = false; queueRescan(); }
+  else if (!stop) await recheckAutoGroups();
   if (fail && lastError) {
     progress("분류를 멈췄어요", ok, list.length, lastError);
   } else {
@@ -926,13 +977,17 @@ $("#sheet-search").addEventListener("keydown", (e) => {
 
 // 사람이 고쳐 준 사진 = AI가 틀리거나 망설인 사진 → 그 아이 대표 사진으로 배워 둠 (한 마리만 나온 사진, 아이당 하루 4장까지)
 const learned = new Map();
+function learnMistake(photo_id, wrong_id, right_id) {
+  sb.functions.invoke("learn-mistake", { body: { photo_id, wrong_id, right_id } }).catch(() => {});
+}
 async function learnFrom(p, ids, before) {
   if (ids.length !== 1) return;
   const id = ids[0];
-  const wasRight = before.status === "done" && before.ids.length === 1 && before.ids[0] === id;
+  // AI가 확신해서 맞힌 사진은 이미 아는 것 → 확신 못 했거나 틀렸거나 직원이 직접 넣은 사진만 학습
+  const wasRight = before.status === "done" && before.conf === "high" && before.ids.length === 1 && before.ids[0] === id;
   if (wasRight) return;
   const k = `${state.day}:${id}`;
-  if ((learned.get(k) || 0) >= 4) return;
+  if ((learned.get(k) || 0) >= 8) return;
   learned.set(k, (learned.get(k) || 0) + 1);
   try {
     const { data: blob } = await sb.storage.from("photos").download(p.thumb_path);
@@ -1027,9 +1082,16 @@ $("#sheet").addEventListener("click", (e) => { if (e.target.id === "sheet") clos
 $("#sheet-save").addEventListener("click", async () => {
   const ids = $$("#sheet-chips button.on").map((b) => b.dataset.dog);
   if (!ids.length) { toast("강아지를 한 마리 이상 골라 주세요"); return; }
-  const before = { status: sheetPhoto.status, ids: [...sheetPhoto.dog_ids] };
+  const before = { status: sheetPhoto.status, ids: [...sheetPhoto.dog_ids], conf: sheetPhoto.confidence };
   await sb.from("photos").update({ dog_ids: ids, status: "done", confidence: "manual" }).eq("id", sheetPhoto.id);
   learnFrom(sheetPhoto, ids, before);
+  // AI가 잘못 넣었던 아이 → 실수로 기억하고 두 아이 구분 포인트를 스스로 다시 정리
+  if (before.conf !== "manual") {
+    const wrong = before.ids.filter((id) => !ids.includes(id) && !dogById(id)?.auto);
+    const added = ids.filter((id) => !before.ids.includes(id));
+    wrong.forEach((w) => learnMistake(sheetPhoto.id, w, added.length === 1 ? added[0] : null));
+  }
+  sheetPhoto.confidence = "manual";
   // 명단에 없던 아이를 직접 골랐으면 오늘 명단에 넣어서 AI도 그 아이를 후보로 보게 함
   const extra = ids.filter((id) => !state.attendance.has(id));
   if (extra.length && state.attendance.size) {
@@ -1071,8 +1133,11 @@ $("#sheet-out").addEventListener("click", async () => {
   const p = sheetPhoto, dogId = sheetKey;
   const rest = p.dog_ids.filter((d) => d !== dogId);
   const status = rest.length ? "done" : "review";
+  const wasAi = p.confidence !== "manual";
   const { error } = await sb.from("photos").update({ dog_ids: rest, status, confidence: "manual" }).eq("id", p.id);
   if (error) { toast("옮기지 못했어요"); return; }
+  if (wasAi && !dogById(dogId)?.auto) learnMistake(p.id, dogId, null);
+  p.confidence = "manual";
   Object.assign(p, { dog_ids: rest, status });
   toast(rest.length ? `${dogById(dogId)?.name}에서 뺐어요` : "분류 안 된 사진으로 옮겼어요");
   const i = sheetList.indexOf(p.id);

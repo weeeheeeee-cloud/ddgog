@@ -16,6 +16,8 @@ const CORS = {
 };
 
 const SYSTEM = `You identify individual dogs in photos taken at a dog daycare.
+You may also get "past mistakes": photos that were matched to the wrong dog before, with the correct answer.
+Study them: the same look-alike dogs come every day, so do not repeat those mistakes.
 You get numbered known dogs, each with one or more reference photos taken from different angles
 (front, side, back, lying down…), possibly none yet. Some dogs also have
 "today's look": a photo of the same dog taken TODAY, showing what it looks like today.
@@ -50,10 +52,11 @@ In the reply, "MAIN dogs" means exactly these dogs that are properly shown.
 Reply with JSON only, no other text:
 {"dogs":[<reference numbers of MAIN dogs>],"sure":[<numbers from "dogs" you are confident about>],"new_dog":true|false,"unknown_main":<number>,"confidence":"high"|"low","rotate":0|90|180|270,"note":"<한국어 30자 이내: 판단 근거>"}
 Keep "note" very short (under 30 Korean characters).
-- "dogs": ALL known dogs properly shown in the new photo (one or several; [] if none). Include your best
-  guess for each properly shown dog even when unsure; list in "sure" only those you are confident about.
-  Judge each dog separately: an unknown or unclear second dog does NOT make you unsure about a dog you
-  clearly recognize. Only today's attendees are listed, so pick the best fit among them.
+- "dogs": ALL known dogs properly shown in the new photo (one or several; [] if none). ALWAYS give your best
+  guess for each properly shown dog, even when unsure: only today's attendees are listed, so pick the best fit
+  among them using reference photos, body-part features and today's look. Leave a dog out of "dogs" only when it
+  clearly matches NONE of them (different breed type, coat colour or size). List in "sure" only the ones you are
+  confident about. Judge each dog separately: an unclear second dog does NOT make you unsure about a dog you recognize.
 - "unknown_main": how many properly shown dogs match none of the known dogs.
 - "new_dog": true if the photo has exactly one MAIN dog and you are fairly sure it is none of the
   known dogs (e.g. clearly different coat color, size or breed type), even if its face is hidden.
@@ -116,8 +119,9 @@ Deno.serve(async (req) => {
   if (!user) return json({ error: "로그인이 필요해요" }, 401);
 
   let photoId: string;
+  let recheck = false;
   try {
-    ({ photo_id: photoId } = await req.json());
+    ({ photo_id: photoId, recheck = false } = await req.json());
   } catch {
     return json({ error: "bad request" }, 400);
   }
@@ -130,8 +134,12 @@ Deno.serve(async (req) => {
   const { data: assigned } = await supa.from("assignments").select("dog_id").eq("day", photo.day);
   let q = supa.from("dogs").select("id, name, note, tips, tips_ai, features, ref_path, dog_refs(path, created_at)")
     .eq("active", true).order("created_at");
+  // recheck: '새 강아지' 그룹 사진을 이름 있는 아이들과만 다시 비교
   if (assigned && assigned.length) {
-    q = q.or(`id.in.(${assigned.map((a) => a.dog_id).join(",")}),auto.eq.true`);
+    q = recheck ? q.in("id", assigned.map((a) => a.dog_id)).eq("auto", false)
+      : q.or(`id.in.(${assigned.map((a) => a.dog_id).join(",")}),auto.eq.true`);
+  } else if (recheck) {
+    q = q.eq("auto", false);
   }
   const { data: dogs } = await q;
   // 오늘 명단에 있지만 대표 사진이 없는 아이 수 (호텔링 손님 등)
@@ -182,6 +190,32 @@ Deno.serve(async (req) => {
       content[content.length - 1].cache_control = { type: "ephemeral" };
     } else {
       content.push({ type: "text", text: "Reference dogs: none yet." });
+    }
+    // 지난 실수 (직원이 고쳐 준 사진): 오늘 후보와 관련된 것만 최근 순 10장
+    if (refs.length) {
+      const idx = new Map(refs.map((d, i) => [d.id, i + 1]));
+      const ids = refs.map((d) => d.id);
+      const { data: les } = await supa.from("lessons").select("wrong_dog, right_dog, path, note")
+        .or(`wrong_dog.in.(${ids.join(",")}),right_dog.in.(${ids.join(",")})`)
+        .order("created_at", { ascending: false }).limit(10);
+      const usable = (les ?? []).filter((l) => idx.has(l.wrong_dog) || idx.has(l.right_dog));
+      if (usable.length) {
+        await Promise.all(usable.filter((l) => !refCache.has(l.path)).map(async (l) => {
+          try { refCache.set(l.path, encodeBase64(await download(supa, "refs", l.path))); } catch { /* 건너뜀 */ }
+        }));
+        content.push({ type: "text", text: "Past mistakes (learn from these):" });
+        const nm = (id: string | null) => {
+          if (!id) return "none of them";
+          const n = idx.get(id);
+          return n ? `[${n}] ${refs[n - 1].name}` : "another dog (not here today)";
+        };
+        for (const l of usable) {
+          const b64 = refCache.get(l.path);
+          if (!b64) continue;
+          content.push({ type: "text", text: `Was wrongly matched to ${nm(l.wrong_dog)}; it is actually ${nm(l.right_dog)}.${l.note ? ` ${l.note}` : ""}` });
+          content.push({ type: "image", source: { type: "base64", media_type: "image/jpeg", data: b64 } });
+        }
+      }
     }
     if (faceless) {
       content.push({ type: "text", text: `Note: ${faceless} dog(s) here today have NO reference photos yet (e.g. hotel guests). ` +
@@ -251,15 +285,13 @@ Deno.serve(async (req) => {
     // 아이별로 판단: 확신한 아이가 다 맞으면 끝. 다른 아이가 애매해도 확신한 아이 사진은 보냄
     const sureNums: number[] = Array.isArray(parsed.sure) ? parsed.sure.map(Number) : (parsed.confidence === "high" ? nums : []);
     const sureIds = new Set(sureNums.filter((n) => n >= 1 && n <= refs.length).map((n) => refs[n - 1].id));
-    let status = "review";
-    if (ids.length && ids.every((id) => sureIds.has(id))) status = "done";
-    else if (sureIds.size > 0) {
-      ids = ids.filter((id) => sureIds.has(id)); // 확신한 아이만 보내고, 애매한 아이는 빼 둠
-      status = "done";
-    }
+    // 애매해도 가장 닮은 아이에게 우선 넣음 (확신 못 한 사진은 confidence low → 화면에 '확인' 표시)
+    let status = ids.length ? "done" : "review";
+    const allSure = ids.length > 0 && ids.every((id) => sureIds.has(id));
+    if (recheck && !ids.length) return json({ unchanged: true });
 
     // 처음 보는 강아지 → 새 그룹 자동 생성 (이 사진을 기준 사진으로)
-    if (!ids.length && parsed.new_dog === true && unknownMain <= 1) {
+    if (!recheck && !ids.length && parsed.new_dog === true && unknownMain <= 1) {
       const { count } = await supa.from("dogs").select("id", { count: "exact", head: true });
       const { data: dog, error: dErr } = await supa.from("dogs")
         .insert({ name: `새 강아지 ${(count ?? 0) + 1}`, auto: true }).select("id").single();
@@ -278,14 +310,14 @@ Deno.serve(async (req) => {
     await supa.from("photos").update({
       rotation,
       dog_ids: ids,
-      confidence: parsed.confidence ?? null,
+      confidence: allSure ? "high" : "low",
       ai_note: note,
       status,
     }).eq("id", photoId);
 
     return json({ status, dog_ids: ids });
   } catch (e) {
-    await supa.from("photos").update({ status: "error", ai_note: String(e).slice(0, 200) }).eq("id", photoId);
+    if (!recheck) await supa.from("photos").update({ status: "error", ai_note: String(e).slice(0, 200) }).eq("id", photoId);
     return json({ error: String(e) }, 500);
   }
 });
