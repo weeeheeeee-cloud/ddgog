@@ -139,13 +139,13 @@ Deno.serve(async (req) => {
   }
 
   const { data: photo, error: pErr } = await supa
-    .from("photos").select("id, day, thumb_path, vec").eq("id", photoId).single();
+    .from("photos").select("id, day, thumb_path, vec, practice").eq("id", photoId).single();
   if (pErr || !photo) return json({ error: "사진을 찾을 수 없어요" }, 404);
 
   // 후보: 그날 담당이 지정된 강아지 + 이름 안 붙은 자동 그룹. 담당 지정이 없으면 활성 강아지 전체
   // 연습 모드(관리 탭에서 켬): 출석 명단을 무시하고 전체 아이 중 지문으로 추려서 분류
-  const { data: pm } = await supa.from("app_settings").select("value").eq("name", "practice").maybeSingle();
-  const practiceOn = pm?.value?.on === true;
+  // 학습 모드로 올린 사진은 출석 명단을 무시하고 전체 아이 중 지문으로 추려서 분류
+  const practiceOn = photo.practice === true;
   const { data: assignedRaw } = await supa.from("assignments").select("dog_id").eq("day", photo.day);
   const assigned = practiceOn ? [] : assignedRaw;
   let q = supa.from("dogs").select("id, name, auto, note, tips, tips_ai, features, ref_path, dog_refs(path, created_at)")
@@ -290,7 +290,7 @@ Deno.serve(async (req) => {
     // 오늘 모습: 오늘 이미 분류된 사진 중 강아지별 가장 최근 1장 (옷·미용 상태가 그날 그대로라 큰 단서)
     if (refs.length) {
       const { data: today } = await supa.from("photos")
-        .select("id, thumb_path, dog_ids").eq("day", photo.day).eq("status", "done")
+        .select("id, thumb_path, dog_ids").eq("day", photo.day).eq("status", "done").eq("practice", photo.practice === true)
         .neq("id", photoId).order("created_at", { ascending: false }).limit(400);
       const latest = new Map<string, string>();
       for (const p of today ?? []) {

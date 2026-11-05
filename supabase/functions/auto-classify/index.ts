@@ -33,9 +33,7 @@ Deno.serve(async (req) => {
   if (!k || req.headers.get("x-worker-key") !== k.key) return json({ error: "forbidden" }, 403);
 
   const day = kstToday();
-  const { count } = await admin.from("assignments").select("dog_id", { count: "exact", head: true }).eq("day", day);
-  const { data: pm } = await admin.from("app_settings").select("value").eq("name", "practice").maybeSingle();
-  if (!count && pm?.value?.on !== true) return json({ skipped: "no roster" });
+  // 언제 돌지는 DB(kick_auto_classify)가 정함: 명단 있는 날 사진 또는 학습 모드 사진
 
   const started = Date.now();
   let done = 0, copied = 0, failed = 0;

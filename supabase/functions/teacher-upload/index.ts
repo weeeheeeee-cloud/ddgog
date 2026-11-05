@@ -55,7 +55,10 @@ Deno.serve(async (req) => {
 
   if (body.action === "done") {
     // 이미 올라온 똑같은 사진(찍은 시각 같고 이미지 거의 같음)은 건너뜀
-    const { data: existing } = await admin.from("photos").select("phash, taken_at").eq("day", day);
+    // 학습 모드가 켜져 있으면 학습용 사진으로 따로 모음
+    const { data: pm } = await admin.from("app_settings").select("value").eq("name", "practice").maybeSingle();
+    const practice = pm?.value?.on === true;
+    const { data: existing } = await admin.from("photos").select("phash, taken_at").eq("day", day).eq("practice", practice);
     const seen = (existing ?? []).map((p) => ({ h: p.phash as string, t: p.taken_at ? +new Date(p.taken_at) : null }));
     let added = 0, skipped = 0;
     const rows = [];
@@ -71,7 +74,7 @@ Deno.serve(async (req) => {
       seen.push({ h: h ?? "", t });
       rows.push({
         id, day, path: `${day}/${id}.jpg`, thumb_path: `${day}/thumb/${id}.jpg`,
-        taken_at: it.taken_at ?? null, phash: h, sharp: typeof it.sharp === "number" ? it.sharp : null, source: "teacher",
+        taken_at: it.taken_at ?? null, phash: h, sharp: typeof it.sharp === "number" ? it.sharp : null, source: "teacher", practice,
         vec: typeof it.vec === "string" && /^\[[-0-9.,e]+\]$/.test(it.vec) && it.vec.split(",").length === 384 ? it.vec : null,
       });
       added++;

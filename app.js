@@ -270,7 +270,7 @@ async function loadPhotos() {
   for (let from = 0; ; from += 1000) {
     const { data } = await sb.from("photos")
       .select("id, path, thumb_path, dog_ids, status, ai_note, confidence, created_at, taken_at, phash, sharp, rotation")
-      .eq("day", state.day).order("created_at").range(from, from + 999);
+      .eq("day", state.day).eq("practice", !!state.practice).order("created_at").range(from, from + 999);
     all.push(...(data || []));
     if (!data || data.length < 1000) break;
   }
@@ -848,7 +848,7 @@ $("#file").addEventListener("change", async (e) => {
         sb.storage.from("photos").upload(thumbPath, small, opt),
       ]);
       if (a.error || b.error) throw a.error || b.error;
-      const ins = await sb.from("photos").insert({ id, day, path, thumb_path: thumbPath, taken_at: taken, ...st });
+      const ins = await sb.from("photos").insert({ id, day, path, thumb_path: thumbPath, taken_at: taken, practice: !!state.practice, ...st });
       if (ins.error) throw ins.error;
     } catch (err) {
       console.error(err);
@@ -885,7 +885,7 @@ async function classifyOne(photoId, recheck = false) {
 }
 
 // 같은 아이가 여러 그룹으로 생기지 않도록 한 장씩 차례로 분류
-// 사진에 지문이 없으면 만들어서 저장 (연습 모드에서 후보를 추리는 데 필요)
+// 사진에 지문이 없으면 만들어서 저장 (학습 모드에서 후보를 추리는 데 필요)
 async function ensureVec(id) {
   try {
     const { data: p } = await sb.from("photos").select("thumb_path, vec").eq("id", id).single();
@@ -897,7 +897,7 @@ async function ensureVec(id) {
 }
 async function classifyPending() {
   if (state.busy) return;
-  const { count: waiting } = await sb.from("photos").select("id", { count: "exact", head: true }).eq("day", state.day).eq("status", "pending");
+  const { count: waiting } = await sb.from("photos").select("id", { count: "exact", head: true }).eq("day", state.day).eq("practice", !!state.practice).eq("status", "pending");
   if (!waiting) { $("#progress").classList.add("hidden"); await render(); return; }
   // 명단부터: 오늘 온 아이들 안에서만 찾아야 빠르고 정확함
   if (state.draft) {
@@ -906,7 +906,7 @@ async function classifyPending() {
     await render();
     return;
   }
-  // 명단 없음 = 연습 모드: 사진 지문으로 전체 아이 중 닮은 10마리를 추려서 비교 (지문이 없으면 먼저 만듦)
+  // 명단 없음 = 학습 모드: 사진 지문으로 전체 아이 중 닮은 10마리를 추려서 비교 (지문이 없으면 먼저 만듦)
   state.busy = true;
   await loadPractice();
   const noRoll = !state.attendance.size || state.practice;
@@ -914,7 +914,7 @@ async function classifyPending() {
   // 서버 작업자와 나눠서 처리: 12장씩 '가져가서' 처리하므로 같은 사진을 두 번 분류하지 않음
   let total = waiting, ok = 0, fail = 0, done = 0, stop = false, saved = 0, first = true;
   const tick = () => progress("AI가 강아지별로 묶는 중… 창을 닫지 마세요", Math.min(done, total), total,
-    noRoll ? "연습 모드(명단 없음): 사진 지문으로 닮은 아이 10마리를 추려서 비교해요. 틀린 건 고쳐 주면 그대로 학습해요."
+    noRoll ? "학습 모드(명단 없음): 사진 지문으로 닮은 아이 10마리를 추려서 비교해요. 틀린 건 고쳐 주면 그대로 학습해요."
            : `아래 목록이 조금씩 채워져요${saved ? ` · 연속 사진 ${saved}장은 같은 장면이라 함께 처리` : ""}`);
   tick();
   while (!stop) {
@@ -951,7 +951,7 @@ async function classifyPending() {
     if (first) { for (const g of groups) await runGroup(g); first = false; }
     else await pool(groups, 6, runGroup);
     if (state.tab === "photos") { await loadDogs(); await loadPhotos(); await renderPhotos(); }
-    const { count: left } = await sb.from("photos").select("id", { count: "exact", head: true }).eq("day", state.day).in("status", ["pending", "working"]);
+    const { count: left } = await sb.from("photos").select("id", { count: "exact", head: true }).eq("day", state.day).eq("practice", !!state.practice).in("status", ["pending", "working"]);
     total = done + (left || 0);
   }
   state.busy = false;
@@ -1497,9 +1497,10 @@ async function renderSide() {
 
   // ---- 사진 탭: 오늘 온 아이들 + 분류된 사진 장수
   if (state.tab === "photos") {
-    const today = state.dogs.filter((d) => state.attendance.has(d.id)).sort(dogOrder);
-    layout?.classList.toggle("with-side", today.length > 0);
-    if (!today.length) return;
+    const today = state.practice ? [] : state.dogs.filter((d) => state.attendance.has(d.id)).sort(dogOrder);
+    const hasAny = state.photos.some((p) => p.status === "done" && p.dog_ids.length);
+    layout?.classList.toggle("with-side", today.length > 0 || (state.practice && hasAny));
+    if (!today.length && !(state.practice && hasAny)) return;
     const count = new Map();
     const per = new Map();
     let done = 0, unsorted = 0, pending = 0;
@@ -1511,9 +1512,9 @@ async function renderSide() {
     for (const [d, list] of per) count.set(d, splitSimilar(list).shown.length); // 비슷한 사진 정리 후 장수
     const zero = today.filter((d) => !count.get(d.id)).length;
     // 명단 밖인데 사진이 분류된 아이 (자동 그룹 등)
-    const extra = [...count.keys()].filter((id) => !state.attendance.has(id) && dogById(id)).map(dogById).sort(dogOrder);
+    const extra = [...count.keys()].filter((id) => (state.practice || !state.attendance.has(id)) && dogById(id)).map(dogById).sort(dogOrder);
 
-    $("#side-head-label").innerHTML = `📋 오늘 <b id="side-count">${today.length}</b>마리`;
+    $("#side-head-label").innerHTML = state.practice ? `🧪 학습 결과 <b id="side-count">${extra.length}</b>마리` : `📋 오늘 <b id="side-count">${today.length}</b>마리`;
     $("#side-sub").textContent = state.photos.length
       ? `분류 완료 ${done}장${unsorted ? ` · 분류 안 됨 ${unsorted}` : ""}${pending ? ` · 대기 ${pending}` : ""}${zero && done ? ` · 사진 없는 아이 ${zero}` : ""}`
       : "아직 올린 사진이 없어요";
@@ -1531,7 +1532,7 @@ async function renderSide() {
     const keyDay = state.day;
     if (sideCountsDay !== keyDay) { sideCounts.clear(); sideCountsDay = keyDay; }
     const html = today.map(row).join("") +
-      (extra.length ? `<p class="side-sec">명단 밖 ${extra.length}</p>` + extra.map(row).join("") : "") +
+      (extra.length ? (state.practice ? "" : `<p class="side-sec">명단 밖 ${extra.length}</p>`) + extra.map(row).join("") : "") +
       `<form id="side-add" class="side-add"><input id="side-add-name" placeholder="이름 추가 (호텔링은 H 이름)"><button class="btn ghost sm">추가</button></form>`;
     $("#side-list").innerHTML = html;
     [...today, ...extra].forEach((d) => sideCounts.set(d.id, count.get(d.id) || 0));
@@ -2040,7 +2041,7 @@ async function backfillFingerprints(manual = false) {
     const { data: refs } = await sb.from("dog_refs").select("id, path").is("vec", null).limit(5000);
     const { data: photos } = await sb.from("photos").select("id, thumb_path, rotation").is("vec", null).gte("day", since).limit(5000);
     const { data: les } = await sb.from("lessons").select("id, path").is("vec", null).limit(2000);
-    // 대표 사진 먼저 (명단 없이 연습할 때 후보를 추리는 기준), 그다음 실수 기록·분류된 사진
+    // 대표 사진 먼저 (명단 없이 학습할 때 후보를 추리는 기준), 그다음 실수 기록·분류된 사진
     const todo = [...(refs || []).map((r) => ({ kind: "r", ...r })), ...(les || []).map((l) => ({ kind: "l", ...l })), ...(photos || []).map((p) => ({ kind: "p", ...p }))];
     fpJob.total = todo.length; fpJob.done = 0;
     if (!todo.length) { msg("모든 사진에 지문이 있어요 ✓"); return; }
@@ -2063,7 +2064,7 @@ async function backfillFingerprints(manual = false) {
 }
 $("#fp-run").addEventListener("click", () => backfillFingerprints(true));
 
-// ---- 연습 모드 스위치
+// ---- 학습 모드 스위치
 async function loadPractice() {
   const { data } = await sb.from("app_settings").select("value").eq("name", "practice").maybeSingle();
   state.practice = data?.value?.on === true;
@@ -2077,7 +2078,9 @@ $("#practice-on").addEventListener("change", async (e) => {
   if (error) { toast("바꾸지 못했어요"); e.target.checked = !on; return; }
   state.practice = on;
   document.body.classList.toggle("practice", on);
-  toast(on ? "연습 모드를 켰어요. 명단 없이 모든 아이 중에서 찾아요" : "연습 모드를 껐어요. 다시 출석 명단 기준으로 분류해요");
+  urlCache.clear();
+  await render();
+  toast(on ? "학습 모드를 켰어요. 기존 사진은 숨기고, 새로 올리는 사진만 모든 아이 중에서 찾아 분류해요" : "학습 모드를 껐어요. 원래 사진과 출석 명단 기준 분류로 돌아왔어요");
 });
 // 로그인되어 있으면 1분 뒤 조용히 시작 (분류에 방해되지 않게)
 setTimeout(async () => { const { data } = await sb.auth.getSession(); if (data.session) backfillFingerprints(); }, 60000);
