@@ -1275,6 +1275,52 @@ async function saveAll(btn) {
 
 /* ================= 관리 ================= */
 /* ---------- 왼쪽 명단 (항상 보임) ---------- */
+// 오늘 명단에서 빼기: 이 아이로 들어간 사진은 지우지 않고 '분류 안 된 사진'으로 돌린 뒤 다시 분류
+async function removeFromToday(dog) {
+  if (!dog) return;
+  const mine = state.photos.filter((p) => p.dog_ids.includes(dog.id));
+  if (!confirm(`'${dog.name}'을(를) 오늘 명단에서 뺄까요?${mine.length ? `\n이 아이로 분류된 사진 ${mine.length}장은 다른 아이로 다시 분류할게요.` : ""}`)) return;
+  await sb.from("assignments").delete().eq("day", state.day).eq("dog_id", dog.id);
+  state.attendance.delete(dog.id);
+  state.hotel.delete(dog.id);
+  for (const p of mine) {
+    const rest = p.dog_ids.filter((d) => d !== dog.id);
+    const status = rest.length ? "done" : "pending";
+    await sb.from("photos").update({ dog_ids: rest, status }).eq("id", p.id);
+    Object.assign(p, { dog_ids: rest, status });
+  }
+  toast(`${dog.name}을(를) 오늘 명단에서 뺐어요`);
+  await render();
+  if (mine.length) classifyPending();
+}
+// 오늘 명단에 이름 추가 (명단에 없으면 새로 등록, 호텔링이면 H)
+async function addNameToToday(name, hotel) {
+  if (!name) return;
+  let m = matchDog(name, null);
+  let dog = m.dog;
+  if (!dog && m.choices) {
+    const v = prompt(`'${name}' 이름의 아이가 여럿이에요. 번호를 골라 주세요\n` + m.choices.map((c, i) => `${i + 1}. ${c.name}`).join("\n"), "1");
+    if (v === null) return;
+    dog = m.choices[+v - 1];
+  }
+  if (!dog) {
+    const { data, error } = await sb.from("dogs").insert({ name, auto: false, active: true }).select().single();
+    if (error) { toast("추가하지 못했어요"); return; }
+    dog = data;
+    state.dogs.push(dog);
+  }
+  if (!state.attendance.has(dog.id)) {
+    await sb.from("assignments").insert({ day: state.day, dog_id: dog.id, hotel });
+    state.attendance.add(dog.id);
+  } else if (hotel) {
+    await sb.from("assignments").update({ hotel: true }).eq("day", state.day).eq("dog_id", dog.id);
+  }
+  if (hotel) state.hotel.add(dog.id);
+  toast(`${dog.name}${hotel ? "(호텔링)" : ""}을(를) 오늘 명단에 넣었어요`);
+  queueRescan();
+  await render();
+}
+
 async function renderSide() {
   const layout = document.querySelector(".layout");
   const ref = await signed("refs", state.dogs.map((d) => d.ref_path));
@@ -1303,14 +1349,25 @@ async function renderSide() {
       : "아직 올린 사진이 없어요";
     const row = (d) => {
       const n = count.get(d.id) || 0;
-      return `<button class="side-row ${n ? "" : "zero"}" data-side="${d.id}" title="${esc(d.name)}">
+      const inToday = state.attendance.has(d.id);
+      return `<div class="side-item"><button class="side-row ${n ? "" : "zero"}" data-side="${d.id}" title="${esc(d.name)}">
         ${d.ref_path ? `<img src="${ref(d.ref_path)}" alt="">` : `<span class="noimg">?</span>`}
-        <span class="nm">${esc(d.name)}</span>
+        <span class="nm">${state.hotel.has(d.id) ? `<b class="tag-h">H</b>` : ""}${esc(d.name)}</span>
         <b class="cnt">${n}<small>장</small></b>
-      </button>`;
+      </button>${inToday ? `<button class="side-x" data-unroll="${d.id}" title="오늘 명단에서 빼기">×</button>` : ""}</div>`;
     };
     $("#side-list").innerHTML = today.map(row).join("") +
-      (extra.length ? `<p class="side-sec">명단 밖 ${extra.length}</p>` + extra.map(row).join("") : "");
+      (extra.length ? `<p class="side-sec">명단 밖 ${extra.length}</p>` + extra.map(row).join("") : "") +
+      `<form id="side-add" class="side-add"><input id="side-add-name" placeholder="이름 추가 (호텔링은 H 이름)"><button class="btn ghost sm">추가</button></form>`;
+    $$("[data-unroll]", $("#side-list")).forEach((b) => b.addEventListener("click", () => removeFromToday(dogById(b.dataset.unroll))));
+    $("#side-add").addEventListener("submit", async (e) => {
+      e.preventDefault();
+      const raw = $("#side-add-name").value.trim();
+      if (!raw) return;
+      const hotel = /^\s*[Hh]\s+|\(\s*[Hh]\s*\)\s*$|\s+[Hh]\s*$/.test(raw);
+      const name = raw.replace(/^\s*[Hh]\s+|\s*\(\s*[Hh]\s*\)\s*$|\s+[Hh]\s*$/g, "").trim();
+      await addNameToToday(name, hotel);
+    });
     $$("[data-side]", $("#side-list")).forEach((b) => b.addEventListener("click", () => {
       const g = document.querySelector(`[data-list="${b.dataset.side}"]`);
       if (g) {

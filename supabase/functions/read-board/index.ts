@@ -27,6 +27,8 @@ Extract ONLY the dogs' names.
 - Names in an app may be written with the breed or owner, e.g. "콩이(말티즈)" or "콩이 / 김OO" → just "콩이".
 - If a list of known dog names is given and a handwritten word is plausibly one of them, use the known spelling.
 - Keep each name exactly once.
+- Include EVERY dog on the list, hotel guests too, even when a name is not among the known names
+  (new or one-off guests are common).
 - Hotel guests (호텔링) are marked with an "H" (e.g. "H 콩이", "콩이(H)", "콩이 h", a circled H, or listed
   under an H / 호텔 section). Do NOT include the H in the name; list those names in "hotel" as well.
 Reply with JSON only:

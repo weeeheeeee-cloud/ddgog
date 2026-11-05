@@ -387,3 +387,11 @@ img.rot270 { transform: rotate(270deg); }
 .feat div{margin-top:4px;line-height:1.5}
 
 .grid img.unsure{outline:3px dashed #f0a000;outline-offset:-3px}
+
+.side-item{display:flex;align-items:center;gap:2px}
+.side-item .side-row{flex:1;min-width:0}
+.side-x{border:0;background:none;color:#bbb;font-size:16px;cursor:pointer;padding:4px 6px;border-radius:6px}
+.side-x:hover{color:#d33;background:#fdeaea}
+.side-add{display:flex;gap:6px;padding:10px 4px 4px}
+.side-add input{flex:1;min-width:0;padding:6px 10px;border:1px solid #ddd;border-radius:999px;font:inherit;font-size:13px}
+.side-row .nm .tag-h{margin-right:4px}
