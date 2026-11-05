@@ -314,7 +314,7 @@ $$(".tabs button").forEach((b) => b.addEventListener("click", () => { state.tab 
 async function render() {
   $$(".tabs button").forEach((b) => b.classList.toggle("on", b.dataset.tab === state.tab));
   $$(".tab").forEach((s) => s.classList.toggle("hidden", s.id !== "tab-" + state.tab));
-  await Promise.all([loadDogs(), loadAttendance()]);
+  await Promise.all([loadDogs(), loadAttendance(), loadPractice()]);
   if (state.tab === "photos") { await loadPhotos(); await renderPhotos(); }
   else if (state.tab === "roster") renderRoster();
   else if (state.tab === "admin") { renderUpLinks(); loadPractice(); }
