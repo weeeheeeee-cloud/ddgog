@@ -29,8 +29,12 @@ How to recognize a dog — the face is NOT required. Use every clue together:
   may show different clothes, so an outfit difference from it does not rule a dog out.
 - A dog seen from the back or side, or with its face hidden, can still be matched when
   coat, body and clothes clearly fit one known dog and no other.
-Many dogs look alike (e.g. several white Maltese). Only match when the specific dog is the same,
-using the distinguishing details (clothes today, markings, size, cut) to tell them apart.
+Many dogs look alike (e.g. several white Maltese, several Australian Shepherds). Only match when the
+specific dog is the same. Clothes change from day to day, so the body itself decides.
+Some dogs come with "구분" (distinguishing points) written by staff or found by comparing look-alikes,
+e.g. tail length, a spot on the face, ear color, size. These are DECISIVE: before choosing between
+similar dogs, look for each listed point in the new photo. If the point that would decide is not
+visible (e.g. the tail is hidden) and two look-alikes still fit, set confidence "low".
 
 The photos are sent to each dog's owner, so decide who the photo is ABOUT.
 - A MAIN dog is a subject of the photo: in focus, reasonably large, usually near the center.
@@ -111,7 +115,7 @@ Deno.serve(async (req) => {
 
   // 후보: 그날 담당이 지정된 강아지 + 이름 안 붙은 자동 그룹. 담당 지정이 없으면 활성 강아지 전체
   const { data: assigned } = await supa.from("assignments").select("dog_id").eq("day", photo.day);
-  let q = supa.from("dogs").select("id, name, note, ref_path, dog_refs(path, created_at)")
+  let q = supa.from("dogs").select("id, name, note, tips, tips_ai, ref_path, dog_refs(path, created_at)")
     .eq("active", true).order("created_at");
   if (assigned && assigned.length) {
     q = q.or(`id.in.(${assigned.map((a) => a.dog_id).join(",")}),auto.eq.true`);
@@ -137,7 +141,8 @@ Deno.serve(async (req) => {
       content.push({ type: "text", text: "Reference dogs:" });
       for (let i = 0; i < refs.length; i++) {
         const d = refs[i];
-        content.push({ type: "text", text: `[${i + 1}] ${d.name}${d.note ? ` — ${d.note}` : ""}${d.paths.length > 1 ? ` (${d.paths.length} photos)` : ""}` });
+        const tips = [d.tips, d.tips_ai].filter(Boolean).join(" / ");
+        content.push({ type: "text", text: `[${i + 1}] ${d.name}${d.note ? ` — ${d.note}` : ""}${tips ? ` | 구분: ${tips}` : ""}${d.paths.length > 1 ? ` (${d.paths.length} photos)` : ""}` });
         for (const path of d.paths) {
           let b64 = refCache.get(path);
           if (!b64) {
