@@ -744,6 +744,7 @@ async function suggestPicks(d) {
 
 // 명단 확정 → 아는 아이는 연결, 처음 보는 이름은 새로 등록
 async function confirmRoll() {
+  let hadRoll = true;
   const btn = $("#roll-confirm");
   btn.disabled = true;
   btn.textContent = "저장 중…";
@@ -764,6 +765,7 @@ async function confirmRoll() {
       ids.push(dog.id);
       if (isHotelName(state.draft, name)) hotelIds.add(dog.id);
     }
+    hadRoll = state.attendance.size > 0;
     await sb.from("assignments").delete().eq("day", state.day);
     const uniq = [...new Set(ids)];
     if (uniq.length) {
@@ -780,6 +782,15 @@ async function confirmRoll() {
     console.error(err);
     toast("저장하지 못했어요. 다시 시도해 주세요.");
   }
+  // 명단 없이 먼저 분류됐던 사진(직원이 고친 건 빼고)은 명단 기준으로 다시 분류
+  try {
+    if (!hadRoll) {
+      const { data: redo } = await sb.from("photos").select("id").eq("day", state.day).in("status", ["done", "review", "error"]).neq("confidence", "manual");
+      const ids = (redo || []).map((x) => x.id);
+      for (let i = 0; i < ids.length; i += 200) await sb.from("photos").update({ status: "pending", dog_ids: [] }).in("id", ids.slice(i, i + 200));
+      if (ids.length) toast(`명단 없이 분류됐던 사진 ${ids.length}장을 명단 기준으로 다시 분류할게요`);
+    }
+  } catch { /* 무시 */ }
   renderPhotos();
   classifyPending(); // 기다리던 사진이 있으면 바로 분류 시작
 }
@@ -882,6 +893,13 @@ async function classifyPending() {
   if (state.draft) {
     progress(`사진 ${waiting}장이 기다리고 있어요`, 0, waiting,
       "위의 '명단 확정'을 먼저 눌러 주세요. 확정하면 오늘 온 아이들 안에서만 찾아서 훨씬 빠르고 정확해요. 누르면 바로 이어서 분류해요.");
+    await render();
+    return;
+  }
+  // 명단 없이 148마리 전체와 비교하면 엉뚱한 아이로 들어감 → 명단부터
+  if (!state.attendance.size) {
+    progress(`사진 ${waiting}장이 기다리고 있어요`, 0, waiting,
+      "이 날짜의 출석 명단이 아직 없어요. 위에서 출석 보드 사진이나 다이얼독 캡처를 올리고 '명단 확정'을 누르면 바로 분류해요.");
     await render();
     return;
   }
