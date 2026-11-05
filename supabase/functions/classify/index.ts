@@ -36,22 +36,24 @@ e.g. tail length, a spot on the face, ear color, size. These are DECISIVE: befor
 similar dogs, look for each listed point in the new photo. If the point that would decide is not
 visible (e.g. the tail is hidden) and two look-alikes still fit, set confidence "low".
 
-The photos are sent to each dog's owner, so decide who the photo is ABOUT.
-- A MAIN dog is a subject of the photo: in focus, reasonably large, usually near the center.
-  Dogs in the background, cut off at the edge, tiny or blurry are NOT main dogs.
-- If two or three dogs share the frame equally (similar size, all in focus, all clearly shown,
-  e.g. posing or playing together), they are ALL main dogs.
+The photos are sent to each dog's owner, so decide which dogs this photo should be sent to.
+- A photo with several dogs goes to EVERY dog that is properly shown in it: clearly visible,
+  recognizable, and a meaningful part of the picture (playing together, sitting side by side,
+  walking as a group, group shots). Owners like seeing their dog with friends.
+- Leave out only dogs that are barely in it: tiny far in the background, mostly cut off at the edge,
+  heavily blurred, or only a paw/tail showing. Those owners would not recognize their dog.
+In the reply, "MAIN dogs" means exactly these dogs that are properly shown.
 
 Reply with JSON only, no other text:
 {"dogs":[<reference numbers of MAIN dogs>],"new_dog":true|false,"unknown_main":<number>,"confidence":"high"|"low","note":"<한국어 30자 이내: 판단 근거>"}
 Keep "note" very short (under 30 Korean characters).
-- "dogs": the known dogs that are MAIN dogs in the new photo ([] if none).
-- "unknown_main": how many MAIN dogs match none of the known dogs.
+- "dogs": ALL known dogs properly shown in the new photo (one or several; [] if none).
+- "unknown_main": how many properly shown dogs match none of the known dogs.
 - "new_dog": true if the photo has exactly one MAIN dog and you are fairly sure it is none of the
   known dogs (e.g. clearly different coat color, size or breed type), even if its face is hidden.
   Then "dogs" must be []. Do not set it when the dog could plausibly be one of the known dogs.
 - "confidence": "high" when the clues clearly point to one dog. "low" if the dog is blurry or
-  mostly hidden, if two known dogs fit about equally, or if it is unclear which dogs are main.`;
+  mostly hidden, or if two known dogs fit about equally for one of the dogs in the photo.`;
 
 const refCache = new Map<string, string>();
 
