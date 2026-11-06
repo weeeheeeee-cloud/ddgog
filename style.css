@@ -436,3 +436,18 @@ img.rot270 { transform: rotate(270deg); }
 .switch-row input{width:20px;height:20px}
 body.practice header.top::after{content:"🧪 학습 모드";position:absolute;right:12px;bottom:-12px;background:#7c3aed;color:#fff;font-size:12px;font-weight:700;padding:3px 10px;border-radius:999px}
 body.practice header.top{position:relative}
+
+.ref-thumb img{cursor:zoom-in}
+.ref-view{position:fixed;inset:0;z-index:80;background:rgba(10,15,30,.78);display:flex;align-items:center;justify-content:center;padding:16px}
+.ref-view.hidden{display:none}
+.rv-box{background:#fff;border-radius:16px;max-width:900px;width:100%;max-height:calc(100vh - 32px);display:flex;flex-direction:column;overflow:hidden}
+.rv-head{display:flex;align-items:center;gap:8px;padding:12px 16px;border-bottom:1px solid #eee;font-size:16px}
+.rv-head .lb{font-style:normal;font-size:11px;background:#3b82f6;color:#fff;border-radius:4px;padding:1px 6px}
+.rv-head .lb.dd{background:#6b7280}
+.rv-x{margin-left:auto;border:0;background:none;font-size:26px;cursor:pointer;line-height:1}
+.rv-stage{position:relative;background:#111;display:flex;align-items:center;justify-content:center;min-height:300px;flex:1}
+.rv-stage img{max-width:100%;max-height:calc(100vh - 200px);object-fit:contain;display:block}
+.rv-nav{position:absolute;top:50%;transform:translateY(-50%);width:44px;height:44px;border-radius:50%;border:0;background:rgba(0,0,0,.5);color:#fff;font-size:28px;cursor:pointer}
+#rv-prev{left:10px}#rv-next{right:10px}
+.rv-actions{display:flex;flex-wrap:wrap;gap:8px;align-items:center;padding:12px 16px}
+.rv-actions .btn.danger{background:#fee2e2;color:#b91c1c;border:1px solid #fca5a5}

@@ -209,6 +209,82 @@ async function addRefs(dog, files, onEach) {
   }
   return added;
 }
+// ---- 대표 사진 크게 보기 (명단 탭): 넘겨 보면서 잘못된 사진은 바로 삭제하거나 다른 아이로 옮김
+const rv = { dog: null, list: [], i: 0, changed: false };
+function refList(dog) {
+  // 명단 카드에 보이는 순서 그대로
+  return dog.dog_refs?.length ? [...dog.dog_refs] : (dog.ref_path ? [{ id: null, path: dog.ref_path }] : []);
+}
+async function openRefView(dog, i) {
+  rv.dog = dog; rv.list = refList(dog); rv.i = i; rv.changed = false;
+  $("#ref-view").classList.remove("hidden");
+  await showRef();
+}
+async function showRef() {
+  const r = rv.list[rv.i];
+  if (!r) { closeRefView(); return; }
+  $("#rv-name").textContent = rv.dog.name;
+  $("#rv-count").textContent = `${rv.i + 1} / ${rv.list.length}`;
+  $("#rv-tag").innerHTML = r.path.includes("-learn-") ? `<i class="lb">분류하며 학습</i>` : r.path.includes("-dd-") ? `<i class="lb dd">다이얼독</i>` : "";
+  const url = await signed("refs", [r.path]);
+  $("#rv-img").src = url(r.path);
+  $("#rv-del").disabled = !r.id;
+  $("#rv-move").disabled = !r.id;
+}
+function closeRefView() {
+  $("#ref-view").classList.add("hidden");
+  if (rv.changed) renderRoster();
+}
+function stepRef(d) { if (!rv.list.length) return; rv.i = (rv.i + d + rv.list.length) % rv.list.length; showRef(); }
+$("#rv-prev").addEventListener("click", () => stepRef(-1));
+$("#rv-next").addEventListener("click", () => stepRef(1));
+$("#rv-close").addEventListener("click", closeRefView);
+$("#ref-view").addEventListener("click", (e) => { if (e.target.id === "ref-view") closeRefView(); });
+async function deleteCurrentRef() {
+  const r = rv.list[rv.i];
+  if (!r?.id) return;
+  await removeRef(rv.dog, r);
+  rv.list.splice(rv.i, 1);
+  rv.changed = true;
+  toast("삭제했어요");
+  if (!rv.list.length) { closeRefView(); return; }
+  if (rv.i >= rv.list.length) rv.i = rv.list.length - 1;
+  showRef();
+}
+$("#rv-del").addEventListener("click", deleteCurrentRef);
+$("#rv-move").addEventListener("click", async () => {
+  const r = rv.list[rv.i];
+  if (!r?.id) return;
+  const v = prompt("이 사진은 어떤 아이인가요? 이름을 써 주세요 (그 아이 대표 사진으로 옮겨요)", "");
+  if (!v || !v.trim()) return;
+  const m = matchDog(v.trim(), null);
+  const to = m.dog || (m.choices && m.choices[(+prompt(m.choices.map((c, i) => `${i + 1}. ${c.name}`).join("\n"), "1") || 1) - 1]);
+  if (!to) { toast("그 이름을 명단에서 찾지 못했어요"); return; }
+  if (to.id === rv.dog.id) return;
+  await sb.from("dog_refs").update({ dog_id: to.id }).eq("id", r.id);
+  rv.dog.dog_refs = (rv.dog.dog_refs || []).filter((y) => y.id !== r.id);
+  to.dog_refs = [...(to.dog_refs || []), r];
+  if (rv.dog.ref_path === r.path) {
+    const next = rv.dog.dog_refs[0]?.path || null;
+    await sb.from("dogs").update({ ref_path: next }).eq("id", rv.dog.id);
+    rv.dog.ref_path = next;
+  }
+  if (!to.ref_path) { await sb.from("dogs").update({ ref_path: r.path }).eq("id", to.id); to.ref_path = r.path; }
+  rv.list.splice(rv.i, 1);
+  rv.changed = true;
+  toast(`${to.name}(으)로 옮겼어요`);
+  if (!rv.list.length) { closeRefView(); return; }
+  if (rv.i >= rv.list.length) rv.i = rv.list.length - 1;
+  showRef();
+});
+document.addEventListener("keydown", (e) => {
+  if ($("#ref-view").classList.contains("hidden")) return;
+  if (e.key === "ArrowLeft") stepRef(-1);
+  else if (e.key === "ArrowRight") stepRef(1);
+  else if (e.key === "Escape") closeRefView();
+  else if (e.key === "Delete" || e.key === "Backspace") { e.preventDefault(); deleteCurrentRef(); }
+});
+
 async function removeRef(dog, ref) {
   await sb.from("dog_refs").delete().eq("id", ref.id);
   await sb.storage.from("refs").remove([ref.path]);
@@ -1694,7 +1770,7 @@ async function renderRoster() {
         </div>
       </div>
       <div class="ref-strip">
-        ${refs.map((r) => `<span class="ref-thumb ${r.path.includes("-learn-") ? "learned" : ""}"><img src="${ref(r.path)}" alt="">${r.path.includes("-learn-") ? `<i class="lb">학습</i>` : ""}${r.id ? `<b class="x" data-del-ref="${r.id}" title="이 아이가 아니면 빼기">×</b>` : ""}</span>`).join("")}
+        ${refs.map((r, i) => `<span class="ref-thumb ${r.path.includes("-learn-") ? "learned" : ""}"><img src="${ref(r.path)}" alt="" data-view-ref="${i}" title="크게 보기">${r.path.includes("-learn-") ? `<i class="lb">학습</i>` : ""}${r.id ? `<b class="x" data-del-ref="${r.id}" title="이 아이가 아니면 빼기">×</b>` : ""}</span>`).join("")}
         <button class="ref-add" data-add-ref>＋<small>사진</small></button>
       </div>
       <p class="ref-hint ${refs.length >= 3 ? "ok" : ""}">대표 사진 ${refs.length}장${refs.length < 3 ? " · 여러 각도로 많이 올릴수록 정확해요" : refs.length > 10 ? " ✓ (AI는 매번 이 중 최대 10장을 골고루 골라 참고해요)" : " ✓ 더 올려도 돼요"}</p>
@@ -1732,6 +1808,7 @@ async function renderRoster() {
   $$(".dog-card").forEach((row) => {
     const dog = dogById(row.dataset.id);
     $("[data-add-ref]", row).addEventListener("click", () => { refTarget = dog.id; $("#roster-file").click(); });
+    $$("[data-view-ref]", row).forEach((im) => im.addEventListener("click", () => openRefView(dog, +im.dataset.viewRef)));
     $$("[data-del-ref]", row).forEach((x) => x.addEventListener("click", async () => {
       const r = dog.dog_refs.find((y) => y.id === x.dataset.delRef);
       const v = prompt(`${dog.name}에서 이 사진을 뺄게요.\n다른 아이 사진이면 그 아이 이름을 써 주세요 (그 아이 대표 사진으로 옮겨요).\n그냥 빼려면 비워 두고 확인`, "");
