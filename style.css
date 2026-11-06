@@ -463,3 +463,11 @@ body.practice header.top{position:relative}
 #practice-reset{margin-top:12px;display:none;flex-direction:column;gap:6px}
 body.practice #practice-reset{display:flex}
 #practice-reset .btn{align-self:flex-start}
+
+.find-box{display:flex;flex-wrap:wrap;align-items:center;gap:6px 8px;margin:8px 0 4px}
+.find-box.on{background:#eef2ff;border:1px solid #c7d2fe;border-radius:12px;padding:10px 12px}
+.find-chip{display:inline-flex;align-items:center;gap:4px;background:#4f46e5;color:#fff;border-radius:999px;padding:3px 10px;font-weight:700;font-size:14px}
+.find-chip small{opacity:.8;font-weight:400}
+.find-chip .x{cursor:pointer;margin-left:2px}
+.find-box input{border:1px solid #c7d2fe;border-radius:8px;padding:4px 8px;font-size:14px;min-width:110px}
+.dog-group.skipped{opacity:.85;border-style:dashed}

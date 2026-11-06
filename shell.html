@@ -59,8 +59,9 @@
         <input id="file" type="file" accept="image/*" multiple hidden>
         <span class="drop-icon">📷</span>
         <strong>사진 올리기</strong>
-        <span class="muted">여러 장을 한 번에 골라도 돼요. 올리면 AI가 강아지별로 묶어줘요.</span>
+        <span class="muted" id="drop-hint">여러 장을 한 번에 골라도 돼요. 올리면 AI가 강아지별로 묶어줘요.</span>
       </label>
+      <div id="find-box" class="find-box"></div>
 
       <div id="progress" class="card hidden">
         <div class="row between"><strong id="pg-title"></strong><span id="pg-count" class="muted small"></span></div>

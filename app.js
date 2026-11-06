@@ -7,6 +7,7 @@ const $ = (s, el = document) => el.querySelector(s);
 const $$ = (s, el = document) => [...el.querySelectorAll(s)];
 
 const state = {
+  find: [], // 특정 아이만 찾기: 이번에 올리는 사진에서 이 아이(들)만 찾음
   day: kstToday(),
   tab: "photos",
   dogs: [],
@@ -456,10 +457,12 @@ async function render() {
 /* ================= 사진 화면 ================= */
 async function renderPhotos() {
   renderRoll(); // 왼쪽 오늘 명단(장수)도 함께 갱신
+  renderFind();
   const P = state.photos;
   const done = P.filter((p) => p.status === "done");
   const unsorted = P.filter((p) => p.status === "review" || p.status === "error");
   const pending = P.filter((p) => p.status === "pending" || p.status === "working");
+  const skipped = P.filter((p) => p.status === "skip");
 
   $("#summary").innerHTML = P.length
     ? `<span><b>${P.length}</b>장</span>
@@ -522,7 +525,14 @@ async function renderPhotos() {
         return guess ? `<div class="guess">${img(p)}<span>${esc(guess)}?</span></div>` : img(p);
       }).join("")}</div>
     </div>` : "") +
-  (!dogIds.length && !unsorted.length ? `<div class="empty">분류를 기다리는 사진이 있어요.</div>` : "");
+  (skipped.length ? `<div class="dog-group skipped" data-list="skipped">
+      <div class="dog-head"><span class="avatar q">🔎</span>
+        <div class="grow"><b>찾는 아이가 아닌 사진 ${skipped.length}장</b><small class="muted">'특정 아이만 찾기'로 올린 사진 중 찾는 아이가 없던 사진이에요. 지우지 않고 모아 뒀어요</small></div>
+        <button id="skip-toggle" class="btn ghost sm">${state.showSkipped ? "접기" : "보기"}</button>
+        ${state.busy ? "" : `<button id="skip-all" class="btn ghost sm">전체 아이로 다시 분류</button>`}</div>
+      ${state.showSkipped ? `<div class="grid">${skipped.map(img).join("")}</div>` : ""}
+    </div>` : "") +
+  (!dogIds.length && !unsorted.length && !skipped.length ? `<div class="empty">분류를 기다리는 사진이 있어요.</div>` : "");
 
   // 사진 넘겨보기용: 그룹별 사진 순서
   const lists = new Map(dogIds.map((id) => [id, visible(id).map((p) => p.id)]));
@@ -532,6 +542,17 @@ async function renderPhotos() {
     renderPhotos();
   }));
   lists.set("unsorted", unsorted.map((p) => p.id));
+  lists.set("skipped", skipped.map((p) => p.id));
+  $("#skip-toggle")?.addEventListener("click", () => { state.showSkipped = !state.showSkipped; renderPhotos(); });
+  $("#skip-all")?.addEventListener("click", async () => {
+    if (!confirm(`찾는 아이가 아닌 사진 ${skipped.length}장을 오늘 명단의 모든 아이 기준으로 다시 분류할까요?`)) return;
+    const ids = skipped.map((p) => p.id);
+    for (let i = 0; i < ids.length; i += 200) {
+      await sb.from("photos").update({ status: "pending", dog_ids: [], find_dogs: [], ai_note: null }).in("id", ids.slice(i, i + 200));
+    }
+    await loadPhotos();
+    classifyPending();
+  });
   $$("[data-photo]", box).forEach((el) => el.addEventListener("click", () => {
     const key = el.closest("[data-list]")?.dataset.list;
     openSheet(el.dataset.photo, lists.get(key) || [el.dataset.photo], key);
@@ -549,6 +570,45 @@ async function renderPhotos() {
   }));
   $$("[data-save]", box).forEach((b) => b.addEventListener("click", () =>
     saveDogPhotos(dogById(b.dataset.save), visible(b.dataset.save), b, b.dataset.mode)));
+}
+
+// ---- 특정 아이만 찾기: 고른 아이만 찾고, 없으면 '찾는 아이가 아닌 사진'으로
+function renderFind() {
+  const box = $("#find-box");
+  if (!box) return;
+  const named = state.dogs.filter((d) => !d.auto).sort(dogOrder);
+  const chips = state.find.map((id) => dogById(id)).filter(Boolean);
+  box.classList.toggle("on", chips.length > 0);
+  box.innerHTML = chips.length
+    ? `<b>🔎 이번에 올리는 사진에서 이 아이만 찾아요:</b>
+       ${chips.map((d) => `<span class="find-chip">${esc(d.name)}${refCount(d) ? "" : ` <small>(대표 사진 없음)</small>`}<b class="x" data-unfind="${d.id}">×</b></span>`).join("")}
+       <input id="find-input" list="find-list" placeholder="아이 더 추가">
+       <button id="find-off" class="btn ghost mini">끄기 (전체 분류)</button>`
+    : `<button id="find-on" class="btn ghost mini">🔎 특정 아이만 찾기</button>
+       <small class="muted">예: 사진 500장 중 꼬미만 찾기. 고른 아이가 없는 사진은 따로 모아 둬요</small>`;
+  box.insertAdjacentHTML("beforeend", `<datalist id="find-list">${named.map((d) => `<option value="${esc(d.name)}">`).join("")}</datalist>`);
+  $("#drop-hint").textContent = chips.length
+    ? `올리는 사진에서 ${chips.map((d) => d.name).join(", ")}만 찾아요.`
+    : "여러 장을 한 번에 골라도 돼요. 올리면 AI가 강아지별로 묶어줘요.";
+  const add = (v) => {
+    const name = (v || "").trim();
+    if (!name) return;
+    const d = named.find((x) => norm(x.name) === norm(name)) || named.find((x) => baseName(x.name) === baseName(name));
+    if (!d) { toast(`'${name}'은(는) 명단에 없어요`); return; }
+    if (!refCount(d)) toast(`${d.name}은(는) 대표 사진이 없어서 찾기 어려워요. 명단에서 대표 사진을 먼저 넣어 주세요`);
+    if (!state.find.includes(d.id)) state.find.push(d.id);
+    renderFind();
+  };
+  $("#find-on")?.addEventListener("click", () => {
+    const v = prompt("어떤 아이를 찾을까요? (이름)");
+    add(v);
+  });
+  $("#find-input")?.addEventListener("change", (e) => add(e.target.value));
+  $("#find-off")?.addEventListener("click", () => { state.find = []; renderFind(); });
+  $$("[data-unfind]", box).forEach((x) => x.addEventListener("click", () => {
+    state.find = state.find.filter((id) => id !== x.dataset.unfind);
+    renderFind();
+  }));
 }
 
 async function renameDog(dog) {
@@ -1050,7 +1110,7 @@ $("#file").addEventListener("change", async (e) => {
         sb.storage.from("photos").upload(thumbPath, small, opt),
       ]);
       if (a.error || b.error) throw a.error || b.error;
-      const ins = await sb.from("photos").insert({ id, day, path, thumb_path: thumbPath, taken_at: taken, practice: !!state.practice, ...st });
+      const ins = await sb.from("photos").insert({ id, day, path, thumb_path: thumbPath, taken_at: taken, practice: !!state.practice, find_dogs: state.find, ...st });
       if (ins.error) throw ins.error;
     } catch (err) {
       console.error(err);
@@ -1741,7 +1801,7 @@ async function renderSide() {
     state.photos.forEach((p) => {
       if (p.status === "done") { done++; p.dog_ids.forEach((d) => { if (!per.has(d)) per.set(d, []); per.get(d).push(p); }); }
       else if (p.status === "pending" || p.status === "working") pending++;
-      else unsorted++;
+      else if (p.status !== "skip") unsorted++;
     });
     for (const [d, list] of per) count.set(d, splitSimilar(list).shown.length); // 비슷한 사진 정리 후 장수
     const zero = today.filter((d) => !count.get(d.id)).length;

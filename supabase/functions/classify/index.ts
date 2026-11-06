@@ -148,9 +148,12 @@ Deno.serve(async (req) => {
   }
 
   const { data: photo, error: pErr } = await supa
-    .from("photos").select("id, day, thumb_path, vec, practice, dog_ids").eq("id", photoId).single();
+    .from("photos").select("id, day, thumb_path, vec, practice, dog_ids, find_dogs").eq("id", photoId).single();
   if (pErr || !photo) return json({ error: "사진을 찾을 수 없어요" }, 404);
 
+  // 특정 아이만 찾기: 올릴 때 고른 아이(들)만 후보. 그 아이가 없으면 'skip'
+  const find: string[] = Array.isArray(photo.find_dogs) && photo.find_dogs.length && !only ? photo.find_dogs : [];
+  if (find.length) only = find;
   // 후보: 그날 담당이 지정된 강아지 + 이름 안 붙은 자동 그룹. 담당 지정이 없으면 활성 강아지 전체
   // 연습 모드(관리 탭에서 켬): 출석 명단을 무시하고 전체 아이 중 지문으로 추려서 분류
   // 학습 모드로 올린 사진은 출석 명단을 무시하고 전체 아이 중 지문으로 추려서 분류
@@ -205,7 +208,7 @@ Deno.serve(async (req) => {
 
   // ---- 지문(이미지 특징값) 먼저: 확실하면 AI 없이 바로 분류, 애매하면 후보를 AI에게 힌트로
   let fpHint = "";
-  if (photo.vec && !recheck && !only) {
+  if (photo.vec && !recheck && !only && !find.length) {
     const { data: st } = await supa.from("app_settings").select("value").eq("name", "fp").maybeSingle();
     const cfg = { enabled: true, twin: 0.95, dog: 0.86, margin: 0.07, min_n: 2, ...(st?.value ?? {}) };
     if (cfg.enabled) {
@@ -288,7 +291,11 @@ Deno.serve(async (req) => {
         }
       }
     }
-    if (only) {
+    if (find.length) {
+      content.push({ type: "text", text: `Note: staff only want photos of ${refs.map((d) => d.name).join(", ")} from this batch. ` +
+        "Answer only whether these dog(s) are properly shown in the new photo. Most photos will show other dogs: then reply \"dogs\": []. " +
+        "Do not force a match: only list a dog when its coat, body and distinguishing points really fit." });
+    } else if (only) {
       content.push({ type: "text", text: "Note: staff just found that one photo filed under one of these two dogs was actually the other. " +
         "These two dogs are easy to confuse. Look very carefully at the distinguishing points and today's look, and decide which of the two is in the new photo." });
     }
@@ -370,6 +377,15 @@ Deno.serve(async (req) => {
     let status = ids.length ? "done" : "review";
     const allSure = ids.length > 0 && ids.every((id) => sureIds.has(id));
     if (recheck && !ids.length) return json({ unchanged: true });
+    if (find.length) {
+      const rotation = [0, 90, 180, 270].includes(Number(parsed.rotate)) ? Number(parsed.rotate) : 0;
+      await supa.from("photos").update({
+        rotation, dog_ids: ids, status: ids.length ? "done" : "skip",
+        confidence: ids.length ? (allSure ? "high" : "low") : "high",
+        ai_note: ids.length ? note : `찾는 아이 아님${note ? `: ${note}` : ""}`.slice(0, 200), claimed_at: null,
+      }).eq("id", photoId);
+      return json({ status: ids.length ? "done" : "skip", dog_ids: ids });
+    }
     if (only) {
       // 이 사진의 다른 아이들은 그대로 두고, A/B 자리만 다시 정함
       if (!ids.length) return json({ unchanged: true });
@@ -410,7 +426,7 @@ Deno.serve(async (req) => {
 
     return json({ status, dog_ids: ids });
   } catch (e) {
-    if (!recheck && !only) await supa.from("photos").update({ status: "error", ai_note: String(e).slice(0, 200) }).eq("id", photoId);
+    if (!recheck && (!only || find.length)) await supa.from("photos").update({ status: "error", ai_note: String(e).slice(0, 200) }).eq("id", photoId);
     return json({ error: String(e) }, 500);
   }
 });
