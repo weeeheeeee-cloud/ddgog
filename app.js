@@ -573,6 +573,8 @@ async function renderPhotos() {
 }
 
 // ---- 특정 아이만 찾기: 고른 아이만 찾고, 없으면 '찾는 아이가 아닌 사진'으로
+// 이미 올려 둔 사진 중 아직 분류 안 된 것(대기·분류 안 됨·찾는 아이 아님)
+const findable = () => (state.busy ? 0 : state.photos.filter((p) => p.status !== "done" && p.status !== "working").length);
 function renderFind() {
   const box = $("#find-box");
   if (!box) return;
@@ -584,6 +586,7 @@ function renderFind() {
        ${chips.map((d) => `<span class="find-chip">${esc(d.name)} <small>${refCount(d) ? `대표 ${refCount(d)}장` : "대표 사진 없음"}</small>
          <button class="find-ref" data-find-ref="${d.id}" title="${esc(d.name)} 대표 사진 추가">📷 추가</button><b class="x" data-unfind="${d.id}">×</b></span>`).join("")}
        <input id="find-input" list="find-list" placeholder="아이 더 추가">
+       ${findable() ? `<button id="find-go" class="btn primary">🔎 올린 사진 ${findable()}장에서 찾기</button>` : ""}
        <button id="find-off" class="btn ghost mini">끄기 (전체 분류)</button>
        <small class="muted find-tip">여러 마리를 같이 찾아도 돼요. 📷 추가로 그 아이 사진을 대표 사진에 더 넣으면 더 잘 찾아요(명단에도 그대로 저장)</small>`
     : `<button id="find-on" class="btn ghost mini">🔎 특정 아이만 찾기</button>
@@ -607,6 +610,18 @@ function renderFind() {
   });
   $("#find-input")?.addEventListener("change", (e) => add(e.target.value));
   $("#find-off")?.addEventListener("click", () => { state.find = []; renderFind(); });
+  $("#find-go")?.addEventListener("click", async () => {
+    const names = chips.map((d) => d.name).join(", ");
+    const ids = state.photos.filter((p) => p.status !== "done" && p.status !== "working").map((p) => p.id);
+    if (!ids.length) { toast("찾을 사진이 없어요"); return; }
+    if (!confirm(`아직 분류 안 된 사진 ${ids.length}장에서 ${names}만 찾을까요?\n없는 사진은 '찾는 아이가 아닌 사진'에 따로 모아 둬요.`)) return;
+    for (let i = 0; i < ids.length; i += 200) {
+      await sb.from("photos").update({ status: "pending", dog_ids: [], ai_note: null, find_dogs: state.find })
+        .in("id", ids.slice(i, i + 200));
+    }
+    await loadPhotos();
+    classifyPending();
+  });
   $$("[data-find-ref]", box).forEach((b) => b.addEventListener("click", () => {
     refTarget = b.dataset.findRef;
     $("#ref-file").click();
@@ -1169,7 +1184,7 @@ async function classifyPending() {
   const { count: waiting } = await sb.from("photos").select("id", { count: "exact", head: true }).eq("day", state.day).eq("practice", !!state.practice).eq("status", "pending");
   if (!waiting) { $("#progress").classList.add("hidden"); await render(); return; }
   // 명단부터: 오늘 온 아이들 안에서만 찾아야 빠르고 정확함
-  if (state.draft) {
+  if (state.draft && !state.find.length) {
     progress(`사진 ${waiting}장이 기다리고 있어요`, 0, waiting,
       "위의 '명단 확정'을 먼저 눌러 주세요. 확정하면 오늘 온 아이들 안에서만 찾아서 훨씬 빠르고 정확해요. 누르면 바로 이어서 분류해요.");
     await render();
@@ -1183,7 +1198,8 @@ async function classifyPending() {
   // 서버 작업자와 나눠서 처리: 12장씩 '가져가서' 처리하므로 같은 사진을 두 번 분류하지 않음
   let total = waiting, ok = 0, fail = 0, done = 0, stop = false, saved = 0, first = true;
   const tick = () => progress("AI가 강아지별로 묶는 중… 창을 닫지 마세요", Math.min(done, total), total,
-    noRoll ? "학습 모드(명단 없음): 사진 지문으로 닮은 아이 10마리를 추려서 비교해요. 틀린 건 고쳐 주면 그대로 학습해요."
+    state.find.length ? `${state.find.map((id) => dogById(id)?.name).filter(Boolean).join(", ")}만 찾는 중이에요. 없는 사진은 아래 '찾는 아이가 아닌 사진'에 모여요.`
+    : noRoll ? "학습 모드(명단 없음): 사진 지문으로 닮은 아이 10마리를 추려서 비교해요. 틀린 건 고쳐 주면 그대로 학습해요."
            : `아래 목록이 조금씩 채워져요${saved ? ` · 연속 사진 ${saved}장은 같은 장면이라 함께 처리` : ""}`);
   tick();
   while (!stop) {
