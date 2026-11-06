@@ -661,10 +661,54 @@ function unsortedClusters(unsorted) {
 
 // ---- 여러 장 선택해서 한꺼번에 옮기기·빼기
 const selBtn = (key) => `<button class="btn ${state.sel?.key === key ? "primary" : "ghost"} sm" data-select="${key}">${state.sel?.key === key ? "선택 끝" : "☑ 여러 장 선택"}</button>`;
+// 화면 옆에 따라다니는 도구: 지금 보고 있는 폴더 기준으로 여러 장 선택·검수·크기
+let viewKey = null;
+function groupInView() {
+  const groups = $$("#groups .dog-group[data-list]");
+  const y = Math.min(220, window.innerHeight * 0.3);
+  let best = null;
+  for (const g of groups) {
+    const r = g.getBoundingClientRect();
+    if (r.top <= y && r.bottom > y) return g.dataset.list;
+    if (r.top > y && !best) best = g.dataset.list;
+  }
+  return best || groups.at(-1)?.dataset.list || null;
+}
+const groupName = (key) => dogById(key)?.name || (key === "unsorted" ? "모르는 아이·분류 안 된 사진" : key === "skipped" ? "찾는 아이가 아닌 사진" : "");
+let toolTick = null;
+window.addEventListener("scroll", () => {
+  if (toolTick || state.sel || state.tab !== "photos") return;
+  toolTick = requestAnimationFrame(() => { toolTick = null; if (groupInView() !== viewKey) renderSelBar(); });
+}, { passive: true });
 function renderSelBar() {
   let bar = $("#sel-bar");
-  if (!state.sel || state.tab !== "photos") { bar?.remove(); return; }
+  const hasGroups = state.tab === "photos" && $$("#groups .dog-group[data-list]").length > 0;
+  if (!hasGroups || (state.busy && !state.sel)) { bar?.remove(); return; }
   if (!bar) { bar = document.createElement("div"); bar.id = "sel-bar"; document.body.appendChild(bar); }
+  if (!state.sel) {
+    // 선택 전: 지금 보고 있는 폴더용 도구
+    viewKey = groupInView();
+    if (!viewKey) { bar.remove(); return; }
+    const d = dogById(viewKey);
+    bar.innerHTML = `<b class="tool-title">${esc(groupName(viewKey))}</b>
+      <button class="btn primary sm" data-tool="select">☑ 여러 장 선택</button>
+      ${d ? `<button class="btn ghost sm" data-tool="verify">🔍 다시 검수</button>` : ""}
+      ${viewKey === "unsorted" ? `<div class="tool-size">${[["s", "작게"], ["m", "보통"], ["l", "크게"], ["xl", "아주 크게"]].map(([k, t]) => `<button class="btn ${state.tileSize === k ? "primary" : "ghost"} mini" data-tile-tool="${k}">${t}</button>`).join("")}</div>` : ""}
+      <button class="btn ghost mini" data-tool="top">▲ 맨 위로</button>`;
+    $$("[data-tool]", bar).forEach((b) => b.addEventListener("click", () => {
+      const k = viewKey, t = b.dataset.tool;
+      if (t === "top") { window.scrollTo({ top: 0, behavior: "smooth" }); return; }
+      const all = [...document.querySelectorAll(`#groups [data-list="${CSS.escape(k)}"] [data-photo]`)].map((el) => el.dataset.photo);
+      state.sel = { key: k, ids: new Set(), all, mode: t === "verify" ? "verify" : undefined };
+      renderPhotos();
+    }));
+    $$("[data-tile-tool]", bar).forEach((b) => b.addEventListener("click", () => {
+      state.tileSize = b.dataset.tileTool;
+      try { localStorage.setItem("tileSize", state.tileSize); } catch { /* 저장 안 돼도 됨 */ }
+      renderPhotos();
+    }));
+    return;
+  }
   const key = state.sel.key, n = state.sel.ids.size;
   const dog = dogById(key);
   if (state.sel.mode === "verify") {
@@ -675,7 +719,7 @@ function renderSelBar() {
     $$("[data-sb]", bar).forEach((b) => b.addEventListener("click", () => selAction(b.dataset.sb)));
     return;
   }
-  const where = dog ? dog.name : key === "unsorted" ? "분류 안 된 사진" : "찾는 아이가 아닌 사진";
+  const where = groupName(key);
   bar.innerHTML = `<b>${esc(where)} · ${n}장 선택</b>
     <button class="btn ghost sm" data-sb="all">${n && n === state.sel.all.length ? "선택 해제" : "전체 선택"}</button>
     ${dog ? `<button class="btn primary sm" data-sb="out" ${n ? "" : "disabled"}>${esc(dog.name)}에서 빼서 아래로</button>` : `<button class="btn primary sm" data-sb="redo" ${n ? "" : "disabled"}>AI로 다시 분류</button>`}
