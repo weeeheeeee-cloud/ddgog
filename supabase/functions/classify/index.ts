@@ -132,14 +132,16 @@ Deno.serve(async (req) => {
 
   let photoId: string;
   let recheck = false;
+  let only: string[] | null = null; // 직원이 A→B로 고친 뒤, A 폴더의 다른 사진을 A·B 둘 중에서만 다시 판단
   try {
-    ({ photo_id: photoId, recheck = false } = await req.json());
+    ({ photo_id: photoId, recheck = false, only = null } = await req.json());
+    if (!Array.isArray(only) || !only.length) only = null;
   } catch {
     return json({ error: "bad request" }, 400);
   }
 
   const { data: photo, error: pErr } = await supa
-    .from("photos").select("id, day, thumb_path, vec, practice").eq("id", photoId).single();
+    .from("photos").select("id, day, thumb_path, vec, practice, dog_ids").eq("id", photoId).single();
   if (pErr || !photo) return json({ error: "사진을 찾을 수 없어요" }, 404);
 
   // 후보: 그날 담당이 지정된 강아지 + 이름 안 붙은 자동 그룹. 담당 지정이 없으면 활성 강아지 전체
@@ -151,7 +153,9 @@ Deno.serve(async (req) => {
   let q = supa.from("dogs").select("id, name, auto, note, tips, tips_ai, features, ref_path, dog_refs(path, created_at)")
     .eq("active", true).order("created_at");
   // recheck: '새 강아지' 그룹 사진을 이름 있는 아이들과만 다시 비교
-  if (assigned && assigned.length) {
+  if (only) {
+    q = q.in("id", only);
+  } else if (assigned && assigned.length) {
     q = recheck ? q.in("id", assigned.map((a) => a.dog_id)).eq("auto", false)
       : q.or(`id.in.(${assigned.map((a) => a.dog_id).join(",")}),auto.eq.true`);
   } else if (recheck) {
@@ -160,7 +164,7 @@ Deno.serve(async (req) => {
   let { data: dogs } = await q;
   // 학습 모드(명단 없음): 지문으로 전체 중 가장 닮은 16마리만 후보로 (흰 아이들처럼 서로 닮은 무리가 많아 넉넉히) → 아이당 대표 사진을 많이 볼 수 있어 정확해짐
   let practice = false;
-  if (!(assigned && assigned.length) && !recheck && photo.vec && (dogs ?? []).length > 12) {
+  if (!only && !(assigned && assigned.length) && !recheck && photo.vec && (dogs ?? []).length > 12) {
     const { data: top } = await supa.rpc("fp_top", { q: photo.vec, dogs: (dogs ?? []).map((d) => d.id), k: 16 });
     if (top?.length) {
       const keep = new Set(top.map((t: { dog_id: string }) => t.dog_id));
@@ -194,7 +198,7 @@ Deno.serve(async (req) => {
 
   // ---- 지문(이미지 특징값) 먼저: 확실하면 AI 없이 바로 분류, 애매하면 후보를 AI에게 힌트로
   let fpHint = "";
-  if (photo.vec && !recheck) {
+  if (photo.vec && !recheck && !only) {
     const { data: st } = await supa.from("app_settings").select("value").eq("name", "fp").maybeSingle();
     const cfg = { enabled: true, twin: 0.95, dog: 0.86, margin: 0.07, min_n: 2, ...(st?.value ?? {}) };
     if (cfg.enabled) {
@@ -355,6 +359,17 @@ Deno.serve(async (req) => {
     let status = ids.length ? "done" : "review";
     const allSure = ids.length > 0 && ids.every((id) => sureIds.has(id));
     if (recheck && !ids.length) return json({ unchanged: true });
+    if (only) {
+      // 이 사진의 다른 아이들은 그대로 두고, A/B 자리만 다시 정함
+      if (!ids.length) return json({ unchanged: true });
+      const keepOthers = (photo.dog_ids ?? []).filter((x: string) => !only!.includes(x));
+      const finalIds = [...new Set([...keepOthers, ...ids])];
+      await supa.from("photos").update({
+        dog_ids: finalIds, status: "done", confidence: allSure ? "high" : "low",
+        ai_note: `직원 수정 후 다시 확인: ${note ?? ""}`.slice(0, 200), claimed_at: null,
+      }).eq("id", photoId);
+      return json({ status: "done", dog_ids: finalIds, changed: finalIds.join() !== (photo.dog_ids ?? []).join() });
+    }
 
     // 처음 보는 강아지 → 새 그룹 자동 생성 (이 사진을 기준 사진으로)
     if (!recheck && !ids.length && parsed.new_dog === true && unknownMain <= 1) {
@@ -384,7 +399,7 @@ Deno.serve(async (req) => {
 
     return json({ status, dog_ids: ids });
   } catch (e) {
-    if (!recheck) await supa.from("photos").update({ status: "error", ai_note: String(e).slice(0, 200) }).eq("id", photoId);
+    if (!recheck && !only) await supa.from("photos").update({ status: "error", ai_note: String(e).slice(0, 200) }).eq("id", photoId);
     return json({ error: String(e) }, 500);
   }
 });

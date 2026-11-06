@@ -1057,6 +1057,27 @@ async function followCorrection(p, before, ids) {
     renderPhotos();
   } catch (e) { console.warn(e); }
 }
+const reviewing = new Set();
+async function reviewFolder(aId, bId, exceptId) {
+  const key = `${aId}>${bId}`;
+  if (reviewing.has(key)) return;
+  reviewing.add(key);
+  const A = dogById(aId), B = dogById(bId);
+  const list = state.photos.filter((p) => p.id !== exceptId && p.status === "done" && p.confidence !== "manual" && p.dog_ids.includes(aId));
+  if (!list.length || !A || !B) { reviewing.delete(key); return; }
+  toast(`${A.name} 폴더의 다른 사진 ${list.length}장도 ${B.name}인지 확인하고 있어요…`);
+  let moved = 0;
+  await pool(list, 4, async (p) => {
+    try {
+      const { data } = await sb.functions.invoke("classify", { body: { photo_id: p.id, only: [aId, bId] } });
+      if (data?.dog_ids && data.dog_ids.includes(bId) && !data.dog_ids.includes(aId)) moved++;
+    } catch { /* 다음 기회에 */ }
+  });
+  reviewing.delete(key);
+  await loadPhotos();
+  if (state.tab === "photos") await renderPhotos();
+  toast(moved ? `${A.name} 폴더에서 ${moved}장을 ${B.name}(으)로 옮겼어요` : `${A.name} 폴더에 ${B.name} 사진은 더 없어요`);
+}
 function learnMistake(photo_id, wrong_id, right_id) {
   sb.functions.invoke("learn-mistake", { body: { photo_id, wrong_id, right_id } }).catch(() => {});
 }
@@ -1176,6 +1197,12 @@ $("#sheet-save").addEventListener("click", async () => {
   }
   sheetPhoto.confidence = "manual";
   followCorrection(sheetPhoto, before, ids);
+  {
+    // A로 잘못 들어간 걸 B로 고치면, A 폴더의 나머지 사진도 A인지 B인지 다시 확인해서 B면 옮김
+    const wrong = before.ids.filter((id) => !ids.includes(id) && !dogById(id)?.auto);
+    const added = ids.filter((id) => !before.ids.includes(id));
+    if (before.conf !== "manual" && wrong.length === 1 && added.length === 1) reviewFolder(wrong[0], added[0], sheetPhoto.id);
+  }
   // 명단에 없던 아이를 직접 골랐으면 오늘 명단에 넣어서 AI도 그 아이를 후보로 보게 함
   const extra = ids.filter((id) => !state.attendance.has(id));
   if (extra.length && state.attendance.size) {
