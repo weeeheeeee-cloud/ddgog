@@ -196,7 +196,7 @@ Deno.serve(async (req) => {
   // 강아지 수로 나눠 강아지당 최대 10장, 사진이 더 많으면 고르게 골라 다양한 각도가 들어가게 함
   // 많이 보낼수록 느려짐: 명단 확정한 날(보통 20~30마리)은 아이당 4~6장, 명단 없으면 아이당 1장
   const MAX_REF_IMAGES = 120;
-  const perDog = Math.max(1, Math.min(6, Math.floor(MAX_REF_IMAGES / Math.max(1, withRefs.length))));
+  const perDog = Math.max(1, Math.min(find.length ? 12 : 6, Math.floor(MAX_REF_IMAGES / Math.max(1, withRefs.length))));
   const spread = (arr: string[], k: number) =>
     arr.length <= k ? arr : Array.from({ length: k }, (_, i) => arr[Math.floor((i * arr.length) / k)]);
   // 직원이 고쳐 준 최근 사진(-learn-)은 꼭 포함: 가장 최근 2장 + 나머지에서 고르게
@@ -294,7 +294,8 @@ Deno.serve(async (req) => {
     if (find.length) {
       content.push({ type: "text", text: `Note: staff only want photos of ${refs.map((d) => d.name).join(", ")} from this batch. ` +
         "Answer only whether these dog(s) are properly shown in the new photo. Most photos will show other dogs: then reply \"dogs\": []. " +
-        "Do not force a match: only list a dog when its coat, body and distinguishing points really fit." });
+        "Here, IGNORE the rule to always give a best guess: list a dog only when its coat, body and distinguishing points really fit; " +
+        "if unsure, leave it out. Do not use new_dog." });
     } else if (only) {
       content.push({ type: "text", text: "Note: staff just found that one photo filed under one of these two dogs was actually the other. " +
         "These two dogs are easy to confuse. Look very carefully at the distinguishing points and today's look, and decide which of the two is in the new photo." });
