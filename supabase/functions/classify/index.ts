@@ -371,14 +371,12 @@ Deno.serve(async (req) => {
     const note = typeof parsed.note === "string" ? parsed.note.slice(0, 200) : null;
 
     const nums: number[] = Array.isArray(parsed.dogs) ? parsed.dogs.map(Number) : [];
-    let ids = [...new Set(nums.filter((n) => n >= 1 && n <= refs.length).map((n) => refs[n - 1].id))];
-    // 주인공 중 모르는 아이가 섞여 있으면 사람이 확인하도록
-    const unknownMain = Number(parsed.unknown_main) || 0;
+    const ids = [...new Set(nums.filter((n) => n >= 1 && n <= refs.length).map((n) => refs[n - 1].id))];
     // 아이별로 판단: 확신한 아이가 다 맞으면 끝. 다른 아이가 애매해도 확신한 아이 사진은 보냄
     const sureNums: number[] = Array.isArray(parsed.sure) ? parsed.sure.map(Number) : (parsed.confidence === "high" ? nums : []);
     const sureIds = new Set(sureNums.filter((n) => n >= 1 && n <= refs.length).map((n) => refs[n - 1].id));
     // 애매해도 가장 닮은 아이에게 우선 넣음 (확신 못 한 사진은 confidence low → 화면에 '확인' 표시)
-    let status = ids.length ? "done" : "review";
+    const status = ids.length ? "done" : "review";
     const allSure = ids.length > 0 && ids.every((id) => sureIds.has(id));
     if (recheck && !ids.length) return json({ unchanged: true });
     if (find.length) {
