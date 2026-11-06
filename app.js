@@ -543,9 +543,9 @@ async function renderPhotos() {
       <div class="tile-size">사진 크기
         ${[["s", "작게"], ["m", "보통"], ["l", "크게"], ["xl", "아주 크게"]].map(([k, t]) => `<button class="btn ${state.tileSize === k ? "primary" : "ghost"} mini" data-tile="${k}">${t}</button>`).join("")}
         <small class="muted">비슷하게 생긴 사진끼리 붙여서 보여줘요</small></div>
-      <div class="grid tiles-${state.tileSize}">${unsortedClusters(unsorted).flat().map((p) => {
-        const guess = p.dog_ids.map((d) => dogById(d)?.name).filter(Boolean).join("·");
-        return guess ? `<div class="guess">${img(p)}<span>${esc(guess)}?</span></div>` : img(p);
+      <div class="grid tiles-${state.tileSize}">${burstGroups(unsortedClusters(unsorted).flat()).map(({ rep: p, members }) => {
+        const more = members.length - 1;
+        return `<div class="tile">${img(p)}${more ? `<span class="burst" title="거의 같은 사진 ${more}장이 함께 묶여 있어요. 고르면 함께 선택돼요">+${more}</span>` : ""}</div>`;
       }).join("")}</div>
     </div>` : "") +
   (!dogIds.length && !unsorted.length && !skipped.length ? `<div class="empty">분류를 기다리는 사진이 있어요.</div>` : "");
@@ -557,7 +557,7 @@ async function renderPhotos() {
     state.expanded.has(id) ? state.expanded.delete(id) : state.expanded.add(id);
     renderPhotos();
   }));
-  lists.set("unsorted", unsorted.map((p) => p.id));
+  lists.set("unsorted", burstGroups(unsortedClusters(unsorted).flat()).map((g) => g.rep.id));
   lists.set("skipped", skipped.map((p) => p.id));
   $("#skip-toggle")?.addEventListener("click", () => { state.showSkipped = !state.showSkipped; renderPhotos(); });
   $("#skip-all")?.addEventListener("click", async () => {
@@ -573,8 +573,9 @@ async function renderPhotos() {
     const key = el.closest("[data-list]")?.dataset.list;
     if (state.sel && state.sel.key === key) {
       const id = el.dataset.photo;
-      state.sel.ids.has(id) ? state.sel.ids.delete(id) : state.sel.ids.add(id);
-      el.classList.toggle("picked", state.sel.ids.has(id));
+      const on = !state.sel.ids.has(id);
+      for (const m of burstOf.get(id) || [id]) on ? state.sel.ids.add(m) : state.sel.ids.delete(m);
+      el.classList.toggle("picked", on);
       renderSelBar();
       return;
     }
@@ -626,6 +627,23 @@ async function loadClusters(unsorted) {
   clusterCache.key = key;
   clusterCache.map = new Map((data || []).map((r) => [r.photo_id, r.cluster]));
 }
+// 연속으로 찍은 거의 같은 사진은 한 장만 보이고 나머지는 함께 묶음 (같은 사진이 여러 번 보이지 않게)
+const burstOf = new Map(); // 보이는 사진 id → 함께 묶인 사진 id들
+function burstGroups(list) {
+  const t = (p) => new Date(p.taken_at || p.created_at).getTime();
+  const groups = [];
+  for (const p of list) {
+    const g = groups.slice(-6).find((x) => x.members.some((q) => p.phash && q.phash && hamming(p.phash, q.phash) <= SIM_DIST && Math.abs(t(p) - t(q)) <= SIM_GAP));
+    if (g) g.members.push(p); else groups.push({ members: [p] });
+  }
+  const seen = new Set();
+  return groups.map((g) => {
+    const members = g.members.filter((p) => !seen.has(p.id) && seen.add(p.id));
+    const rep = [...members].sort((a, b) => (b.sharp || 0) - (a.sharp || 0))[0];
+    burstOf.set(rep.id, members.map((p) => p.id));
+    return { rep, members };
+  }).filter((g) => g.rep);
+}
 function unsortedClusters(unsorted) {
   const by = new Map();
   for (const p of unsorted) {
@@ -671,7 +689,8 @@ async function selAction(kind) {
   if (!sel) return;
   if (kind === "cancel") { state.sel = null; renderPhotos(); return; }
   if (kind === "all") {
-    sel.ids = sel.ids.size === sel.all.length ? new Set() : new Set(sel.all);
+    const every = sel.all.flatMap((id) => burstOf.get(id) || [id]);
+    sel.ids = sel.ids.size >= every.length ? new Set() : new Set(every);
     renderPhotos();
     return;
   }
