@@ -284,6 +284,11 @@ async function findOrCreateDog(name) {
     const v = prompt(`'${name}' 이름의 아이가 여럿이에요. 번호를 골라 주세요\n` + m.choices.map((c, i) => `${i + 1}. ${c.name}`).join("\n"), "1");
     return v === null ? null : m.choices[+v - 1] || null;
   }
+  if (m.similar) {
+    const got = askSimilar(name, m.similar);
+    if (got === undefined) return null;
+    if (got) return got;
+  }
   if (!confirm(`'${name}'은(는) 명단에 없어요. 새로 등록할까요?`)) return null;
   const { data, error } = await sb.from("dogs").insert({ name, auto: false, active: true }).select("*, dog_refs(id, path, created_at)").single();
   if (error || !data) { toast("등록하지 못했어요"); return null; }
@@ -564,6 +569,13 @@ async function renameDog(dog) {
         list.map((c, i) => `${i + 1}. ${c.name}`).join("\n"), "1");
       if (v === null) return false;
       same = list[+v - 1] || null;
+    } else if (m.similar) {
+      const list = m.similar.filter((c) => c.id !== dog.id);
+      if (list.length) {
+        const got = askSimilar(nm, list);
+        if (got === undefined) return false;
+        same = got;
+      }
     }
   }
   if (same) {
@@ -679,7 +691,8 @@ function blobToBase64(blob) {
 const baseName = (s) => norm(String(s || "").replace(/\s*\(.*\)\s*$/, ""));
 function matchDog(n, draft = state.draft, usePick = true) {
   const pick = usePick && draft?.pick?.[norm(n)];
-  if (pick) return { dog: dogById(pick) };
+  if (pick === NEW_DOG) return { isNew: true };
+  if (pick && dogById(pick)) return { dog: dogById(pick) };
   const named = state.dogs.filter((d) => !d.auto);
   const exact = named.filter((d) => norm(d.name) === norm(n));
   const withRefs = (arr) => arr.filter((d) => refCount(d) > 0);
@@ -689,9 +702,60 @@ function matchDog(n, draft = state.draft, usePick = true) {
   if (good.length === 1) return { dog: good[0] };
   if (good.length > 1) return { choices: good };
   if (exact.length) return { dog: exact[0] };
+  if (same.length) return same.length === 1 ? { dog: same[0] } : { choices: same };
+  // 명단에 없는 이름이라도 비슷한 이름(다복이↔대박이, 장군↔김장군, 가지↔단지)이 있으면 새로 만들지 않고 물어봄
+  const sim = similarDogs(n);
+  if (sim.length) return { similar: sim };
   return {};
 }
-const isNewName = (n) => { const m = matchDog(n); return !m.dog && !m.choices; };
+const NEW_DOG = "__new__";
+// 한글을 자모로 풀어서 비교 (다복이/대박이처럼 모음 하나 다른 이름도 잡음)
+const JA_I = "ㄱㄲㄴㄷㄸㄹㅁㅂㅃㅅㅆㅇㅈㅉㅊㅋㅌㅍㅎ", JA_M = "ㅏㅐㅑㅒㅓㅔㅕㅖㅗㅘㅙㅚㅛㅜㅝㅞㅟㅠㅡㅢㅣ",
+  JA_F = ["", ..."ㄱㄲㄳㄴㄵㄶㄷㄹㄺㄻㄼㄽㄾㄿㅀㅁㅂㅄㅅㅆㅇㅈㅊㅋㅌㅍㅎ"];
+const jamo = (s) => [...s].map((ch) => {
+  const c = ch.charCodeAt(0) - 0xac00;
+  if (c < 0 || c > 11171) return ch;
+  return JA_I[Math.floor(c / 588)] + JA_M[Math.floor((c % 588) / 28)] + JA_F[c % 28];
+}).join("");
+function editDist(a, b) {
+  const dp = Array.from({ length: b.length + 1 }, (_, j) => j);
+  for (let i = 1; i <= a.length; i++) {
+    let prev = dp[0]; dp[0] = i;
+    for (let j = 1; j <= b.length; j++) {
+      const t = dp[j];
+      dp[j] = Math.min(dp[j] + 1, dp[j - 1] + 1, prev + (a[i - 1] === b[j - 1] ? 0 : 1));
+      prev = t;
+    }
+  }
+  return dp[b.length];
+}
+function similarDogs(n, excludeId = null) {
+  const b = baseName(n);
+  if (!b) return [];
+  const strip = (s) => s.replace(/이$/, "");
+  const score = (x) => {
+    if (x === b) return 0;
+    if (strip(x) === strip(b) && strip(b)) return 1;                       // 다복 ↔ 다복이
+    const [s, l] = x.length < b.length ? [x, b] : [b, x];
+    if (l.includes(s) && l.length - s.length <= 2) return 2;               // 장군 ↔ 김장군, 슈 ↔ 슈슈
+    const d = editDist(jamo(x), jamo(b));
+    if (Math.min(x.length, b.length) >= 2 && d <= 2) return 2 + d;          // 가지 ↔ 단지, 다복이 ↔ 대박이
+    return 99;
+  };
+  return state.dogs.filter((d) => !d.auto && d.id !== excludeId)
+    .map((d) => [d, score(baseName(d.name))]).filter(([, s]) => s < 99)
+    .sort((p, q) => p[1] - q[1] || (q[0].dd_pet_id ? 1 : 0) - (p[0].dd_pet_id ? 1 : 0) || refCount(q[0]) - refCount(p[0]))
+    .slice(0, 4).map(([d]) => d);
+}
+const unresolved = (n, d) => { const m = matchDog(n, d); return !!(m.choices || m.similar); };
+// 프롬프트로 고르기: 비슷한 이름이 있으면 번호, 0이면 새 아이
+function askSimilar(name, list) {
+  const v = prompt(`'${name}'와(과) 이름이 비슷한 아이가 있어요. 같은 아이면 번호를, 다른 아이면 0을 눌러 주세요\n` +
+    list.map((c, i) => `${i + 1}. ${c.name}${c.dd_pet_id ? "" : " (다이얼독 없음)"}`).join("\n") + "\n0. 다른 아이 (새로 등록)", "1");
+  if (v === null) return undefined;
+  return list[+v - 1] || null;
+}
+const isNewName = (n) => { const m = matchDog(n); return !m.dog && !m.choices && !m.similar; };
 const isHotelName = (draft, n) => (draft.hotel || []).some((h) => norm(h) === norm(n));
 
 async function renderRoll() {
@@ -704,13 +768,23 @@ async function renderRoll() {
     const d = state.draft;
     count.textContent = `${d.names.length}마리 읽음`;
     const amb = d.names.map((n, i) => ({ n, i, c: matchDog(n, d, false).choices })).filter((x) => x.c);
-    const ambRef = amb.length ? await signed("refs", amb.flatMap((x) => x.c.map((c) => c.ref_path))) : null;
+    const sims = d.names.map((n, i) => ({ n, i, c: matchDog(n, d, false).similar })).filter((x) => x.c);
+    const ambRef = amb.length || sims.length
+      ? await signed("refs", [...amb, ...sims].flatMap((x) => x.c.map((c) => c.ref_path).filter(Boolean))) : null;
     body.innerHTML = `
       ${amb.length ? `<div class="same-name">
         <b>이름이 같은 아이가 있어요 — 오늘 온 아이를 눌러 주세요</b>
         ${amb.map(({ n, i, c }) => `<div class="same-row"><span class="same-label">${esc(n)}${d.guessed?.has(norm(n)) && d.pick?.[norm(n)] ? ` <small class="muted">(최근 자주 온 아이로 골라 둠)</small>` : ""}</span>
           <div class="same-opts">${c.map((x) => `<button class="same-opt ${d.pick?.[norm(n)] === x.id ? "on" : ""}" data-same="${i}" data-id="${x.id}">
             ${x.ref_path ? `<img src="${ambRef(x.ref_path)}" alt="">` : ""}<span>${esc(x.name)}</span></button>`).join("")}</div></div>`).join("")}
+      </div>` : ""}
+      ${sims.length ? `<div class="same-name similar">
+        <b>비슷한 이름이 이미 있어요 — 같은 아이인지 골라 주세요</b>
+        <small class="muted">보드에 쓴 이름이 명단(다이얼독) 이름과 조금 달라요. 같은 아이를 누르면 그 이름으로 묶이고, 정말 다른 아이면 '다른 아이'를 눌러 주세요.</small>
+        ${sims.map(({ n, i, c }) => `<div class="same-row"><span class="same-label">${esc(n)}${isHotelName(d, n) ? ` <i class="tag-h">H</i>` : ""}</span>
+          <div class="same-opts">${c.map((x) => `<button class="same-opt ${d.pick?.[norm(n)] === x.id ? "on" : ""}" data-same="${i}" data-id="${x.id}">
+            ${x.ref_path ? `<img src="${ambRef(x.ref_path)}" alt="">` : ""}<span>${esc(x.name)}${x.dd_pet_id ? "" : ` <small class="muted">(카톡)</small>`}</span></button>`).join("")}
+            <button class="same-opt new ${d.pick?.[norm(n)] === NEW_DOG ? "on" : ""}" data-same="${i}" data-id="${NEW_DOG}"><span>다른 아이 (새로 등록)</span></button></div></div>`).join("")}
       </div>` : ""}
       ${d.img ? `<img class="board-preview" src="${d.img}" alt="출석 보드">${d.more ? `<p class="muted small" style="margin:-4px 0 8px">외 ${d.more}장 함께 읽음</p>` : ""}` : ""}
       <p class="small">읽은 이름이 맞는지 확인해 주세요. <b>이름을 누르면 고칠 수 있고</b>, ×로 뺄 수 있어요.
@@ -720,6 +794,7 @@ async function renderRoll() {
       <div class="chips roll-chips">${d.names.map((n, i) => `
         <span class="${d.unsure.includes(n) ? "unsure" : ""} ${isNewName(n) && !isHotelName(d, n) ? "new" : ""} ${isHotelName(d, n) ? "hotel" : ""}"><b data-h="${i}" class="h-toggle" title="호텔링 켜기/끄기">H</b><b data-edit="${i}">${esc(n)}</b>${(() => {
           const m = matchDog(n, d);
+          if (m.similar) return `<small class="ask"> 비슷한 이름 확인 ↑</small>`;
           if (m.choices) return `<select data-pick="${i}" class="pick-dog"><option value="">어느 아이?</option>${m.choices.map((c) => `<option value="${c.id}">${esc(c.name)}</option>`).join("")}</select>`;
           if (m.dog && norm(m.dog.name) !== norm(n)) return `<small class="muted"> → ${esc(m.dog.name)}</small>`;
           return "";
@@ -730,7 +805,7 @@ async function renderRoll() {
         <button class="btn ghost" type="submit">추가</button>
       </form>
       <div class="row" style="margin-top:10px">
-        <button id="roll-confirm" class="btn primary grow" ${d.names.length && !d.names.some((n) => matchDog(n, d).choices) ? "" : "disabled"}>${d.names.some((n) => matchDog(n, d).choices) ? "이름이 같은 아이를 먼저 골라 주세요" : `명단 확정 (${d.names.length}마리)`}</button>
+        <button id="roll-confirm" class="btn primary grow" ${d.names.length && !d.names.some((n) => unresolved(n, d)) ? "" : "disabled"}>${d.names.some((n) => unresolved(n, d)) ? "위에서 같은 아이인지 먼저 골라 주세요" : `명단 확정 (${d.names.length}마리)`}</button>
         <button id="roll-retake" class="btn ghost">다시 찍기</button>
         <button id="roll-cancel" class="btn ghost">취소</button>
       </div>`;
@@ -1624,6 +1699,11 @@ async function addNameToToday(name, hotel) {
     if (v === null) return;
     dog = m.choices[+v - 1];
   }
+  if (!dog && m.similar) {
+    const got = askSimilar(name, m.similar);
+    if (got === undefined) return;
+    dog = got;
+  }
   if (!dog) {
     const { data, error } = await sb.from("dogs").insert({ name, auto: false, active: true }).select().single();
     if (error) { toast("추가하지 못했어요"); return; }
@@ -1807,6 +1887,7 @@ async function renderRoster() {
         <div class="grow">
           <b class="nm">${esc(d.name)}</b>
           ${d.auto ? `<span class="tag">이름 필요</span>` : ""}
+          ${!d.auto && !d.dd_pet_id ? `<span class="tag kakao">카톡</span>` : ""}
           ${today ? `<span class="tag today">오늘 출석</span>` : ""}
           ${!d.active ? `<span class="tag off">숨김</span>` : ""}
           <small>${esc(d.note || "")}</small>
@@ -1847,11 +1928,16 @@ async function renderRoster() {
     <div class="stat"><b>${allNamed.length}</b><span>등록된 강아지</span></div>
     <div class="stat"><b>${totalRefs}</b><span>대표 사진</span></div>
     <div class="stat ${noPhoto ? "warn" : ""}"><b>${noPhoto}</b><span>사진 없음</span></div>
+    <div class="stat"><b>${allNamed.filter((d) => !d.dd_pet_id).length}</b><span>다이얼독 없음(카톡)</span></div>
     <div class="stat ${autoCount ? "warn" : ""}"><b>${autoCount}</b><span>이름 없는 그룹</span></div>
     ${fewPhoto ? `<p class="stats-note">사진이 3장 미만인 아이가 ${fewPhoto}마리 있어요. 더 올리면 정확해져요.</p>` : ""}`;
 
+  // 다이얼독에 있는 아이 / 다이얼독에 없는 아이(호텔링 등 알림장 대신 카톡으로 사진을 보내는 아이)
+  const ddDogs = named.filter((d) => d.dd_pet_id);
+  const kakao = named.filter((d) => !d.dd_pet_id);
   $("#roster-list").innerHTML = named.length
-    ? `<h3 class="sec">명단 ${named.length}마리</h3>` + named.map(card).join("")
+    ? (ddDogs.length ? `<h3 class="sec">다이얼독 명단 ${ddDogs.length}마리 <small class="muted">이름은 다이얼독과 같게 맞춰요</small></h3>` + ddDogs.map(card).join("") : "") +
+      (kakao.length ? `<h3 class="sec kakao-sec">다이얼독에 없는 아이 ${kakao.length}마리 <small class="muted">호텔링·데이케어로 와서 알림장 대신 카톡으로 사진을 보내는 아이예요. 사진이 쌓이면 대표 사진을 직접 골라 주세요</small></h3>` + kakao.map(card).join("") : "")
     : `<div class="empty">${q ? "찾는 이름이 없어요." : "아직 명단이 없어요. 위에서 등록하거나, 사진 탭에서 출석 보드를 올려 보세요."}</div>`;
   $("#roster-auto").innerHTML = autos.length
     ? `<h3 class="sec">이름 없는 그룹 ${autos.length}개 <button class="btn ghost mini danger" id="del-all-auto">모두 삭제</button> <small class="muted">AI가 만든 그룹이에요. 이름을 붙이면 명단에 들어가요 (같은 이름이 있으면 합쳐져요). 삭제해도 사진은 지워지지 않고 '분류 안 된 사진'으로 돌아가요</small></h3>` + autos.map(card).join("")
@@ -1897,6 +1983,8 @@ async function renderRoster() {
       if (dog.auto) { if (await renameDog(dog)) renderRoster(); return; }
       const name = prompt("이름", dog.name);
       if (name === null) return;
+      if (dog.dd_pet_id && name.trim() && baseName(name) !== baseName(dog.name) &&
+        !confirm(`'${dog.name}'은(는) 다이얼독에 등록된 이름이에요.\n이름을 바꾸면 다이얼독 명단과 달라져서 헷갈릴 수 있어요.\n보드에 다르게 쓰는 것뿐이라면 바꾸지 않아도 돼요(명단 확정 때 같은 아이로 묶어 드려요).\n\n그래도 '${name.trim()}'(으)로 바꿀까요?`)) return;
       const note = prompt("특징 (견종·털색·무늬)", dog.note || "");
       if (note === null) return;
       const tips = prompt("구분 포인트 (닮은 아이와 다른 점: 꼬리 길이, 얼굴 점, 귀 색 등)", dog.tips || "");
