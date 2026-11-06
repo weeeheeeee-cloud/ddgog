@@ -572,6 +572,43 @@ async function renderPhotos() {
     saveDogPhotos(dogById(b.dataset.save), visible(b.dataset.save), b, b.dataset.mode)));
 }
 
+// ---- 사진으로 찾기: 명단에 없는 아이(호텔링 등)는 사진 몇 장을 주면 그 아이를 등록하고 그 아이만 찾음
+$("#find-photo-file").addEventListener("change", async (e) => {
+  const files = [...e.target.files];
+  e.target.value = "";
+  if (!files.length) return;
+  const typed = prompt(`이 사진 ${files.length}장의 아이 이름을 적어 주세요.\n모르면 비워 두세요 (예: 호텔 손님으로 등록돼요)`, "");
+  if (typed === null) return;
+  let dog;
+  const name = typed.trim();
+  if (name) {
+    dog = await findOrCreateDog(name);
+    if (!dog) return;
+  } else {
+    const md = state.day.slice(5).replace("-", "");
+    const n = state.dogs.filter((d) => d.name.startsWith(`호텔 손님 ${md}`)).length + 1;
+    const { data, error } = await sb.from("dogs").insert({ name: `호텔 손님 ${md}-${n}`, auto: false, active: true, note: "호텔링 (이름 나중에)" })
+      .select("*, dog_refs(id, path, created_at)").single();
+    if (error || !data) { toast("등록하지 못했어요"); return; }
+    state.dogs.push(data);
+    state.dogs.sort(dogOrder);
+    dog = data;
+  }
+  toast(`${dog.name} 사진 올리는 중…`);
+  const added = await addRefs(dog, files);
+  if (!added) { toast("사진을 올리지 못했어요. 다시 시도해 주세요"); return; }
+  // 오늘 명단에 호텔링(H)으로 넣어 둠
+  if (!state.attendance.has(dog.id)) {
+    await sb.from("assignments").upsert({ day: state.day, dog_id: dog.id, hotel: true }, { onConflict: "day,dog_id", ignoreDuplicates: true });
+    state.attendance.add(dog.id);
+    state.hotel?.add?.(dog.id);
+  }
+  if (!state.find.includes(dog.id)) state.find.push(dog.id);
+  toast(`${dog.name} 얼굴을 기억했어요 (${added}장). 이제 '찾기'를 누르면 이 아이 사진만 모아요`);
+  renderFind();
+  renderRoll();
+});
+
 // ---- 특정 아이만 찾기: 고른 아이만 찾고, 없으면 '찾는 아이가 아닌 사진'으로
 // 이미 올려 둔 사진 중 아직 분류 안 된 것(대기·분류 안 됨·찾는 아이 아님)
 const findable = () => (state.busy ? 0 : state.photos.filter((p) => p.status !== "done" && p.status !== "working").length);
@@ -586,11 +623,13 @@ function renderFind() {
        ${chips.map((d) => `<span class="find-chip">${esc(d.name)} <small>${refCount(d) ? `대표 ${refCount(d)}장` : "대표 사진 없음"}</small>
          <button class="find-ref" data-find-ref="${d.id}" title="${esc(d.name)} 대표 사진 추가">📷 추가</button><b class="x" data-unfind="${d.id}">×</b></span>`).join("")}
        <input id="find-input" list="find-list" placeholder="아이 더 추가">
+       <button class="btn ghost mini find-photo">🏨 사진으로 아이 추가</button>
        ${findable() ? `<button id="find-go" class="btn primary">🔎 올린 사진 ${findable()}장에서 찾기</button>` : ""}
        <button id="find-off" class="btn ghost mini">끄기 (전체 분류)</button>
        <small class="muted find-tip">여러 마리를 같이 찾아도 돼요. 📷 추가로 그 아이 사진을 대표 사진에 더 넣으면 더 잘 찾아요(명단에도 그대로 저장)</small>`
     : `<button id="find-on" class="btn ghost mini">🔎 특정 아이만 찾기</button>
-       <small class="muted">예: 사진 500장 중 꼬미만 찾기. 고른 아이가 없는 사진은 따로 모아 둬요</small>`;
+       <button class="btn ghost mini find-photo">🏨 사진으로 찾기 (호텔링·명단에 없는 아이)</button>
+       <small class="muted">예: 사진 500장 중 꼬미만 찾기. 명단에 없는 호텔링 아이는 그 아이 사진 몇 장을 주면 그 아이만 모아요</small>`;
   box.insertAdjacentHTML("beforeend", `<datalist id="find-list">${named.map((d) => `<option value="${esc(d.name)}">`).join("")}</datalist>`);
   $("#drop-hint").textContent = chips.length
     ? `올리는 사진에서 ${chips.map((d) => d.name).join(", ")}만 찾아요.`
@@ -609,6 +648,7 @@ function renderFind() {
     add(v);
   });
   $("#find-input")?.addEventListener("change", (e) => add(e.target.value));
+  $$(".find-photo", box).forEach((b) => b.addEventListener("click", () => $("#find-photo-file").click()));
   $("#find-off")?.addEventListener("click", () => { state.find = []; renderFind(); });
   $("#find-go")?.addEventListener("click", async () => {
     const names = chips.map((d) => d.name).join(", ");
@@ -1049,6 +1089,8 @@ async function confirmRoll() {
       if (isHotelName(state.draft, name)) hotelIds.add(dog.id);
     }
     hadRoll = state.attendance.size > 0;
+    // 사진으로 넣어 둔 호텔링 아이(보드에 없음)는 명단을 확정해도 그대로 둠
+    for (const id of state.hotel) if (state.attendance.has(id) && !ids.includes(id) && !dogById(id)?.dd_pet_id) { ids.push(id); hotelIds.add(id); }
     await sb.from("assignments").delete().eq("day", state.day);
     const uniq = [...new Set(ids)];
     if (uniq.length) {

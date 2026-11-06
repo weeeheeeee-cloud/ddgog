@@ -475,3 +475,4 @@ body.practice #practice-reset{display:flex}
 .find-ref:hover{background:rgba(255,255,255,.35)}
 .find-tip{flex-basis:100%}
 #find-go{flex-basis:100%;margin-top:4px}
+.find-box .find-photo{white-space:nowrap}
