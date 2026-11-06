@@ -276,7 +276,32 @@ $("#rv-move").addEventListener("click", async () => {
   if (!rv.list.length) { closeRefView(); return; }
   if (rv.i >= rv.list.length) rv.i = rv.list.length - 1;
   showRef();
+  moveSimilarRefs(rv.dog, to);
 });
+// 한 장을 B로 옮기면 A의 나머지 사진 중 B인 것도 AI가 찾아서 바로 함께 옮김
+async function moveSimilarRefs(from, to) {
+  toast(`${from.name} 사진 중에 ${to.name} 사진이 더 있는지 찾고 있어요…`);
+  try {
+    const { data } = await sb.functions.invoke("move-similar-refs", { body: { from_id: from.id, to_id: to.id } });
+    const ids = data?.ids || [];
+    if (!ids.length) { toast(`${from.name} 사진 중에 ${to.name} 사진은 더 없어요`); return; }
+    const moved = (from.dog_refs || []).filter((r) => ids.includes(r.id));
+    from.dog_refs = (from.dog_refs || []).filter((r) => !ids.includes(r.id));
+    to.dog_refs = [...(to.dog_refs || []), ...moved];
+    if (moved.some((r) => r.path === from.ref_path)) from.ref_path = from.dog_refs[0]?.path || null;
+    if (!to.ref_path) to.ref_path = moved[0]?.path || null;
+    toast(`${to.name} 사진 ${ids.length}장을 더 찾아서 ${to.name}(으)로 옮겼어요`);
+    if (!$("#ref-view").classList.contains("hidden") && rv.dog?.id === from.id) {
+      const cur = rv.list[rv.i]?.id;
+      rv.list = rv.list.filter((r) => !ids.includes(r.id));
+      rv.changed = true;
+      if (!rv.list.length) { closeRefView(); return; }
+      const k = rv.list.findIndex((r) => r.id === cur);
+      rv.i = k >= 0 ? k : Math.min(rv.i, rv.list.length - 1);
+      showRef();
+    } else if (state.tab === "roster") renderRoster();
+  } catch (e) { console.warn(e); }
+}
 document.addEventListener("keydown", (e) => {
   if ($("#ref-view").classList.contains("hidden")) return;
   if (e.key === "ArrowLeft") stepRef(-1);
@@ -1827,6 +1852,9 @@ async function renderRoster() {
         }
         if (!to.ref_path) { await sb.from("dogs").update({ ref_path: r.path }).eq("id", to.id); to.ref_path = r.path; }
         toast(`${to.name}(으)로 옮겼어요`);
+        renderRoster();
+        moveSimilarRefs(dog, to);
+        return;
       } else {
         await removeRef(dog, r);
       }
