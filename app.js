@@ -257,10 +257,8 @@ $("#rv-move").addEventListener("click", async () => {
   if (!r?.id) return;
   const v = prompt("이 사진은 어떤 아이인가요? 이름을 써 주세요 (그 아이 대표 사진으로 옮겨요)", "");
   if (!v || !v.trim()) return;
-  const m = matchDog(v.trim(), null);
-  const to = m.dog || (m.choices && m.choices[(+prompt(m.choices.map((c, i) => `${i + 1}. ${c.name}`).join("\n"), "1") || 1) - 1]);
-  if (!to) { toast("그 이름을 명단에서 찾지 못했어요"); return; }
-  if (to.id === rv.dog.id) return;
+  const to = await findOrCreateDog(v.trim());
+  if (!to || to.id === rv.dog.id) return;
   await sb.from("dog_refs").update({ dog_id: to.id }).eq("id", r.id);
   rv.dog.dog_refs = (rv.dog.dog_refs || []).filter((y) => y.id !== r.id);
   to.dog_refs = [...(to.dog_refs || []), r];
@@ -278,6 +276,21 @@ $("#rv-move").addEventListener("click", async () => {
   showRef();
   moveSimilarRefs(rv.dog, to);
 });
+// 이름으로 명단에서 찾고, 없으면 새로 등록할지 물어봄
+async function findOrCreateDog(name) {
+  const m = matchDog(name, null);
+  if (m.dog) return m.dog;
+  if (m.choices) {
+    const v = prompt(`'${name}' 이름의 아이가 여럿이에요. 번호를 골라 주세요\n` + m.choices.map((c, i) => `${i + 1}. ${c.name}`).join("\n"), "1");
+    return v === null ? null : m.choices[+v - 1] || null;
+  }
+  if (!confirm(`'${name}'은(는) 명단에 없어요. 새로 등록할까요?`)) return null;
+  const { data, error } = await sb.from("dogs").insert({ name, auto: false, active: true }).select("*, dog_refs(id, path, created_at)").single();
+  if (error || !data) { toast("등록하지 못했어요"); return null; }
+  state.dogs.push(data);
+  state.dogs.sort(dogOrder);
+  return data;
+}
 // 한 장을 B로 옮기면 A의 나머지 사진 중 B인 것도 AI가 찾아서 바로 함께 옮김
 async function moveSimilarRefs(from, to) {
   toast(`${from.name} 사진 중에 ${to.name} 사진이 더 있는지 찾고 있어요…`);
@@ -1839,9 +1852,8 @@ async function renderRoster() {
       const v = prompt(`${dog.name}에서 이 사진을 뺄게요.\n다른 아이 사진이면 그 아이 이름을 써 주세요 (그 아이 대표 사진으로 옮겨요).\n그냥 빼려면 비워 두고 확인`, "");
       if (v === null) return;
       if (v.trim()) {
-        const m = matchDog(v.trim(), null);
-        const to = m.dog || (m.choices && m.choices[(+prompt(m.choices.map((c, i) => `${i + 1}. ${c.name}`).join("\n"), "1") || 1) - 1]);
-        if (!to) { toast("그 이름을 명단에서 찾지 못했어요"); return; }
+        const to = await findOrCreateDog(v.trim());
+        if (!to || to.id === dog.id) return;
         await sb.from("dog_refs").update({ dog_id: to.id }).eq("id", r.id);
         dog.dog_refs = dog.dog_refs.filter((y) => y.id !== r.id);
         to.dog_refs = [...(to.dog_refs || []), r];
