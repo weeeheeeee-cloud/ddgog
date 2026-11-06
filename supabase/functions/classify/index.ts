@@ -148,7 +148,7 @@ Deno.serve(async (req) => {
   }
 
   const { data: photo, error: pErr } = await supa
-    .from("photos").select("id, day, thumb_path, vec, practice, dog_ids, find_dogs").eq("id", photoId).single();
+    .from("photos").select("id, day, thumb_path, vec, practice, dog_ids, find_dogs, not_dogs").eq("id", photoId).single();
   if (pErr || !photo) return json({ error: "사진을 찾을 수 없어요" }, 404);
 
   // 특정 아이만 찾기: 올릴 때 고른 아이(들)만 후보. 그 아이가 없으면 'skip'
@@ -172,6 +172,9 @@ Deno.serve(async (req) => {
     q = q.eq("auto", false);
   }
   let { data: dogs } = await q;
+  // 직원이 '이 아이 아님'으로 뺀 아이는 이 사진의 후보에서 제외
+  const notDogs: string[] = Array.isArray(photo.not_dogs) ? photo.not_dogs : [];
+  if (notDogs.length) dogs = (dogs ?? []).filter((d) => !notDogs.includes(d.id));
   // 학습 모드(명단 없음): 지문으로 전체 중 가장 닮은 16마리만 후보로 (흰 아이들처럼 서로 닮은 무리가 많아 넉넉히) → 아이당 대표 사진을 많이 볼 수 있어 정확해짐
   let practice = false;
   if (!only && !(assigned && assigned.length) && !recheck && photo.vec && (dogs ?? []).length > 12) {

@@ -403,7 +403,7 @@ async function loadPhotos() {
   const all = [];
   for (let from = 0; ; from += 1000) {
     const { data } = await sb.from("photos")
-      .select("id, path, thumb_path, dog_ids, status, ai_note, confidence, created_at, taken_at, phash, sharp, rotation")
+      .select("id, path, thumb_path, dog_ids, status, ai_note, confidence, created_at, taken_at, phash, sharp, rotation, not_dogs")
       .eq("day", state.day).eq("practice", !!state.practice).order("created_at").range(from, from + 999);
     all.push(...(data || []));
     if (!data || data.length < 1000) break;
@@ -598,8 +598,9 @@ function renderSelBar() {
   const where = dog ? dog.name : key === "unsorted" ? "분류 안 된 사진" : "찾는 아이가 아닌 사진";
   bar.innerHTML = `<b>${esc(where)} · ${n}장 선택</b>
     <button class="btn ghost sm" data-sb="all">${n && n === state.sel.all.length ? "선택 해제" : "전체 선택"}</button>
-    <button class="btn primary sm" data-sb="move" ${n ? "" : "disabled"}>다른 아이로 옮기기</button>
-    ${dog ? `<button class="btn ghost sm" data-sb="out" ${n ? "" : "disabled"}>${esc(dog.name)}에서 빼기</button>` : ""}
+    ${dog ? `<button class="btn primary sm" data-sb="redo" ${n ? "" : "disabled"}>빼고 다시 분류</button>` : `<button class="btn primary sm" data-sb="redo" ${n ? "" : "disabled"}>AI로 다시 분류</button>`}
+    <button class="btn ghost sm" data-sb="move" ${n ? "" : "disabled"}>다른 아이로 옮기기</button>
+    ${dog ? `<button class="btn ghost sm" data-sb="out" ${n ? "" : "disabled"}>빼기만</button>` : ""}
     <button class="btn ghost sm" data-sb="cancel">취소</button>`;
   $$("[data-sb]", bar).forEach((b) => b.addEventListener("click", () => selAction(b.dataset.sb)));
 }
@@ -615,6 +616,28 @@ async function selAction(kind) {
   const photos = state.photos.filter((p) => sel.ids.has(p.id));
   if (!photos.length) return;
   const from = dogById(sel.key);
+  // 빼고 다시 분류: 이 아이는 후보에서 빼고 AI가 다시 판단
+  if (kind === "redo") {
+    toast(`${photos.length}장을 ${from ? `${from.name}에서 빼고 ` : ""}다시 분류할게요`);
+    let i = 0;
+    for (const p of photos) {
+      const not = from ? [...new Set([...(p.not_dogs || []), from.id])] : (p.not_dogs || []);
+      const keep = from ? p.dog_ids.filter((d) => d !== from.id) : [];
+      // 다른 아이와 같이 나온 사진은 그 아이는 그대로 두고 빠진 아이만 정리
+      const upd = keep.length && from
+        ? { dog_ids: keep, status: "done", not_dogs: not }
+        : { dog_ids: [], status: "pending", not_dogs: not, ai_note: null, find_dogs: [], claimed_at: null };
+      await sb.from("photos").update(upd).eq("id", p.id);
+      if (i < 6 && from && !from.auto) learnMistake(p.id, from.id, null);
+      Object.assign(p, upd);
+      i++;
+    }
+    state.sel = null;
+    await loadPhotos();
+    await renderPhotos();
+    classifyPending();
+    return;
+  }
   let to = null;
   if (kind === "move") {
     const typed = prompt(`선택한 ${photos.length}장을 어느 아이로 옮길까요? (이름)`, "");
@@ -1399,7 +1422,7 @@ async function openSheet(photoId, list = sheetList, key = sheetKey) {
   renderPicked();
   const inGroup = sheetKey && sheetKey !== "unsorted" && p.dog_ids.includes(sheetKey);
   $("#sheet-out").classList.toggle("hidden", !inGroup);
-  $("#sheet-out").textContent = inGroup ? `${dogById(sheetKey)?.name || ""}에서 빼기` : "여기서 빼기";
+  $("#sheet-out").textContent = inGroup ? `${dogById(sheetKey)?.name || ""}에서 빼고 다시 분류` : "여기서 빼기";
   $("#sheet-del").classList.toggle("hidden", inGroup);
   $("#sheet").classList.remove("hidden");
   document.body.style.overflow = "hidden";
@@ -1643,18 +1666,21 @@ $("#sheet-new").addEventListener("click", async () => {
   render();
 });
 
-// 잘못 들어간 사진: 지우지 않고 이 강아지에서만 빼서 '분류 안 된 사진'으로 돌려보냄
+// 잘못 들어간 사진: 지우지 않고 이 강아지에서만 빼서 다시 분류 (몇 장 연달아 빼면 모아서 한 번에)
+let redoTimer = null;
 $("#sheet-out").addEventListener("click", async () => {
   const p = sheetPhoto, dogId = sheetKey;
   const rest = p.dog_ids.filter((d) => d !== dogId);
-  const status = rest.length ? "done" : "review";
+  // 이 아이는 이 사진의 후보에서 빼고, 남은 아이가 없으면 AI가 다시 분류
+  const not = [...new Set([...(p.not_dogs || []), dogId])];
+  const status = rest.length ? "done" : "pending";
   const wasAi = p.confidence !== "manual";
-  const { error } = await sb.from("photos").update({ dog_ids: rest, status, confidence: "manual" }).eq("id", p.id);
+  const { error } = await sb.from("photos").update({ dog_ids: rest, status, not_dogs: not, confidence: rest.length ? "manual" : null, ai_note: null, claimed_at: null }).eq("id", p.id);
   if (error) { toast("옮기지 못했어요"); return; }
   if (wasAi && !dogById(dogId)?.auto) learnMistake(p.id, dogId, null);
-  p.confidence = "manual";
-  Object.assign(p, { dog_ids: rest, status });
-  toast(rest.length ? `${dogById(dogId)?.name}에서 뺐어요` : "분류 안 된 사진으로 옮겼어요");
+  Object.assign(p, { dog_ids: rest, status, not_dogs: not, confidence: rest.length ? "manual" : null });
+  toast(rest.length ? `${dogById(dogId)?.name}에서 뺐어요` : `${dogById(dogId)?.name}에서 빼고 다시 분류할게요`);
+  if (!rest.length) { clearTimeout(redoTimer); redoTimer = setTimeout(() => classifyPending(), 2500); }
   const i = sheetList.indexOf(p.id);
   sheetList = sheetList.filter((id) => id !== p.id);
   if (sheetList.length) openSheet(sheetList[Math.min(i, sheetList.length - 1)]); else closeSheet();
