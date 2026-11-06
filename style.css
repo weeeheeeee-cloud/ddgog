@@ -451,3 +451,4 @@ body.practice header.top{position:relative}
 #rv-prev{left:10px}#rv-next{right:10px}
 .rv-actions{display:flex;flex-wrap:wrap;gap:8px;align-items:center;padding:12px 16px}
 .rv-actions .btn.danger{background:#fee2e2;color:#b91c1c;border:1px solid #fca5a5}
+.btn.ghost.mini.danger{background:transparent;color:#c33;border:1px solid #e5b4b4}

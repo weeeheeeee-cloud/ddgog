@@ -323,6 +323,19 @@ document.addEventListener("keydown", (e) => {
   else if (e.key === "Delete" || e.key === "Backspace") { e.preventDefault(); deleteCurrentRef(); }
 });
 
+// 그룹 삭제 (사진은 남김: 그 아이만 빠지고, 아무도 안 남으면 '분류 안 됨'으로)
+async function deleteDogs(ids) {
+  const { data, error } = await sb.rpc("delete_dogs", { ids });
+  if (error) { toast("삭제하지 못했어요"); console.warn(error); return; }
+  const paths = [...new Set((data || []).map((x) => x.path).filter(Boolean))];
+  for (let i = 0; i < paths.length; i += 100) await sb.storage.from("refs").remove(paths.slice(i, i + 100));
+  state.dogs = state.dogs.filter((d) => !ids.includes(d.id));
+  ids.forEach((id) => state.attendance.delete(id));
+  toast(ids.length > 1 ? `그룹 ${ids.length}개를 삭제했어요` : "삭제했어요");
+  await loadPhotos();
+  render();
+}
+
 async function removeRef(dog, ref) {
   await sb.from("dog_refs").delete().eq("id", ref.id);
   await sb.storage.from("refs").remove([ref.path]);
@@ -1804,6 +1817,7 @@ async function renderRoster() {
           <button class="btn ${d.auto ? "primary" : "ghost"} mini" data-edit>${d.auto ? "이름" : "수정"}</button>
           ${d.auto ? "" : `<button class="btn ghost mini" data-fix>학습 정정</button>`}
           <button class="btn ghost mini" data-merge>합치기</button>
+          ${d.auto ? `<button class="btn ghost mini danger" data-delete-dog>삭제</button>` : ""}
           <button class="btn ghost mini" data-toggle>${d.active ? "숨기기" : "표시"}</button>
         </div>
       </div>
@@ -1840,8 +1854,15 @@ async function renderRoster() {
     ? `<h3 class="sec">명단 ${named.length}마리</h3>` + named.map(card).join("")
     : `<div class="empty">${q ? "찾는 이름이 없어요." : "아직 명단이 없어요. 위에서 등록하거나, 사진 탭에서 출석 보드를 올려 보세요."}</div>`;
   $("#roster-auto").innerHTML = autos.length
-    ? `<h3 class="sec">이름 없는 그룹 ${autos.length}개 <small class="muted">AI가 만든 그룹이에요. 이름을 붙이면 명단에 들어가요 (같은 이름이 있으면 합쳐져요)</small></h3>` + autos.map(card).join("")
+    ? `<h3 class="sec">이름 없는 그룹 ${autos.length}개 <button class="btn ghost mini danger" id="del-all-auto">모두 삭제</button> <small class="muted">AI가 만든 그룹이에요. 이름을 붙이면 명단에 들어가요 (같은 이름이 있으면 합쳐져요). 삭제해도 사진은 지워지지 않고 '분류 안 된 사진'으로 돌아가요</small></h3>` + autos.map(card).join("")
     : "";
+
+  $("#del-all-auto")?.addEventListener("click", async () => {
+    const ids = state.dogs.filter((d) => d.auto).map((d) => d.id);
+    if (!ids.length) return;
+    if (!confirm(`이름 없는 그룹 ${ids.length}개를 모두 삭제할까요?\n사진은 지워지지 않고 '분류 안 된 사진'으로 돌아가요.`)) return;
+    await deleteDogs(ids);
+  });
 
   $$(".dog-card").forEach((row) => {
     const dog = dogById(row.dataset.id);
@@ -1893,6 +1914,10 @@ async function renderRoster() {
     });
     const box = $(".merge-box", row);
     $("[data-merge]", row).addEventListener("click", () => box.classList.toggle("hidden"));
+    $("[data-delete-dog]", row)?.addEventListener("click", async () => {
+      if (!confirm(`'${dog.name}' 그룹을 삭제할까요?\n이 그룹의 사진은 지워지지 않고 '분류 안 된 사진'으로 돌아가요.`)) return;
+      await deleteDogs([dog.id]);
+    });
     $("[data-merge-cancel]", row).addEventListener("click", () => box.classList.add("hidden"));
     $("[data-merge-go]", row).addEventListener("click", async () => {
       const target = dogById($("select", box).value);
