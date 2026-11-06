@@ -79,8 +79,10 @@ Deno.serve(async (req) => {
 
   try {
     if (body.action === "groups") {
-      const { data: dogs } = await admin.from("dogs").select("id, name, note, tips")
-        .eq("active", true).eq("auto", false).order("name");
+      let gq = admin.from("dogs").select("id, name, note, tips").eq("active", true).eq("auto", false).order("name");
+      // ids를 주면 그 아이들 안에서만 묶음 (예: 오늘 출석한 아이들)
+      if (Array.isArray(body.ids) && body.ids.length) gq = gq.in("id", body.ids as string[]);
+      const { data: dogs } = await gq;
       const list = dogs ?? [];
       const lines = list.map((d, i) => `${i + 1}. ${d.name} — ${[d.note, d.tips].filter(Boolean).join(" / ") || "(메모 없음)"}`).join("\n");
       const text = await claude(GROUP_MODEL, GROUP_SYSTEM, [{ type: "text", text: lines }], 8000);
@@ -95,36 +97,47 @@ Deno.serve(async (req) => {
       const ids = (Array.isArray(body.ids) ? body.ids : []).slice(0, 10) as string[];
       if (ids.length < 2) return json({ error: "need 2+ ids" }, 400);
       const { data: dogs } = await admin.from("dogs")
-        .select("id, name, note, tips, ref_path, dog_refs(id, path, created_at)").in("id", ids);
-      const list = (dogs ?? []).map((d) => {
+        .select("id, name, note, tips, tips_ai, ref_path, dog_refs(id, path, created_at)").in("id", ids);
+      // day를 주면 그날 직원이 확인했거나 AI가 확신한 사진(한 마리만 나온 것)도 같이 봄 = 지금 나눠진 결과를 보고 작성
+      const day = typeof body.day === "string" ? body.day : null;
+      const per = ids.length <= 4 ? 5 : ids.length <= 6 ? 4 : 3;
+      const spread = <T,>(arr: T[], k: number) => arr.length <= k ? arr : Array.from({ length: k }, (_, i) => arr[Math.floor((i * arr.length) / k)]);
+      const list = await Promise.all((dogs ?? []).map(async (d) => {
         const refs = (d.dog_refs ?? []).sort((a, b) => a.created_at.localeCompare(b.created_at));
-        const per = ids.length <= 4 ? 5 : ids.length <= 6 ? 4 : 3;
-        const pick = refs.length <= per ? refs : Array.from({ length: per }, (_, i) => refs[Math.floor((i * refs.length) / per)]);
+        let today: { id: string; path: string; bucket: string }[] = [];
+        if (day) {
+          const { data: ph } = await admin.from("photos").select("id, thumb_path, confidence")
+            .eq("day", day).eq("status", "done").eq("dog_ids", `{${d.id}}`).in("confidence", ["manual", "high"]).limit(60);
+          const sorted = (ph ?? []).sort((a, b) => (a.confidence === "manual" ? 0 : 1) - (b.confidence === "manual" ? 0 : 1));
+          today = spread(sorted, 3).map((x) => ({ id: x.id, path: x.thumb_path, bucket: "photos" }));
+        }
+        const nRef = Math.max(2, per - today.length);
+        const pick = [...spread(refs, nRef).map((r) => ({ id: r.id, path: r.path, bucket: "refs" })), ...today];
         return { ...d, pick };
-      });
+      }));
       const content: Record<string, unknown>[] = [];
       let photoNo = 0;
-      const photoMap: Record<number, string> = {};
+      const photoMap: Record<number, { id: string; bucket: string; dog: string }> = {};
       for (let i = 0; i < list.length; i++) {
         const d = list[i];
-        content.push({ type: "text", text: `Dog ${i + 1}: ${d.name}${d.note ? ` — ${d.note}` : ""}${d.tips ? ` | staff tips: ${d.tips}` : ""}` });
+        content.push({ type: "text", text: `Dog ${i + 1}: ${d.name}${d.note ? ` — ${d.note}` : ""}${d.tips ? ` | staff tips: ${d.tips}` : ""}${d.tips_ai ? ` | earlier notes (keep what is still true): ${d.tips_ai}` : ""}` });
         for (const r of d.pick) {
-          const { data } = await admin.storage.from("refs").download(r.path);
+          const { data } = await admin.storage.from(r.bucket).download(r.path);
           if (!data) continue;
           photoNo++;
-          photoMap[photoNo] = r.id;
-          content.push({ type: "text", text: `photo ${photoNo} (dog ${i + 1})` });
+          photoMap[photoNo] = { id: r.id, bucket: r.bucket, dog: d.name };
+          content.push({ type: "text", text: `photo ${photoNo} (dog ${i + 1}${r.bucket === "photos" ? ", sorted today" : ""})` });
           content.push({ type: "image", source: { type: "base64", media_type: "image/jpeg", data: encodeBase64(new Uint8Array(await data.arrayBuffer())) } });
         }
       }
       const text = await claude(COMPARE_MODEL, COMPARE_SYSTEM, content, 6000);
       const res = (parseJson(text).dogs ?? []) as { n: number; tips: string; suspect?: number[] }[];
-      const saved: { name: string; tips: string; suspect: number }[] = [];
+      const saved: { name: string; tips: string; suspect: { id: string; bucket: string }[] }[] = [];
       for (const r of res) {
         const d = list[r.n - 1];
         if (!d || typeof r.tips !== "string") continue;
         await admin.from("dogs").update({ tips_ai: r.tips.slice(0, 160) }).eq("id", d.id);
-        saved.push({ name: d.name, tips: r.tips, suspect: (r.suspect ?? []).length });
+        saved.push({ name: d.name, tips: r.tips, suspect: (r.suspect ?? []).map((n) => photoMap[n]).filter(Boolean).map((x) => ({ id: x.id, bucket: x.bucket })) });
       }
       return json({ saved });
     }
