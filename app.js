@@ -711,22 +711,41 @@ function renderSelBar() {
   }
   const key = state.sel.key, n = state.sel.ids.size;
   const dog = dogById(key);
+  // 고른 사진을 작은 섬네일로 모아 보여줌 (눌러서 빼기)
+  const shownIds = [...state.sel.ids].filter((id) => document.querySelector(`#groups [data-photo="${CSS.escape(id)}"]`));
+  const tray = shownIds.length
+    ? `<div class="sel-tray">${shownIds.slice(-60).reverse().map((id) => {
+        const el = document.querySelector(`#groups [data-photo="${CSS.escape(id)}"]`);
+        const more = (burstOf.get(id) || [id]).length - 1;
+        return `<button class="sel-thumb" data-unpick="${id}" title="눌러서 선택 빼기"><img src="${el.getAttribute("src")}" class="${el.className.replace(/\b(picked|unsure)\b/g, "")}" alt="">${more ? `<i>+${more}</i>` : ""}<b>×</b></button>`;
+      }).join("")}</div>`
+    : `<small class="muted">사진을 누르면 여기에 모여요</small>`;
   if (state.sel.mode === "verify") {
-    bar.innerHTML = `<b>🔍 ${esc(dog?.name || "")} 다시 검수</b>
+    bar.innerHTML = `<b>🔍 ${esc(dog?.name || "")} 다시 검수</b>${tray}
       <small>기준이 될 사진(이 아이가 확실한 사진)을 1~3장 눌러 주세요. 안 골라도 대표 사진으로 검수해요${n ? ` · <b>${n}장</b> 골랐어요` : ""}</small>
       <button class="btn primary sm" data-sb="verify">검수 시작</button>
       <button class="btn ghost sm" data-sb="cancel">취소</button>`;
     $$("[data-sb]", bar).forEach((b) => b.addEventListener("click", () => selAction(b.dataset.sb)));
+    bindUnpick(bar);
     return;
   }
   const where = groupName(key);
-  bar.innerHTML = `<b>${esc(where)} · ${n}장 선택</b>
+  bar.innerHTML = `<b class="tool-title">${esc(where)}</b><b class="sel-count">${n}장 선택</b>${tray}
     <button class="btn ghost sm" data-sb="all">${n && n === state.sel.all.length ? "선택 해제" : "전체 선택"}</button>
     ${dog ? `<button class="btn primary sm" data-sb="out" ${n ? "" : "disabled"}>${esc(dog.name)}에서 빼서 아래로</button>` : `<button class="btn primary sm" data-sb="redo" ${n ? "" : "disabled"}>AI로 다시 분류</button>`}
     <button class="btn ghost sm" data-sb="move" ${n ? "" : "disabled"}>다른 아이로 옮기기</button>
     <button class="btn ghost sm danger" data-sb="del" ${n ? "" : "disabled"}>삭제</button>
     <button class="btn ghost sm" data-sb="cancel">취소</button>`;
   $$("[data-sb]", bar).forEach((b) => b.addEventListener("click", () => selAction(b.dataset.sb)));
+  bindUnpick(bar);
+}
+function bindUnpick(bar) {
+  $$("[data-unpick]", bar).forEach((b) => b.addEventListener("click", () => {
+    const id = b.dataset.unpick;
+    for (const m of burstOf.get(id) || [id]) state.sel.ids.delete(m);
+    document.querySelector(`#groups [data-photo="${CSS.escape(id)}"]`)?.classList.remove("picked");
+    renderSelBar();
+  }));
 }
 async function selAction(kind) {
   const sel = state.sel;
