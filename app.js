@@ -7,6 +7,7 @@ const $ = (s, el = document) => el.querySelector(s);
 const $$ = (s, el = document) => [...el.querySelectorAll(s)];
 
 const state = {
+  sel: null, // 여러 장 선택: { key: 그룹(강아지 id·"unsorted"·"skipped"), ids: Set }
   find: [], // 특정 아이만 찾기: 이번에 올리는 사진에서 이 아이(들)만 찾음
   day: kstToday(),
   tab: "photos",
@@ -442,7 +443,7 @@ async function setDay(day) {
 $("#day").addEventListener("change", (e) => setDay(e.target.value || kstToday()));
 $$(".date-row [data-shift]").forEach((b) => b.addEventListener("click", () => setDay(shiftDay(state.day, +b.dataset.shift))));
 $("#today").addEventListener("click", () => setDay(kstToday()));
-$$(".tabs button").forEach((b) => b.addEventListener("click", () => { state.tab = b.dataset.tab; render(); }));
+$$(".tabs button").forEach((b) => b.addEventListener("click", () => { state.tab = b.dataset.tab; state.sel = null; renderSelBar(); render(); }));
 
 async function render() {
   $$(".tabs button").forEach((b) => b.classList.toggle("on", b.dataset.tab === state.tab));
@@ -496,7 +497,7 @@ async function renderPhotos() {
 
   const thumb = await signed("photos", P.map((p) => p.thumb_path));
   const ref = await signed("refs", dogIds.map((id) => dogById(id)?.ref_path));
-  const img = (p) => `<img loading="lazy" src="${thumb(p.thumb_path)}" data-photo="${p.id}" class="rot${p.rotation || 0}${p.status === "done" && p.confidence === "low" ? " unsure" : ""}" alt=""${p.status === "done" && p.confidence === "low" ? ' title="AI가 확신하지 못한 사진 — 확인해 주세요"' : ""}>`;
+  const img = (p) => `<img loading="lazy" src="${thumb(p.thumb_path)}" data-photo="${p.id}" class="rot${p.rotation || 0}${p.status === "done" && p.confidence === "low" ? " unsure" : ""}${state.sel?.ids.has(p.id) ? " picked" : ""}" alt=""${p.status === "done" && p.confidence === "low" ? ' title="AI가 확신하지 못한 사진 — 확인해 주세요"' : ""}>`;
 
   box.innerHTML = dogIds.map((id) => {
     const dog = dogById(id);
@@ -509,7 +510,7 @@ async function renderPhotos() {
           <button class="dog-name ${dog.auto ? "unnamed" : ""}" data-rename="${id}">${esc(dog.name)} <span>✎</span></button>
           <small class="muted">${shown.length}장${extra.length ? ` · 비슷한 사진 ${extra.length}장 ${open ? "펼침" : "접힘"}` : ""}</small>
         </div>
-        <div class="save-btns">${saveButtons(id)}</div>
+        <div class="save-btns">${selBtn(id)}${saveButtons(id)}</div>
       </div>
       <div class="grid">${shown.map(img).join("")}</div>
       ${extra.length ? `<button class="more-sim" data-expand="${id}">${open ? "비슷한 사진 접기 ▲" : `비슷한 사진 ${extra.length}장 더 보기 ▼`}</button>
@@ -519,7 +520,7 @@ async function renderPhotos() {
   (unsorted.length ? `<div class="dog-group unsorted" data-list="unsorted">
       <div class="dog-head"><span class="avatar q">?</span>
         <div class="grow"><b>분류 안 된 사진 ${unsorted.length}장</b><small class="muted">AI가 확신하지 못한 사진이에요. 이름? 표시는 AI 추측이니, 눌러서 맞으면 [분류 저장]만 누르세요</small></div>
-        ${state.busy ? "" : `<button id="reclassify" class="btn ghost sm">AI로 다시 분류</button>`}</div>
+        ${selBtn("unsorted")}${state.busy ? "" : `<button id="reclassify" class="btn ghost sm">AI로 다시 분류</button>`}</div>
       <div class="grid">${unsorted.map((p) => {
         const guess = p.dog_ids.map((d) => dogById(d)?.name).filter(Boolean).join("·");
         return guess ? `<div class="guess">${img(p)}<span>${esc(guess)}?</span></div>` : img(p);
@@ -528,7 +529,7 @@ async function renderPhotos() {
   (skipped.length ? `<div class="dog-group skipped" data-list="skipped">
       <div class="dog-head"><span class="avatar q">🔎</span>
         <div class="grow"><b>찾는 아이가 아닌 사진 ${skipped.length}장</b><small class="muted">'특정 아이만 찾기'로 올린 사진 중 찾는 아이가 없던 사진이에요. 지우지 않고 모아 뒀어요</small></div>
-        <button id="skip-toggle" class="btn ghost sm">${state.showSkipped ? "접기" : "보기"}</button>
+        ${state.showSkipped ? selBtn("skipped") : ""}<button id="skip-toggle" class="btn ghost sm">${state.showSkipped ? "접기" : "보기"}</button>
         ${state.busy ? "" : `<button id="skip-all" class="btn ghost sm">전체 아이로 다시 분류</button>`}</div>
       ${state.showSkipped ? `<div class="grid">${skipped.map(img).join("")}</div>` : ""}
     </div>` : "") +
@@ -555,8 +556,22 @@ async function renderPhotos() {
   });
   $$("[data-photo]", box).forEach((el) => el.addEventListener("click", () => {
     const key = el.closest("[data-list]")?.dataset.list;
+    if (state.sel && state.sel.key === key) {
+      const id = el.dataset.photo;
+      state.sel.ids.has(id) ? state.sel.ids.delete(id) : state.sel.ids.add(id);
+      el.classList.toggle("picked", state.sel.ids.has(id));
+      renderSelBar();
+      return;
+    }
     openSheet(el.dataset.photo, lists.get(key) || [el.dataset.photo], key);
   }));
+  $$("[data-select]", box).forEach((b) => b.addEventListener("click", () => {
+    const key = b.dataset.select;
+    state.sel = state.sel?.key === key ? null : { key, ids: new Set(), all: lists.get(key) || [] };
+    renderPhotos();
+  }));
+  if (state.sel) state.sel.all = lists.get(state.sel.key) || [];
+  renderSelBar();
   // 그룹이 늘어난 뒤 다시 돌리면 대부분 자리를 찾아감
   $("#reclassify")?.addEventListener("click", async () => {
     const ids = unsorted.map((p) => p.id);
@@ -570,6 +585,68 @@ async function renderPhotos() {
   }));
   $$("[data-save]", box).forEach((b) => b.addEventListener("click", () =>
     saveDogPhotos(dogById(b.dataset.save), visible(b.dataset.save), b, b.dataset.mode)));
+}
+
+// ---- 여러 장 선택해서 한꺼번에 옮기기·빼기
+const selBtn = (key) => `<button class="btn ${state.sel?.key === key ? "primary" : "ghost"} sm" data-select="${key}">${state.sel?.key === key ? "선택 끝" : "☑ 여러 장 선택"}</button>`;
+function renderSelBar() {
+  let bar = $("#sel-bar");
+  if (!state.sel || state.tab !== "photos") { bar?.remove(); return; }
+  if (!bar) { bar = document.createElement("div"); bar.id = "sel-bar"; document.body.appendChild(bar); }
+  const key = state.sel.key, n = state.sel.ids.size;
+  const dog = dogById(key);
+  const where = dog ? dog.name : key === "unsorted" ? "분류 안 된 사진" : "찾는 아이가 아닌 사진";
+  bar.innerHTML = `<b>${esc(where)} · ${n}장 선택</b>
+    <button class="btn ghost sm" data-sb="all">${n && n === state.sel.all.length ? "선택 해제" : "전체 선택"}</button>
+    <button class="btn primary sm" data-sb="move" ${n ? "" : "disabled"}>다른 아이로 옮기기</button>
+    ${dog ? `<button class="btn ghost sm" data-sb="out" ${n ? "" : "disabled"}>${esc(dog.name)}에서 빼기</button>` : ""}
+    <button class="btn ghost sm" data-sb="cancel">취소</button>`;
+  $$("[data-sb]", bar).forEach((b) => b.addEventListener("click", () => selAction(b.dataset.sb)));
+}
+async function selAction(kind) {
+  const sel = state.sel;
+  if (!sel) return;
+  if (kind === "cancel") { state.sel = null; renderPhotos(); return; }
+  if (kind === "all") {
+    sel.ids = sel.ids.size === sel.all.length ? new Set() : new Set(sel.all);
+    renderPhotos();
+    return;
+  }
+  const photos = state.photos.filter((p) => sel.ids.has(p.id));
+  if (!photos.length) return;
+  const from = dogById(sel.key);
+  let to = null;
+  if (kind === "move") {
+    const typed = prompt(`선택한 ${photos.length}장을 어느 아이로 옮길까요? (이름)`, "");
+    if (!typed || !typed.trim()) return;
+    to = await findOrCreateDog(typed.trim());
+    if (!to) return;
+    if (from && to.id === from.id) { toast("같은 아이예요"); return; }
+  }
+  toast(`${photos.length}장 고치는 중…`);
+  const learnLimit = 6; // 실수 기록·학습 사진은 몇 장만 (비용·중복 방지)
+  let i = 0;
+  for (const p of photos) {
+    const before = { status: p.status, ids: [...p.dog_ids], conf: p.confidence };
+    let ids = from ? p.dog_ids.filter((d) => d !== from.id) : [];
+    if (to) ids = [...new Set([...ids, to.id])];
+    const upd = ids.length ? { dog_ids: ids, status: "done", confidence: "manual" } : { dog_ids: [], status: "review", confidence: "manual" };
+    await sb.from("photos").update({ ...upd, find_dogs: [] }).eq("id", p.id);
+    if (i < learnLimit && from && !from.auto) learnMistake(p.id, from.id, to?.id || null);
+    if (i < learnLimit && to) learnFrom(p, [to.id], before);
+    Object.assign(p, upd);
+    i++;
+  }
+  // 오늘 명단에 없던 아이로 옮겼으면 명단에 넣어서 AI도 후보로 보게 함
+  if (to && state.attendance.size && !state.attendance.has(to.id)) {
+    await sb.from("assignments").upsert({ day: state.day, dog_id: to.id }, { onConflict: "day,dog_id", ignoreDuplicates: true });
+    state.attendance.add(to.id);
+  }
+  toast(to ? `${photos.length}장을 ${to.name}(으)로 옮겼어요` : `${photos.length}장을 ${from?.name || ""}에서 뺐어요`);
+  state.sel = null;
+  await renderPhotos();
+  // A 폴더 사진을 B로 여러 장 옮겼으면, A의 나머지 사진도 B인지 한 번 더 확인
+  if (from && to && !from.auto) reviewFolder(from.id, to.id, null);
 }
 
 // ---- 사진으로 찾기: 명단에 없는 아이(호텔링 등)는 사진 몇 장을 주면 그 아이를 등록하고 그 아이만 찾음
