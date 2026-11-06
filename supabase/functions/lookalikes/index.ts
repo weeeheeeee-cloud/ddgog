@@ -54,6 +54,10 @@ separate it from the others in this group: tail length/shape/carriage, ear shape
 (spots, blaze, mask), eye color, coat pattern and patch positions, leg/chest/paw markings, size and build,
 coat texture, grooming style. Clothes, collars and harnesses change daily, so NEVER use them.
 Staff tips are true; build on them.
+For WHITE curly dogs (bichon, maltipoo, maltese, coton), "white and curly" separates nothing. Compare instead:
+nose colour (black / brown / slightly pink), tear stains (none / light / brown), head volume and shape
+(huge puffy round vs small or narrow), muzzle length, ear length and colour tinge, cream/apricot tinge on body,
+body size and leg length, tail plume. Name the single most decisive point first.
 Write each dog's tips in Korean (60자 이내), naming which look-alike(s) it should not be confused with,
 e.g. "해랑·루나와 비슷하나 얼굴에 점박이. 레티는 꼬리 보통 길이". Only state what you can actually see.
 If some photos of a dog seem to show a different dog, list their photo numbers in "suspect".
@@ -88,13 +92,13 @@ Deno.serve(async (req) => {
     }
 
     if (body.action === "compare") {
-      const ids = (Array.isArray(body.ids) ? body.ids : []).slice(0, 8) as string[];
+      const ids = (Array.isArray(body.ids) ? body.ids : []).slice(0, 10) as string[];
       if (ids.length < 2) return json({ error: "need 2+ ids" }, 400);
       const { data: dogs } = await admin.from("dogs")
         .select("id, name, note, tips, ref_path, dog_refs(id, path, created_at)").in("id", ids);
       const list = (dogs ?? []).map((d) => {
         const refs = (d.dog_refs ?? []).sort((a, b) => a.created_at.localeCompare(b.created_at));
-        const per = ids.length <= 4 ? 5 : 3;
+        const per = ids.length <= 4 ? 5 : ids.length <= 6 ? 4 : 3;
         const pick = refs.length <= per ? refs : Array.from({ length: per }, (_, i) => refs[Math.floor((i * refs.length) / per)]);
         return { ...d, pick };
       });
