@@ -484,3 +484,9 @@ body.practice #practice-reset{display:flex}
 .unsorted .cluster:first-of-type{border-top:0}
 .cluster-head{display:flex;align-items:center;gap:8px;margin-bottom:6px}
 .cluster-head small{font-weight:700;color:#374151}
+.tile-size{display:flex;flex-wrap:wrap;align-items:center;gap:6px;margin:4px 0 8px;font-size:13px;font-weight:700}
+.grid.tiles-s{grid-template-columns:repeat(auto-fill,minmax(96px,1fr))}
+.grid.tiles-m{grid-template-columns:repeat(auto-fill,minmax(150px,1fr))}
+.grid.tiles-l{grid-template-columns:repeat(auto-fill,minmax(220px,1fr));gap:6px}
+.grid.tiles-xl{grid-template-columns:repeat(auto-fill,minmax(320px,1fr));gap:8px}
+.grid.tiles-l img,.grid.tiles-xl img{object-fit:contain;background:#111}

@@ -7,6 +7,7 @@ const $ = (s, el = document) => el.querySelector(s);
 const $$ = (s, el = document) => [...el.querySelectorAll(s)];
 
 const state = {
+  tileSize: (() => { try { return localStorage.getItem("tileSize") || "l"; } catch { return "l"; } })(), // 모르는 아이 칸 사진 크기
   sel: null, // 여러 장 선택: { key: 그룹(강아지 id·"unsorted"·"skipped"), ids: Set }
   find: [], // 특정 아이만 찾기: 이번에 올리는 사진에서 이 아이(들)만 찾음
   day: kstToday(),
@@ -539,13 +540,13 @@ async function renderPhotos() {
       <div class="dog-head"><span class="avatar q">?</span>
         <div class="grow"><b>모르는 아이·분류 안 된 사진 ${unsorted.length}장</b><small class="muted">처음 보는 아이, 뺀 사진, AI가 확신하지 못한 사진을 한곳에 모았어요. 비슷한 사진끼리 묶어 두었으니 묶음째 선택해서 한 번에 넣을 수 있어요</small></div>
         ${selBtn("unsorted")}${state.busy ? "" : `<button id="reclassify" class="btn ghost sm">AI로 다시 분류</button>`}</div>
-      ${unsortedClusters(unsorted).map((g, gi) => `<div class="cluster">
-        <div class="cluster-head"><small>${!g.loose ? `비슷한 사진 묶음 ${gi + 1} · ${g.length}장` : `비슷한 사진이 없는 사진 ${g.length}장`}</small>
-          ${!g.loose ? `<button class="btn ghost mini" data-pick-cluster="${g.map((p) => p.id).join(",")}">이 묶음 선택</button>` : ""}</div>
-        <div class="grid">${g.map((p) => {
-          const guess = p.dog_ids.map((d) => dogById(d)?.name).filter(Boolean).join("·");
-          return guess ? `<div class="guess">${img(p)}<span>${esc(guess)}?</span></div>` : img(p);
-        }).join("")}</div></div>`).join("")}
+      <div class="tile-size">사진 크기
+        ${[["s", "작게"], ["m", "보통"], ["l", "크게"], ["xl", "아주 크게"]].map(([k, t]) => `<button class="btn ${state.tileSize === k ? "primary" : "ghost"} mini" data-tile="${k}">${t}</button>`).join("")}
+        <small class="muted">비슷하게 생긴 사진끼리 붙여서 보여줘요</small></div>
+      <div class="grid tiles-${state.tileSize}">${unsortedClusters(unsorted).flat().map((p) => {
+        const guess = p.dog_ids.map((d) => dogById(d)?.name).filter(Boolean).join("·");
+        return guess ? `<div class="guess">${img(p)}<span>${esc(guess)}?</span></div>` : img(p);
+      }).join("")}</div>
     </div>` : "") +
   (!dogIds.length && !unsorted.length && !skipped.length ? `<div class="empty">분류를 기다리는 사진이 있어요.</div>` : "");
 
@@ -578,6 +579,11 @@ async function renderPhotos() {
       return;
     }
     openSheet(el.dataset.photo, lists.get(key) || [el.dataset.photo], key);
+  }));
+  $$("[data-tile]", box).forEach((b) => b.addEventListener("click", () => {
+    state.tileSize = b.dataset.tile;
+    try { localStorage.setItem("tileSize", state.tileSize); } catch { /* 저장 안 돼도 됨 */ }
+    renderPhotos();
   }));
   $$("[data-pick-cluster]", box).forEach((b) => b.addEventListener("click", () => {
     state.sel = { key: "unsorted", ids: new Set(b.dataset.pickCluster.split(",")), all: lists.get("unsorted") || [] };
