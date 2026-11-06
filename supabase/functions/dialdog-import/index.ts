@@ -66,7 +66,9 @@ Reply with JSON only:
 {"note":"<한 줄 요약 40자 이내: 견종·털색·체구>",
  "features":"<부위별 특징, 각 항목 짧게, 줄바꿈으로 구분>\\n얼굴: …\\n정수리·머리통(위에서): …\\n뒤통수·귀: …\\n등·몸통(위/옆): …\\n꼬리·엉덩이: …\\n다리·발: …\\n체형·크기: …\\n털 길이·질감·미용: …"}
 Mention patches/markings and their exact positions, colour gradients, ear shape and colour, tail length/curl/plume,
-leg length, body length vs height. Keep the whole "features" under 400 Korean characters.`;
+leg length, body length vs height. Keep the whole "features" under 400 Korean characters.
+For WHITE or cream curly dogs (many look alike here) always state: nose colour (black / brown / slightly pink),
+tear stains (none / light / brown, where), head volume and shape (huge puffy round vs small/narrow), muzzle length.`;
 
 Deno.serve(async (req) => {
   CORS = corsFor(req.headers.get("origin"));
