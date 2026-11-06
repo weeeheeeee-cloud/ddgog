@@ -281,6 +281,10 @@ Deno.serve(async (req) => {
         }
       }
     }
+    if (only) {
+      content.push({ type: "text", text: "Note: staff just found that one photo filed under one of these two dogs was actually the other. " +
+        "These two dogs are easy to confuse. Look very carefully at the distinguishing points and today's look, and decide which of the two is in the new photo." });
+    }
     if (practice) {
       content.push({ type: "text", text: "Note: no attendance list today. These candidates were pre-selected by visual similarity " +
         "from ALL registered dogs, so the right dog is usually among them, but not always: if none truly matches, use new_dog / unknown_main." });
