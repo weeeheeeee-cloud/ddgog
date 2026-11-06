@@ -415,7 +415,7 @@ async function loadPhotos() {
   const all = [];
   for (let from = 0; ; from += 1000) {
     const { data } = await sb.from("photos")
-      .select("id, path, thumb_path, dog_ids, status, ai_note, confidence, created_at, taken_at, phash, sharp, rotation, not_dogs")
+      .select("id, path, thumb_path, dog_ids, status, ai_note, confidence, created_at, taken_at, phash, sharp, rotation, not_dogs, rotation_checked")
       .eq("day", state.day).eq("practice", !!state.practice).order("created_at").range(from, from + 999);
     all.push(...(data || []));
     if (!data || data.length < 1000) break;
@@ -521,7 +521,7 @@ async function renderPhotos() {
           <button class="dog-name ${dog.auto ? "unnamed" : ""}" data-rename="${id}">${esc(dog.name)} <span>✎</span></button>
           <small class="muted">${shown.length}장${extra.length ? ` · 비슷한 사진 ${extra.length}장 ${open ? "펼침" : "접힘"}` : ""}</small>
         </div>
-        <div class="save-btns">${selBtn(id)}${saveButtons(id)}</div>
+        <div class="save-btns">${state.busy ? "" : `<button class="btn ghost sm" data-verify="${id}">🔍 다시 검수</button>`}${selBtn(id)}${saveButtons(id)}</div>
       </div>
       <div class="grid">${shown.map(img).join("")}</div>
       ${extra.length ? `<button class="more-sim" data-expand="${id}">${open ? "비슷한 사진 접기 ▲" : `비슷한 사진 ${extra.length}장 더 보기 ▼`}</button>
@@ -583,6 +583,11 @@ async function renderPhotos() {
     state.sel = { key: "unsorted", ids: new Set(b.dataset.pickCluster.split(",")), all: lists.get("unsorted") || [] };
     renderPhotos();
   }));
+  $$("[data-verify]", box).forEach((b) => b.addEventListener("click", () => {
+    const key = b.dataset.verify;
+    state.sel = { key, ids: new Set(), all: lists.get(key) || [], mode: "verify" };
+    renderPhotos();
+  }));
   $$("[data-select]", box).forEach((b) => b.addEventListener("click", () => {
     const key = b.dataset.select;
     state.sel = state.sel?.key === key ? null : { key, ids: new Set(), all: lists.get(key) || [] };
@@ -638,6 +643,14 @@ function renderSelBar() {
   if (!bar) { bar = document.createElement("div"); bar.id = "sel-bar"; document.body.appendChild(bar); }
   const key = state.sel.key, n = state.sel.ids.size;
   const dog = dogById(key);
+  if (state.sel.mode === "verify") {
+    bar.innerHTML = `<b>🔍 ${esc(dog?.name || "")} 다시 검수</b>
+      <small>기준이 될 사진(이 아이가 확실한 사진)을 1~3장 눌러 주세요. 안 골라도 대표 사진으로 검수해요${n ? ` · <b>${n}장</b> 골랐어요` : ""}</small>
+      <button class="btn primary sm" data-sb="verify">검수 시작</button>
+      <button class="btn ghost sm" data-sb="cancel">취소</button>`;
+    $$("[data-sb]", bar).forEach((b) => b.addEventListener("click", () => selAction(b.dataset.sb)));
+    return;
+  }
   const where = dog ? dog.name : key === "unsorted" ? "분류 안 된 사진" : "찾는 아이가 아닌 사진";
   bar.innerHTML = `<b>${esc(where)} · ${n}장 선택</b>
     <button class="btn ghost sm" data-sb="all">${n && n === state.sel.all.length ? "선택 해제" : "전체 선택"}</button>
@@ -656,6 +669,7 @@ async function selAction(kind) {
     renderPhotos();
     return;
   }
+  if (kind === "verify") { state.sel = null; renderSelBar(); verifyFolder(dogById(sel.key), [...sel.ids]); return; }
   const photos = state.photos.filter((p) => sel.ids.has(p.id));
   if (!photos.length) return;
   const from = dogById(sel.key);
@@ -727,6 +741,49 @@ async function selAction(kind) {
   await renderPhotos();
   // A 폴더 사진을 B로 여러 장 옮겼으면, A의 나머지 사진도 B인지 한 번 더 확인
   if (from && to && !from.auto) reviewFolder(from.id, to.id, null);
+}
+
+// ---- 폴더 다시 검수: 기준(대표 사진 + 직원이 고른 사진)과 너무 다른 사진은 빼서 아래로, 누운 사진은 세움
+async function verifyFolder(dog, anchors) {
+  if (!dog || state.busy) return;
+  const list = state.photos.filter((p) => p.status === "done" && p.dog_ids.includes(dog.id) && !anchors.includes(p.id));
+  if (!list.length) { toast("검수할 사진이 없어요"); return; }
+  state.busy = true;
+  const batches = [];
+  for (let i = 0; i < list.length; i += 6) batches.push(list.slice(i, i + 6));
+  let done = 0, out = 0, rotated = 0, fail = 0;
+  const title = `${dog.name} 폴더 다시 검수 중… 창을 닫지 마세요`;
+  progress(title, 0, list.length, anchors.length ? `기준 사진 ${anchors.length}장과 비교해요` : "대표 사진과 비교해요");
+  await pool(batches, 3, async (batch) => {
+    try {
+      const { data, error } = await sb.functions.invoke("verify-folder", { body: { dog_id: dog.id, photo_ids: batch.map((p) => p.id), anchor_ids: anchors } });
+      if (error) throw error;
+      for (const r of data?.results || []) {
+        const p = state.photos.find((x) => x.id === r.id);
+        if (!p) continue;
+        const upd = {};
+        if (!r.same) {
+          const rest = p.dog_ids.filter((d) => d !== dog.id);
+          Object.assign(upd, { dog_ids: rest, not_dogs: [...new Set([...(p.not_dogs || []), dog.id])],
+            status: rest.length ? "done" : "review", ai_note: `${dog.name} 검수에서 뺌${r.note ? `: ${r.note}` : ""}`.slice(0, 200) });
+          if (!rest.length) upd.confidence = null;
+          out++;
+        }
+        if (!p.rotation_checked && (r.rotate || 0) !== (p.rotation || 0)) { upd.rotation = r.rotate || 0; rotated++; }
+        if (Object.keys(upd).length) {
+          await sb.from("photos").update(upd).eq("id", p.id);
+          Object.assign(p, upd);
+        }
+      }
+    } catch (e) { console.warn(e); fail += batch.length; }
+    done += batch.length;
+    progress(title, done, list.length, `뺀 사진 ${out}장 · 돌린 사진 ${rotated}장${fail ? ` · 확인 못 함 ${fail}장` : ""}`);
+  });
+  state.busy = false;
+  progress(`${dog.name} 검수 끝`, list.length, list.length, `${list.length}장 중 ${out}장을 맨 아래 '모르는 아이' 칸으로 뺐고, ${rotated}장을 바로 세웠어요${fail ? ` · ${fail}장은 확인하지 못했어요(다시 누르면 이어서)` : ""}`);
+  toast(out ? `${dog.name} 폴더에서 다른 아이로 보이는 사진 ${out}장을 뺐어요` : `${dog.name} 폴더는 모두 같은 아이로 보여요`);
+  urlCache?.clear?.();
+  await renderPhotos();
 }
 
 // ---- 사진으로 찾기: 명단에 없는 아이(호텔링 등)는 사진 몇 장을 주면 그 아이를 등록하고 그 아이만 찾음
