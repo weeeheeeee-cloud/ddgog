@@ -1618,7 +1618,7 @@ async function previewReclassify(list) {
   const results = [];
   await pool(groups, 6, async (g) => {
     const r = await classifyPreview(g.rep.id);
-    if (r) results.push({ ...g, ids: r.dog_ids || [], sure: new Set(r.sure || []), note: r.note || "", rotation: r.rotation, keep: true, manual: false });
+    if (r) results.push({ ...g, ids: r.dog_ids || [], aiIds: [...(r.dog_ids || [])], sure: new Set(r.sure || []), note: r.note || "", rotation: r.rotation, keep: true, manual: false });
     else failed++;
     done++;
     tick();
@@ -1691,17 +1691,27 @@ async function openReclassifyReview(results, failed) {
       draw();
     }));
     $$("[data-rc-act]", ov).forEach((b) => b.addEventListener("click", () => {
-      if (b.dataset.rcAct === "apply") applyReclassify(results.filter((r) => r.keep && r.ids.length), ov);
+      if (b.dataset.rcAct === "apply") applyReclassify(results.filter((r) => r.keep && r.ids.length), ov, results.filter((r) => !r.keep && r.aiIds.length));
       else ov.remove();
     }));
   };
   ov.addEventListener("click", (e) => { if (e.target === ov) ov.remove(); });
   draw();
 }
-async function applyReclassify(chosen, ov) {
+async function applyReclassify(chosen, ov, rejected = []) {
   const btn = ov.querySelector('[data-rc-act="apply"]');
   if (btn) { btn.disabled = true; btn.textContent = "넣는 중…"; }
-  let n = 0, learnN = 0;
+  let n = 0, learnN = 0, mistakeN = 0;
+  const named = (id) => { const d = dogById(id); return d && !d.auto; };
+  // 체크를 뺀 사진 = AI가 틀린 사진: 그 아이는 이 사진 후보에서 빼고, 실수로 기록해서 다음부터 덜 헷갈리게
+  for (const r of rejected) {
+    for (const p of r.members) {
+      const not = [...new Set([...(p.not_dogs || []), ...r.aiIds])];
+      await sb.from("photos").update({ not_dogs: not }).eq("id", p.id);
+      p.not_dogs = not;
+    }
+    if (mistakeN < 8 && r.aiIds.length === 1 && named(r.aiIds[0])) { learnMistake(r.rep.id, r.aiIds[0], null); mistakeN++; }
+  }
   for (const r of chosen) {
     const conf = r.manual ? "manual" : r.ids.every((id) => r.sure.has(id)) ? "high" : "low";
     for (const p of r.members) {
@@ -1710,8 +1720,12 @@ async function applyReclassify(chosen, ov) {
       if (!p.rotation_checked && r.rotation != null && p.id === r.rep.id) upd.rotation = r.rotation;
       await sb.from("photos").update(upd).eq("id", p.id);
       Object.assign(p, upd);
-      // 직원이 직접 고른 아이는 학습 사진으로
-      if (r.manual && learnN < 6 && p.id === r.rep.id) { learnFrom(p, r.ids, before); learnN++; }
+      // 직원이 확인한 사진은 학습: 직접 고른 아이 + AI가 확신 못 했는데 맞힌 아이 (확신해서 맞힌 건 이미 아는 것)
+      if (p.id === r.rep.id && conf !== "high" && learnN < 16) { learnFrom(p, r.ids, before); learnN++; }
+      // AI가 A라고 했는데 직원이 B로 바꿨으면 "A 아니고 B" 실수 기록
+      if (p.id === r.rep.id && r.manual && mistakeN < 8 && r.aiIds.length === 1 && named(r.aiIds[0]) && !r.ids.includes(r.aiIds[0])) {
+        learnMistake(p.id, r.aiIds[0], r.ids[0]); mistakeN++;
+      }
       n++;
     }
   }
