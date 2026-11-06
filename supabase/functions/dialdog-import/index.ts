@@ -1,6 +1,6 @@
 // 다이얼독 지난 알림장 → 명단·대표 사진·특징 일괄 학습 (관리용)
 // 다이얼독 파트너 페이지에서 실행되는 스크립트가 호출. import_tokens 의 토큰이 맞아야만 동작.
-//  action "pick": { name, breed, color, images: base64[] (120px 썸네일, 최대 80) } → { picks, consistent }
+//  action "pick": { name, breed, color, images: base64[] (120px 썸네일, 최대 80), labels?: string[] (사진별 날짜) } → { picks, consistent }
 //  action "save": { name, breed, color, petId, images: base64[] (512px, 최대 18) }
 //                 → 이전 다이얼독 대표 사진 교체 + 부위별 특징(features) 학습 → { dogId, added, created, features }
 
@@ -52,6 +52,10 @@ Most show that dog; some show other dogs, groups, people, food or no dog.
    the back/등 from above, rear and tail, legs/paws, lying down, sitting, full body, different grooming lengths.
    A partial photo is GOOD if it clearly shows that dog's coat/pattern; skip blurry, tiny or ambiguous ones
    and photos where another dog dominates. Avoid near-duplicates.
+3. The photos come from reports spread over MANY months (dates are given). The same dog looks different after
+   grooming (long fluffy coat vs short clip), in different seasons and in different clothes/outfits.
+   Spread your picks across different dates so that every look is represented: long coat, short clip,
+   with clothes (several different outfits) and without clothes. Do not take most picks from one date.
 Reply with JSON only: {"picks":[<photo numbers>],"consistent":true|false}`;
 
 const FEATURE_SYSTEM = `You describe ONE dog so that a vision model can recognize it at a dog daycare
@@ -122,8 +126,9 @@ Never use clothes. Korean. Reply JSON only:
       const content: Record<string, unknown>[] = [{
         type: "text", text: `Dog: ${name}${breed ? ` / breed: ${breed}` : ""}${color ? ` / color: ${color}` : ""}\nMAX = ${max}`,
       }];
+      const labels = Array.isArray(body.labels) ? body.labels.map(String) : [];
       imgs.forEach((data, i) => {
-        content.push({ type: "text", text: `Photo ${i + 1}:` });
+        content.push({ type: "text", text: `Photo ${i + 1}${labels[i] ? ` (${labels[i]})` : ""}:` });
         content.push({ type: "image", source: { type: "base64", media_type: "image/jpeg", data } });
       });
       const sys = body.multi ? PICK_SYSTEM + `\nIMPORTANT: this name actually covers 2 or more SIBLING dogs that live together (e.g. 비비모모 = 비비 + 모모).
