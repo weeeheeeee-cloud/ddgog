@@ -603,13 +603,8 @@ async function renderPhotos() {
   if (state.sel) state.sel.all = lists.get(state.sel.key) || [];
   renderSelBar();
   // 그룹이 늘어난 뒤 다시 돌리면 대부분 자리를 찾아감
-  $("#reclassify")?.addEventListener("click", async () => {
-    const ids = unsorted.map((p) => p.id);
-    for (let i = 0; i < ids.length; i += 200) {
-      await sb.from("photos").update({ status: "pending", dog_ids: [], ai_note: null }).in("id", ids.slice(i, i + 200));
-    }
-    classifyPending();
-  });
+  // 바로 넣지 않고, 어디로 갈지 먼저 보여준 뒤 확인하고 넣음
+  $("#reclassify")?.addEventListener("click", () => previewReclassify(unsorted));
   $$("[data-rename]", box).forEach((b) => b.addEventListener("click", async () => {
     if (await renameDog(dogById(b.dataset.rename))) renderPhotos();
   }));
@@ -774,6 +769,7 @@ async function selAction(kind) {
     return;
   }
   // 빼고 다시 분류: 이 아이는 후보에서 빼고 AI가 다시 판단
+  if (kind === "redo" && !from) { state.sel = null; renderSelBar(); previewReclassify(photos); return; }
   if (kind === "redo") {
     toast(`${photos.length}장을 ${from ? `${from.name}에서 빼고 ` : ""}다시 분류할게요`);
     let i = 0;
@@ -1593,6 +1589,142 @@ async function classifyPending() {
     setTimeout(() => $("#progress").classList.add("hidden"), 4000);
   }
   await render();
+}
+
+/* ---------- 다시 분류 미리보기: 어디 넣을지 보여주고 확인 후 넣기 ---------- */
+async function classifyPreview(photoId) {
+  for (let attempt = 0; attempt < 4; attempt++) {
+    const res = await Promise.race([
+      sb.functions.invoke("classify", { body: { photo_id: photoId, preview: true } }),
+      sleep(120000).then(() => ({ error: { context: { status: 504 } } })),
+    ]);
+    if (!res.error && res.data?.preview) return res.data;
+    const status = res.error?.context?.status;
+    if (status === 503 || status === 429 || status === 504 || status === 546) { await sleep(2000 * 2 ** attempt); continue; }
+    return null;
+  }
+  return null;
+}
+async function previewReclassify(list) {
+  if (state.busy || !list?.length) return;
+  state.busy = true;
+  await render();
+  // 거의 같은 연속 사진은 한 장만 물어보고 같이 처리
+  const groups = burstGroups(list).map((g) => ({ rep: g.rep, members: g.members }));
+  let done = 0, failed = 0;
+  const total = groups.length;
+  const tick = () => progress("AI가 어디 넣을지 살펴보는 중… 아직 넣지 않아요", done, total, "다 보고 나면 어디로 갈지 보여드려요. 확인하고 넣으면 돼요.");
+  tick();
+  const results = [];
+  await pool(groups, 6, async (g) => {
+    const r = await classifyPreview(g.rep.id);
+    if (r) results.push({ ...g, ids: r.dog_ids || [], sure: new Set(r.sure || []), note: r.note || "", rotation: r.rotation, keep: true, manual: false });
+    else failed++;
+    done++;
+    tick();
+  });
+  state.busy = false;
+  $("#progress").classList.add("hidden");
+  await render();
+  if (!results.length) { toast(failed ? "AI가 바빠서 살펴보지 못했어요. 잠시 후 다시 눌러 주세요" : "다시 분류할 사진이 없어요"); return; }
+  openReclassifyReview(results, failed);
+}
+async function openReclassifyReview(results, failed) {
+  document.querySelector(".rc-overlay")?.remove();
+  const ov = document.createElement("div");
+  ov.className = "rc-overlay";
+  document.body.appendChild(ov);
+  const thumb = await signed("photos", results.flatMap((r) => r.members.map((p) => p.thumb_path)));
+  const draw = async () => {
+    const found = results.filter((r) => r.ids.length);
+    const none = results.filter((r) => !r.ids.length);
+    const byKey = new Map();
+    for (const r of found) {
+      const k = [...r.ids].sort().join(",");
+      if (!byKey.has(k)) byKey.set(k, []);
+      byKey.get(k).push(r);
+    }
+    const blocks = [...byKey.entries()].sort((a, b) => b[1].length - a[1].length);
+    const refs = await signed("refs", blocks.map(([k]) => dogById(k.split(",")[0])?.ref_path));
+    const cnt = (rs) => rs.reduce((n, r) => n + r.members.length, 0);
+    const picked = cnt(found.filter((r) => r.keep));
+    const tile = (r, i) => `<button class="rc-tile ${r.keep ? "on" : ""} ${!r.manual && !r.ids.every((id) => r.sure.has(id)) ? "unsure" : ""}" data-rc="${i}" title="${esc(r.note)}">
+        <img src="${thumb(r.rep.thumb_path)}" class="rot${r.rep.rotation || 0}" alt="">
+        <span class="rc-check">${r.keep ? "✓" : ""}</span>
+        ${r.members.length > 1 ? `<span class="burst">+${r.members.length - 1}</span>` : ""}</button>`;
+    ov.innerHTML = `<div class="rc-box">
+      <div class="rc-head"><div class="grow"><b>AI가 이렇게 넣으려고 해요</b>
+        <small class="muted">아직 넣지 않았어요. 틀린 사진은 눌러서 체크를 빼면 그대로 남아요. 주황 점선은 AI가 확신하지 못한 사진이에요.</small></div>
+        <button class="btn ghost sm" data-rc-act="close">닫기</button></div>
+      <div class="rc-body">
+      ${blocks.map(([k, rs]) => {
+        const ids = k.split(",");
+        const d0 = dogById(ids[0]);
+        const allOn = rs.every((r) => r.keep);
+        return `<div class="rc-group">
+          <div class="rc-ghead">${d0?.ref_path ? `<img class="avatar" src="${refs(d0.ref_path)}" alt="">` : `<span class="avatar"></span>`}
+            <b class="grow">→ ${esc(ids.map((id) => dogById(id)?.name || "?").join(" · "))} <span class="muted">${cnt(rs)}장</span></b>
+            <button class="btn ghost mini" data-rc-all="${k}">${allOn ? "모두 빼기" : "모두 넣기"}</button>
+            <button class="btn ghost mini" data-rc-move="${k}">다른 아이로</button></div>
+          <div class="rc-grid">${rs.map((r) => tile(r, results.indexOf(r))).join("")}</div></div>`;
+      }).join("")}
+      ${none.length ? `<div class="rc-group none"><div class="rc-ghead"><span class="avatar q">?</span>
+          <b class="grow">AI도 못 찾은 사진 <span class="muted">${cnt(none)}장 · 그대로 둬요</span></b></div>
+          <div class="rc-grid">${none.map((r) => `<div class="rc-tile off"><img src="${thumb(r.rep.thumb_path)}" class="rot${r.rep.rotation || 0}" alt=""></div>`).join("")}</div></div>` : ""}
+      ${failed ? `<p class="muted small">${failed}장은 AI가 바빠서 살펴보지 못했어요. 그대로 남아 있어요.</p>` : ""}
+      </div>
+      <div class="rc-foot"><button class="btn ghost sm" data-rc-act="close">넣지 않고 닫기</button>
+        <button class="btn primary sm" data-rc-act="apply" ${picked ? "" : "disabled"}>체크한 ${picked}장 넣기</button></div>
+    </div>`;
+    $$("[data-rc]", ov).forEach((b) => b.addEventListener("click", () => { const r = results[+b.dataset.rc]; r.keep = !r.keep; draw(); }));
+    $$("[data-rc-all]", ov).forEach((b) => b.addEventListener("click", () => {
+      const rs = byKey.get(b.dataset.rcAll); const on = !rs.every((r) => r.keep);
+      rs.forEach((r) => (r.keep = on)); draw();
+    }));
+    $$("[data-rc-move]", ov).forEach((b) => b.addEventListener("click", async () => {
+      const rs = byKey.get(b.dataset.rcMove);
+      const typed = prompt(`이 ${cnt(rs)}장을 어느 아이로 넣을까요? (이름)`, "");
+      if (!typed || !typed.trim()) return;
+      const to = await findOrCreateDog(typed.trim());
+      if (!to) return;
+      rs.forEach((r) => { r.ids = [to.id]; r.manual = true; r.keep = true; });
+      draw();
+    }));
+    $$("[data-rc-act]", ov).forEach((b) => b.addEventListener("click", () => {
+      if (b.dataset.rcAct === "apply") applyReclassify(results.filter((r) => r.keep && r.ids.length), ov);
+      else ov.remove();
+    }));
+  };
+  ov.addEventListener("click", (e) => { if (e.target === ov) ov.remove(); });
+  draw();
+}
+async function applyReclassify(chosen, ov) {
+  const btn = ov.querySelector('[data-rc-act="apply"]');
+  if (btn) { btn.disabled = true; btn.textContent = "넣는 중…"; }
+  let n = 0, learnN = 0;
+  for (const r of chosen) {
+    const conf = r.manual ? "manual" : r.ids.every((id) => r.sure.has(id)) ? "high" : "low";
+    for (const p of r.members) {
+      const before = { status: p.status, ids: [...p.dog_ids], conf: p.confidence };
+      const upd = { dog_ids: r.ids, status: "done", confidence: conf, ai_note: r.manual ? "직원이 확인 후 넣음" : `확인 후 넣음: ${r.note}`.slice(0, 200), find_dogs: [], claimed_at: null };
+      if (!p.rotation_checked && r.rotation != null && p.id === r.rep.id) upd.rotation = r.rotation;
+      await sb.from("photos").update(upd).eq("id", p.id);
+      Object.assign(p, upd);
+      // 직원이 직접 고른 아이는 학습 사진으로
+      if (r.manual && learnN < 6 && p.id === r.rep.id) { learnFrom(p, r.ids, before); learnN++; }
+      n++;
+    }
+  }
+  // 오늘 명단에 없던 아이면 명단에 추가
+  const newIds = [...new Set(chosen.flatMap((r) => r.ids))].filter((id) => state.attendance.size && !state.attendance.has(id));
+  for (const id of newIds) {
+    await sb.from("assignments").upsert({ day: state.day, dog_id: id }, { onConflict: "day,dog_id", ignoreDuplicates: true });
+    state.attendance.add(id);
+  }
+  ov.remove();
+  toast(`${n}장을 넣었어요`);
+  await loadPhotos();
+  await renderPhotos();
 }
 
 /* ---------- 사진 시트 (크게 보기 + 강아지 지정) ---------- */

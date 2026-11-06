@@ -140,8 +140,10 @@ Deno.serve(async (req) => {
   let photoId: string;
   let recheck = false;
   let only: string[] | null = null; // 직원이 A→B로 고친 뒤, A 폴더의 다른 사진을 A·B 둘 중에서만 다시 판단
+  let preview = false; // 미리보기: 어디 넣을지만 알려주고 저장하지 않음 (직원이 확인 후 넣음)
   try {
-    ({ photo_id: photoId, recheck = false, only = null } = await req.json());
+    ({ photo_id: photoId, recheck = false, only = null, preview = false } = await req.json());
+    preview = preview === true;
     if (!Array.isArray(only) || !only.length) only = null;
   } catch {
     return json({ error: "bad request" }, 400);
@@ -152,7 +154,7 @@ Deno.serve(async (req) => {
   if (pErr || !photo) return json({ error: "사진을 찾을 수 없어요" }, 404);
 
   // 특정 아이만 찾기: 올릴 때 고른 아이(들)만 후보. 그 아이가 없으면 'skip'
-  const find: string[] = Array.isArray(photo.find_dogs) && photo.find_dogs.length && !only ? photo.find_dogs : [];
+  const find: string[] = Array.isArray(photo.find_dogs) && photo.find_dogs.length && !only && !preview ? photo.find_dogs : [];
   if (find.length) only = find;
   // 후보: 그날 담당이 지정된 강아지 + 이름 안 붙은 자동 그룹. 담당 지정이 없으면 활성 강아지 전체
   // 연습 모드(관리 탭에서 켬): 출석 명단을 무시하고 전체 아이 중 지문으로 추려서 분류
@@ -217,6 +219,7 @@ Deno.serve(async (req) => {
     if (cfg.enabled) {
       const named = refs.filter((d) => !d.auto);
       const finish = async (ids: string[], note: string) => {
+        if (preview) return json({ preview: true, dog_ids: ids, sure: ids, note, rotation: null, by: "fingerprint" });
         await supa.from("photos").update({ dog_ids: ids, status: "done", confidence: "high", ai_note: note, claimed_at: null }).eq("id", photoId);
         return json({ status: "done", dog_ids: ids, by: "fingerprint" });
       };
@@ -360,6 +363,7 @@ Deno.serve(async (req) => {
     });
 
     if (res.status === 429 || res.status === 529 || res.status >= 500) {
+      if (preview) return json({ error: "busy", retryable: true }, 503);
       await supa.from("photos").update({ status: "pending", claimed_at: null }).eq("id", photoId).eq("status", "working");
       return json({ error: "busy", retryable: true }, 503);
     }
@@ -378,6 +382,10 @@ Deno.serve(async (req) => {
     // 애매해도 가장 닮은 아이에게 우선 넣음 (확신 못 한 사진은 confidence low → 화면에 '확인' 표시)
     const status = ids.length ? "done" : "review";
     const allSure = ids.length > 0 && ids.every((id) => sureIds.has(id));
+    if (preview) {
+      const rot = [0, 90, 180, 270].includes(Number(parsed.rotate)) ? Number(parsed.rotate) : 0;
+      return json({ preview: true, dog_ids: ids, sure: [...sureIds], note, rotation: rot, new_dog: parsed.new_dog === true });
+    }
     if (recheck && !ids.length) return json({ unchanged: true });
     if (find.length) {
       const rotation = [0, 90, 180, 270].includes(Number(parsed.rotate)) ? Number(parsed.rotate) : 0;
@@ -415,7 +423,7 @@ Deno.serve(async (req) => {
 
     return json({ status, dog_ids: ids });
   } catch (e) {
-    if (!recheck && (!only || find.length)) await supa.from("photos").update({ status: "error", ai_note: String(e).slice(0, 200) }).eq("id", photoId);
+    if (!preview && !recheck && (!only || find.length)) await supa.from("photos").update({ status: "error", ai_note: String(e).slice(0, 200) }).eq("id", photoId);
     return json({ error: String(e) }, 500);
   }
 });
