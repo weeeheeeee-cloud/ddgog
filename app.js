@@ -180,7 +180,7 @@ async function pool(items, limit, fn) {
   }));
 }
 
-// 이름 붙은 강아지 가나다순 → 새 강아지 번호순
+// 이름 가나다순
 function dogOrder(a, b) {
   if (a.auto !== b.auto) return a.auto ? 1 : -1;
   if (a.auto) return (parseInt(a.name.replace(/\D/g, "")) || 0) - (parseInt(b.name.replace(/\D/g, "")) || 0);
@@ -390,7 +390,19 @@ async function startApp() {
 async function loadDogs() {
   const { data } = await sb.from("dogs").select("*, dog_refs(id, path, created_at)");
   (data || []).forEach((d) => (d.dog_refs || []).sort((a, b) => a.created_at.localeCompare(b.created_at)));
-  state.dogs = (data || []).sort(dogOrder);
+  const autos = (data || []).filter((d) => d.auto);
+  if (autos.length) purgeAutoGroups(autos.map((d) => d.id));
+  state.dogs = (data || []).filter((d) => !d.auto).sort(dogOrder);
+}
+// '새 강아지' 그룹은 더 이상 쓰지 않음: 남아 있으면 지우고 사진은 '모르는 아이'로 돌림
+async function purgeAutoGroups(ids) {
+  try {
+    await sb.from("lessons").update({ wrong_dog: null }).in("wrong_dog", ids);
+    await sb.from("lessons").delete().in("right_dog", ids);
+    const { data } = await sb.rpc("delete_dogs", { ids });
+    const paths = [...new Set((data || []).map((x) => x.path).filter(Boolean))];
+    for (let i = 0; i < paths.length; i += 100) await sb.storage.from("refs").remove(paths.slice(i, i + 100));
+  } catch (e) { console.warn(e); }
 }
 async function loadAttendance() {
   const { data } = await sb.from("assignments").select("dog_id, hotel").eq("day", state.day);
@@ -470,11 +482,9 @@ async function renderPhotos() {
        <span>분류 완료 <b>${done.length}</b></span>
        ${unsorted.length ? `<span class="warn">분류 안 됨 <b>${unsorted.length}</b></span>` : ""}
        ${pending.length && !state.busy ? `<button id="resume" class="btn primary sm">남은 ${pending.length}장 분류하기</button>` : ""}
-       ${!state.busy && done.some((p) => p.dog_ids.some((d) => dogById(d)?.auto)) ? `<button id="recheck-auto" class="btn ghost sm">새 강아지 다시 분류</button>` : ""}
        ${done.length ? `<button id="save-all" class="btn primary sm">📥 전체 다운로드</button>` : ""}`
     : "";
   $("#resume")?.addEventListener("click", () => classifyPending());
-  $("#recheck-auto")?.addEventListener("click", () => { autoChecked.clear(); recheckAutoGroups(); });
   $("#save-all")?.addEventListener("click", (e) => saveAll(e.currentTarget));
 
   // 강아지별 묶기
@@ -1043,7 +1053,7 @@ async function renderRoll() {
       ${d.img ? `<img class="board-preview" src="${d.img}" alt="출석 보드">${d.more ? `<p class="muted small" style="margin:-4px 0 8px">외 ${d.more}장 함께 읽음</p>` : ""}` : ""}
       <p class="small">읽은 이름이 맞는지 확인해 주세요. <b>이름을 누르면 고칠 수 있고</b>, ×로 뺄 수 있어요.
         ${d.names.some((n) => isNewName(n) && !isHotelName(d, n)) ? `<em class="tag-new">새 아이</em>는 명단에 없는 이름이라 확정 후 대표 사진을 받을게요.` : ""}
-        <span class="tag-h">H</span> 표시는 호텔링이에요. 눌러서 켜고 끌 수 있어요. 호텔링 아이는 대표 사진 없이 분류하고, 모르는 아이는 '새 강아지'로 묶어 두면 나중에 이름을 붙이면 돼요.
+        <span class="tag-h">H</span> 표시는 호텔링이에요. 눌러서 켜고 끌 수 있어요. 호텔링 아이는 대표 사진 없이 분류하고, AI가 모르는 아이는 '모르는 아이' 칸에 비슷한 사진끼리 모아 둬요.
         ${d.unsure.length ? `<span class="q-legend">?</span> 표시는 글씨가 애매했던 이름이에요.` : ""}</p>
       <div class="chips roll-chips">${d.names.map((n, i) => `
         <span class="${d.unsure.includes(n) ? "unsure" : ""} ${isNewName(n) && !isHotelName(d, n) ? "new" : ""} ${isHotelName(d, n) ? "hotel" : ""}"><b data-h="${i}" class="h-toggle" title="호텔링 켜기/끄기">H</b><b data-edit="${i}">${esc(n)}</b>${(() => {
@@ -1133,7 +1143,7 @@ async function renderRoll() {
         <button class="btn primary sm" data-ref-for="${dg.id}">대표 사진 올리기</button></div>`).join("")}</div>` : ""}
     ${known.length ? `<div class="known-list">${known.map((dg) => `
       <span class="known" title="얼굴 기억함"><img src="${ref(dg.ref_path)}" alt="">${esc(dg.name)}<i>✓</i></span>`).join("")}</div>` : ""}
-    ${hotelDogs.length ? `<p class="small" style="margin:10px 0 4px">🏨 <b>호텔링</b> · 대표 사진 없이 분류해요. AI가 모르는 아이는 '새 강아지'로 묶어 두니, 나중에 이 이름으로 붙이면 얼굴도 기억해요.</p>
+    ${hotelDogs.length ? `<p class="small" style="margin:10px 0 4px">🏨 <b>호텔링</b> · 대표 사진 없이 분류해요. AI가 모르는 아이는 '모르는 아이' 칸에 모이니, 묶음째 골라 이 이름으로 옮기면 얼굴도 기억해요.</p>
     <div class="known-list">${hotelDogs.map((dg) => `
       <span class="known hotel">${dg.ref_path ? `<img src="${ref(dg.ref_path)}" alt="">` : ""}<b class="tag-h">H</b>${esc(dg.name)}</span>`).join("")}</div>` : ""}
     <div class="row" style="margin-top:10px">
@@ -1416,7 +1426,6 @@ async function classifyPending() {
   }
   state.busy = false;
   if (rescanAgain) { rescanAgain = false; queueRescan(); }
-  else if (!stop) await recheckAutoGroups();
   if (fail && lastError) {
     progress("분류를 멈췄어요", ok, total, lastError);
   } else {
@@ -1448,7 +1457,7 @@ async function openSheet(photoId, list = sheetList, key = sheetKey) {
     .sort((a, b) => (state.attendance.has(b.id) - state.attendance.has(a.id)) || dogOrder(a, b));
   $("#sheet-chips").innerHTML = chipDogs.map((d) =>
     `<button data-dog="${d.id}" data-name="${esc(norm(d.name))}" class="${p.dog_ids.includes(d.id) ? "on" : ""}">${esc(d.name)}</button>`).join("")
-    || `<span class="muted small">아직 강아지 그룹이 없어요. '새 강아지로'를 눌러 주세요.</span>`;
+    || `<span class="muted small">아직 등록된 아이가 없어요. '이 사진으로 아이 등록'을 눌러 주세요.</span>`;
   $$("#sheet-chips button").forEach((b) => b.addEventListener("click", () => { b.classList.toggle("on"); renderPicked(); }));
   $("#sheet-search").value = "";
   filterChips();
@@ -1676,14 +1685,14 @@ $("#sheet-save").addEventListener("click", async () => {
   renderPhotos();
 });
 
-// 이 사진으로 새 강아지 그룹 만들기
+// 이 사진으로 아이 등록 (이름은 꼭 적음)
 $("#sheet-new").addEventListener("click", async () => {
   const p = sheetPhoto;
-  const name = prompt("강아지 이름 (모르면 비워 두세요)", "");
+  const name = prompt("이 아이 이름을 적어 주세요 (호텔링 아이도 이름으로 등록해요)", "");
   if (name === null) return;
-  const { count } = await sb.from("dogs").select("id", { count: "exact", head: true });
+  if (!name.trim()) { toast("이름을 적어 주세요. 모르는 아이는 '모르는 아이' 칸에 그대로 두면 돼요"); return; }
   const { data: dog, error } = await sb.from("dogs")
-    .insert({ name: name.trim() || `모르는 아이 ${state.day.slice(5).replace("-", "")}-${(count ?? 0) + 1}`, auto: false }).select().single();
+    .insert({ name: name.trim(), auto: false }).select().single();
   if (error) { toast("만들지 못했어요"); return; }
   const { data: blob } = await sb.storage.from("photos").download(p.thumb_path);
   const refPath = `${dog.id}-${Date.now()}.jpg`;
@@ -2068,7 +2077,7 @@ async function renderSide() {
     </button>`;
   $("#side-list").innerHTML =
     (named.length ? named.map(row).join("") : `<p class="muted small side-empty">아직 등록된 강아지가 없어요</p>`) +
-    (autos.length ? `<p class="side-sec">이름 없는 그룹 ${autos.length}</p>` + autos.map(row).join("") : "");
+    "";
   $$("[data-side]", $("#side-list")).forEach((b) => b.addEventListener("click", () => {
     const card = document.querySelector(`.dog-card[data-id="${b.dataset.side}"]`);
     card?.scrollIntoView({ behavior: "smooth", block: "center" });
@@ -2190,7 +2199,7 @@ async function renderRoster() {
     <div class="stat"><b>${totalRefs}</b><span>대표 사진</span></div>
     <div class="stat ${noPhoto ? "warn" : ""}"><b>${noPhoto}</b><span>사진 없음</span></div>
     <div class="stat"><b>${allNamed.filter((d) => !d.dd_pet_id).length}</b><span>다이얼독 없음(카톡)</span></div>
-    <div class="stat ${autoCount ? "warn" : ""}"><b>${autoCount}</b><span>이름 없는 그룹</span></div>
+
     ${fewPhoto ? `<p class="stats-note">사진이 3장 미만인 아이가 ${fewPhoto}마리 있어요. 더 올리면 정확해져요.</p>` : ""}`;
 
   // 다이얼독에 있는 아이 / 다이얼독에 없는 아이(호텔링 등 알림장 대신 카톡으로 사진을 보내는 아이)
@@ -2423,7 +2432,7 @@ async function runImport() {
   renderRoster();
 }
 
-// 새 강아지 등록 (이름 + 여러 각도 사진)
+// 아이 등록 (이름 + 여러 각도 사진)
 $("#new-dog-files").addEventListener("change", (e) => {
   const n = e.target.files.length;
   $("#new-dog-files-label").textContent = n ? `📷 ${n}장 선택됨` : "📷 대표 사진 고르기 (여러 장)";
