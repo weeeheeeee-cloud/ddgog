@@ -33,6 +33,13 @@ How to recognize a dog — the face is NOT required. Use every clue together:
   coat, body and clothes clearly fit one known dog and no other.
 Many dogs look alike (e.g. several white Maltese, several Australian Shepherds). Only match when the
 specific dog is the same. Clothes change from day to day, so the body itself decides.
+WHITE DOGS NEED EXTRA CARE: this daycare has many white curly dogs (bichons, maltipoos, maltese, cotons)
+and they are the most common mistakes. For a white dog, never decide from "white and curly" alone. Check, one by one:
+nose colour (black vs brownish vs slightly PINK), tear stains (none / light / brown) and where,
+head shape and size (huge round puffy "afro" head vs small or narrow head, long vs short muzzle),
+ear length and whether ears are hidden in the head fluff, cream/apricot tinge on ears or back,
+body size and leg length, tail plume. Compare these against each white candidate's 구분 and 부위별 특징.
+If two white candidates still fit equally, choose the one that matches the most specific points and set confidence "low".
 Many dogs come with "부위별 특징" (what the face, top of the head, back of the head, back, tail and legs look like).
 Staff photos often show only part of a dog (just the head from above, the back of the head, the back, the rear),
 so compare the visible part with that dog's matching body-part description and reference photos of the same view.
