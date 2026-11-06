@@ -495,6 +495,7 @@ async function renderPhotos() {
     return;
   }
 
+  await loadClusters(unsorted);
   const thumb = await signed("photos", P.map((p) => p.thumb_path));
   const ref = await signed("refs", dogIds.map((id) => dogById(id)?.ref_path));
   const img = (p) => `<img loading="lazy" src="${thumb(p.thumb_path)}" data-photo="${p.id}" class="rot${p.rotation || 0}${p.status === "done" && p.confidence === "low" ? " unsure" : ""}${state.sel?.ids.has(p.id) ? " picked" : ""}" alt=""${p.status === "done" && p.confidence === "low" ? ' title="AI가 확신하지 못한 사진 — 확인해 주세요"' : ""}>`;
@@ -519,12 +520,15 @@ async function renderPhotos() {
   }).join("") +
   (unsorted.length ? `<div class="dog-group unsorted" data-list="unsorted">
       <div class="dog-head"><span class="avatar q">?</span>
-        <div class="grow"><b>분류 안 된 사진 ${unsorted.length}장</b><small class="muted">AI가 확신하지 못한 사진이에요. 이름? 표시는 AI 추측이니, 눌러서 맞으면 [분류 저장]만 누르세요</small></div>
+        <div class="grow"><b>모르는 아이·분류 안 된 사진 ${unsorted.length}장</b><small class="muted">처음 보는 아이, 뺀 사진, AI가 확신하지 못한 사진을 한곳에 모았어요. 비슷한 사진끼리 묶어 두었으니 묶음째 선택해서 한 번에 넣을 수 있어요</small></div>
         ${selBtn("unsorted")}${state.busy ? "" : `<button id="reclassify" class="btn ghost sm">AI로 다시 분류</button>`}</div>
-      <div class="grid">${unsorted.map((p) => {
-        const guess = p.dog_ids.map((d) => dogById(d)?.name).filter(Boolean).join("·");
-        return guess ? `<div class="guess">${img(p)}<span>${esc(guess)}?</span></div>` : img(p);
-      }).join("")}</div>
+      ${unsortedClusters(unsorted).map((g, gi) => `<div class="cluster">
+        <div class="cluster-head"><small>${!g.loose ? `비슷한 사진 묶음 ${gi + 1} · ${g.length}장` : `비슷한 사진이 없는 사진 ${g.length}장`}</small>
+          ${!g.loose ? `<button class="btn ghost mini" data-pick-cluster="${g.map((p) => p.id).join(",")}">이 묶음 선택</button>` : ""}</div>
+        <div class="grid">${g.map((p) => {
+          const guess = p.dog_ids.map((d) => dogById(d)?.name).filter(Boolean).join("·");
+          return guess ? `<div class="guess">${img(p)}<span>${esc(guess)}?</span></div>` : img(p);
+        }).join("")}</div></div>`).join("")}
     </div>` : "") +
   (skipped.length ? `<div class="dog-group skipped" data-list="skipped">
       <div class="dog-head"><span class="avatar q">🔎</span>
@@ -565,6 +569,10 @@ async function renderPhotos() {
     }
     openSheet(el.dataset.photo, lists.get(key) || [el.dataset.photo], key);
   }));
+  $$("[data-pick-cluster]", box).forEach((b) => b.addEventListener("click", () => {
+    state.sel = { key: "unsorted", ids: new Set(b.dataset.pickCluster.split(",")), all: lists.get("unsorted") || [] };
+    renderPhotos();
+  }));
   $$("[data-select]", box).forEach((b) => b.addEventListener("click", () => {
     const key = b.dataset.select;
     state.sel = state.sel?.key === key ? null : { key, ids: new Set(), all: lists.get(key) || [] };
@@ -585,6 +593,31 @@ async function renderPhotos() {
   }));
   $$("[data-save]", box).forEach((b) => b.addEventListener("click", () =>
     saveDogPhotos(dogById(b.dataset.save), visible(b.dataset.save), b, b.dataset.mode)));
+}
+
+// ---- 모르는 아이 사진을 지문이 비슷한 것끼리 묶기 (서버에서 계산, 바뀔 때만 다시)
+const clusterCache = { key: "", map: new Map() };
+async function loadClusters(unsorted) {
+  const key = state.day + "|" + !!state.practice + "|" + unsorted.map((p) => p.id).sort().join(",");
+  if (!unsorted.length || clusterCache.key === key) return;
+  const { data, error } = await sb.rpc("unsorted_clusters", { p_day: state.day, p_practice: !!state.practice });
+  if (error) { console.warn(error); return; }
+  clusterCache.key = key;
+  clusterCache.map = new Map((data || []).map((r) => [r.photo_id, r.cluster]));
+}
+function unsortedClusters(unsorted) {
+  const by = new Map();
+  for (const p of unsorted) {
+    const c = clusterCache.map.get(p.id);
+    const k = c && c > 0 ? c : "single:" + p.id;
+    if (!by.has(k)) by.set(k, []);
+    by.get(k).push(p);
+  }
+  const groups = [...by.values()];
+  const multi = groups.filter((g) => g.length > 1).sort((a, b) => b.length - a.length);
+  const singles = groups.filter((g) => g.length === 1).flat();
+  if (singles.length) singles.loose = true;
+  return singles.length ? [...multi, singles] : multi;
 }
 
 // ---- 여러 장 선택해서 한꺼번에 옮기기·빼기
@@ -1650,7 +1683,7 @@ $("#sheet-new").addEventListener("click", async () => {
   if (name === null) return;
   const { count } = await sb.from("dogs").select("id", { count: "exact", head: true });
   const { data: dog, error } = await sb.from("dogs")
-    .insert({ name: name.trim() || `새 강아지 ${(count ?? 0) + 1}`, auto: !name.trim() }).select().single();
+    .insert({ name: name.trim() || `모르는 아이 ${state.day.slice(5).replace("-", "")}-${(count ?? 0) + 1}`, auto: false }).select().single();
   if (error) { toast("만들지 못했어요"); return; }
   const { data: blob } = await sb.storage.from("photos").download(p.thumb_path);
   const refPath = `${dog.id}-${Date.now()}.jpg`;

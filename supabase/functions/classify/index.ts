@@ -402,28 +402,15 @@ Deno.serve(async (req) => {
       return json({ status: "done", dog_ids: finalIds, changed: finalIds.join() !== (photo.dog_ids ?? []).join() });
     }
 
-    // 처음 보는 강아지 → 새 그룹 자동 생성 (이 사진을 기준 사진으로)
-    if (!recheck && !ids.length && parsed.new_dog === true && unknownMain <= 1) {
-      const { count } = await supa.from("dogs").select("id", { count: "exact", head: true });
-      const { data: dog, error: dErr } = await supa.from("dogs")
-        .insert({ name: `새 강아지 ${(count ?? 0) + 1}`, auto: true }).select("id").single();
-      if (dErr || !dog) throw new Error("새 그룹 생성 실패");
-      const refPath = `${dog.id}-${Date.now()}.jpg`;
-      const up = await supa.storage.from("refs")
-        .upload(refPath, targetBytes, { contentType: "image/jpeg" });
-      if (up.error) throw new Error("기준 사진 저장 실패");
-      await supa.from("dogs").update({ ref_path: refPath }).eq("id", dog.id);
-      await supa.from("dog_refs").insert({ dog_id: dog.id, path: refPath });
-      ids = [dog.id];
-      status = "done";
-    }
+    // 처음 보는 강아지: 새 그룹을 만들지 않고 '모르는 아이' 사진으로 둠 (화면에서 비슷한 사진끼리 묶어 보여줌)
+    const isNew = !recheck && !ids.length && parsed.new_dog === true;
 
     const rotation = [0, 90, 180, 270].includes(Number(parsed.rotate)) ? Number(parsed.rotate) : 0;
     await supa.from("photos").update({
       rotation,
       dog_ids: ids,
       confidence: allSure ? "high" : "low",
-      ai_note: note,
+      ai_note: isNew ? `처음 보는 아이${note ? `: ${note}` : ""}`.slice(0, 200) : note,
       status,
       claimed_at: null,
     }).eq("id", photoId);

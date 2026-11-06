@@ -480,3 +480,7 @@ body.practice #practice-reset{display:flex}
 #sel-bar{position:fixed;left:50%;bottom:16px;transform:translateX(-50%);z-index:60;display:flex;flex-wrap:wrap;align-items:center;gap:8px;
   background:#fff;border:1px solid #c7d2fe;box-shadow:0 8px 28px rgba(0,0,0,.18);border-radius:14px;padding:10px 14px;max-width:calc(100vw - 32px)}
 #sel-bar b{margin-right:4px}
+.unsorted .cluster{border-top:1px dashed #e5e7eb;padding-top:8px;margin-top:8px}
+.unsorted .cluster:first-of-type{border-top:0}
+.cluster-head{display:flex;align-items:center;gap:8px;margin-bottom:6px}
+.cluster-head small{font-weight:700;color:#374151}
