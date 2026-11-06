@@ -116,6 +116,12 @@
         <h2>🧪 학습 모드</h2>
         <p class="muted small">켜면 기존 사진은 화면에서 숨기고(지워지지 않아요), 새로 올리는 사진(선생님 링크 포함)만 따로 모아서 등록된 모든 아이 중에서 찾아 분류해요. 고쳐 주는 건 전부 학습돼요. 끄면 원래 사진으로 돌아와요. 평소 운영할 때는 꺼 두세요.</p>
         <label class="switch-row"><input type="checkbox" id="practice-on"> <b>학습 모드 켜기</b></label>
+        <div id="practice-reset" class="practice-only">
+          <button id="practice-clear" class="btn ghost danger">🧹 학습 모드 사진 싹 비우기</button>
+          <label class="small"><input type="checkbox" id="practice-clear-learn"> 학습 모드에서 고쳐 주며 배운 것(학습 사진·실수 기록)도 함께 지우기</label>
+          <p class="muted small">학습 모드로 올린 사진만 모두 지워서 처음부터 다시 해볼 수 있어요. 평소 운영 사진과 다이얼독 대표 사진은 그대로예요.</p>
+          <p id="practice-clear-msg" class="muted small"></p>
+        </div>
       </div>
 
       <div class="card">

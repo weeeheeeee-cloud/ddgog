@@ -459,3 +459,7 @@ body.practice header.top{position:relative}
 .roll-chips .ask{color:#1d4ed8;font-weight:700}
 .tag.kakao{background:#fef3c7;color:#92400e}
 .sec.kakao-sec{margin-top:22px;border-top:2px dashed #e5e7eb;padding-top:14px}
+
+#practice-reset{margin-top:12px;display:none;flex-direction:column;gap:6px}
+body.practice #practice-reset{display:flex}
+#practice-reset .btn{align-self:flex-start}

@@ -2339,6 +2339,48 @@ $("#practice-on").addEventListener("change", async (e) => {
   await render();
   toast(on ? "학습 모드를 켰어요. 기존 사진은 숨기고, 새로 올리는 사진만 모든 아이 중에서 찾아 분류해요" : "학습 모드를 껐어요. 원래 사진과 출석 명단 기준 분류로 돌아왔어요");
 });
+// 학습 모드 사진 싹 비우기 (운영 사진·다이얼독 대표 사진은 그대로)
+$("#practice-clear").addEventListener("click", async () => {
+  const { count } = await sb.from("photos").select("id", { count: "exact", head: true }).eq("practice", true);
+  const withLearn = $("#practice-clear-learn").checked;
+  if (!count && !withLearn) { toast("지울 학습 모드 사진이 없어요"); return; }
+  if (!confirm(`학습 모드로 올린 사진 ${count || 0}장을 모두 지울까요?${withLearn ? "\n학습 모드에서 배운 학습 사진·실수 기록도 함께 지워요." : ""}\n지운 사진은 되돌릴 수 없어요.`)) return;
+  const btn = $("#practice-clear"), msg = $("#practice-clear-msg");
+  btn.disabled = true;
+  try {
+    let since = null;
+    if (withLearn) {
+      // 학습 모드 사진이 처음 올라온 시점 이후에 생긴 학습 사진·실수 기록 = 학습 모드에서 배운 것
+      const { data: first } = await sb.from("photos").select("created_at").eq("practice", true).order("created_at").limit(1);
+      since = first?.[0]?.created_at || null;
+    }
+    const n = await deletePhotos((q) => q.eq("practice", true), (k) => { msg.textContent = `${k}장 지움…`; });
+    let learned = 0;
+    if (withLearn && since) {
+      const { data: refs } = await sb.from("dog_refs").select("id, path").like("path", "%-learn-%").gte("created_at", since);
+      const { data: les } = await sb.from("lessons").select("id, path").gte("created_at", since);
+      for (let i = 0; i < (refs || []).length; i += 200) {
+        const part = refs.slice(i, i + 200);
+        await sb.from("dog_refs").delete().in("id", part.map((r) => r.id));
+        await sb.storage.from("refs").remove(part.map((r) => r.path));
+      }
+      for (let i = 0; i < (les || []).length; i += 200) {
+        const part = les.slice(i, i + 200);
+        await sb.from("lessons").delete().in("id", part.map((r) => r.id));
+        await sb.storage.from("refs").remove(part.map((r) => r.path));
+      }
+      learned = (refs || []).length + (les || []).length;
+      await loadDogs();
+    }
+    msg.textContent = `학습 모드 사진 ${n}장${learned ? `, 학습 기록 ${learned}개` : ""}를 지웠어요. 이제 새로 올려서 다시 해보세요.`;
+    toast("학습 모드를 깨끗이 비웠어요");
+    urlCache.clear();
+    await render();
+  } catch (e) {
+    console.error(e);
+    toast("다 지우지 못했어요. 다시 눌러 주세요");
+  } finally { btn.disabled = false; }
+});
 // 로그인되어 있으면 1분 뒤 조용히 시작 (분류에 방해되지 않게)
 setTimeout(async () => { const { data } = await sb.auth.getSession(); if (data.session) backfillFingerprints(); }, 60000);
 setInterval(async () => { const { data } = await sb.auth.getSession(); if (data.session) backfillFingerprints(); }, 30 * 60000);
