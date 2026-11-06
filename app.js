@@ -643,6 +643,7 @@ function renderSelBar() {
     <button class="btn ghost sm" data-sb="all">${n && n === state.sel.all.length ? "선택 해제" : "전체 선택"}</button>
     ${dog ? `<button class="btn primary sm" data-sb="out" ${n ? "" : "disabled"}>${esc(dog.name)}에서 빼서 아래로</button>` : `<button class="btn primary sm" data-sb="redo" ${n ? "" : "disabled"}>AI로 다시 분류</button>`}
     <button class="btn ghost sm" data-sb="move" ${n ? "" : "disabled"}>다른 아이로 옮기기</button>
+    <button class="btn ghost sm danger" data-sb="del" ${n ? "" : "disabled"}>삭제</button>
     <button class="btn ghost sm" data-sb="cancel">취소</button>`;
   $$("[data-sb]", bar).forEach((b) => b.addEventListener("click", () => selAction(b.dataset.sb)));
 }
@@ -658,6 +659,18 @@ async function selAction(kind) {
   const photos = state.photos.filter((p) => sel.ids.has(p.id));
   if (!photos.length) return;
   const from = dogById(sel.key);
+  if (kind === "del") {
+    if (!confirm(`선택한 사진 ${photos.length}장을 완전히 삭제할까요? 되돌릴 수 없어요.`)) return;
+    const ids = new Set(photos.map((p) => p.id));
+    try {
+      await deletePhotos((q) => q.in("id", [...ids]), () => {});
+    } catch { toast("다 지우지 못했어요. 다시 눌러 주세요"); }
+    state.photos = state.photos.filter((p) => !ids.has(p.id));
+    toast(`${photos.length}장을 삭제했어요`);
+    state.sel = null;
+    await renderPhotos();
+    return;
+  }
   // 빼고 다시 분류: 이 아이는 후보에서 빼고 AI가 다시 판단
   if (kind === "redo") {
     toast(`${photos.length}장을 ${from ? `${from.name}에서 빼고 ` : ""}다시 분류할게요`);
@@ -932,7 +945,8 @@ function queueRescan() {
 }
 async function rescanUnsorted() {
   if (state.busy) { rescanAgain = true; return; }
-  const ids = state.photos.filter((p) => (p.status === "review" || p.status === "error") && p.confidence !== "manual").map((p) => p.id);
+  // 직원이 뺀 사진(not_dogs)은 '아래로' 보낸 것이니 자동으로 다시 분류하지 않음
+  const ids = state.photos.filter((p) => (p.status === "review" || p.status === "error") && p.confidence !== "manual" && !(p.not_dogs || []).length).map((p) => p.id);
   if (!ids.length) return;
   for (let i = 0; i < ids.length; i += 200) {
     await sb.from("photos").update({ status: "pending" }).in("id", ids.slice(i, i + 200)).in("status", ["review", "error"]);
@@ -1466,7 +1480,7 @@ async function openSheet(photoId, list = sheetList, key = sheetKey) {
   const inGroup = sheetKey && sheetKey !== "unsorted" && p.dog_ids.includes(sheetKey);
   $("#sheet-out").classList.toggle("hidden", !inGroup);
   $("#sheet-out").textContent = inGroup ? `${dogById(sheetKey)?.name || ""}에서 빼기 (아래로)` : "여기서 빼기";
-  $("#sheet-del").classList.toggle("hidden", inGroup);
+  $("#sheet-del").classList.remove("hidden"); // 어디서 보든 삭제 가능
   $("#sheet").classList.remove("hidden");
   document.body.style.overflow = "hidden";
   // 다음 사진 미리 불러오기
@@ -1729,12 +1743,16 @@ $("#sheet-out").addEventListener("click", async () => {
 });
 
 $("#sheet-del").addEventListener("click", async () => {
-  if (!confirm("이 사진을 완전히 삭제할까요? 되돌릴 수 없어요.\n(잘못 분류된 거라면 다른 강아지를 골라 '분류 저장'을 누르세요)")) return;
+  if (!confirm("이 사진을 완전히 삭제할까요? 되돌릴 수 없어요.")) return;
   const p = sheetPhoto;
   await sb.storage.from("photos").remove([p.path, p.thumb_path]);
   await sb.from("photos").delete().eq("id", p.id);
   state.photos = state.photos.filter((x) => x.id !== p.id);
-  closeSheet();
+  toast("사진을 삭제했어요");
+  // 다음 사진으로 넘어감
+  const i = sheetList.indexOf(p.id);
+  sheetList = sheetList.filter((id) => id !== p.id);
+  if (sheetList.length) openSheet(sheetList[Math.min(i, sheetList.length - 1)]); else closeSheet();
   renderPhotos();
 });
 
