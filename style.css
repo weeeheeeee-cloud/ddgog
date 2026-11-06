@@ -471,3 +471,6 @@ body.practice #practice-reset{display:flex}
 .find-chip .x{cursor:pointer;margin-left:2px}
 .find-box input{border:1px solid #c7d2fe;border-radius:8px;padding:4px 8px;font-size:14px;min-width:110px}
 .dog-group.skipped{opacity:.85;border-style:dashed}
+.find-ref{border:0;background:rgba(255,255,255,.22);color:#fff;border-radius:999px;padding:1px 8px;font-size:12px;font-weight:700;cursor:pointer}
+.find-ref:hover{background:rgba(255,255,255,.35)}
+.find-tip{flex-basis:100%}

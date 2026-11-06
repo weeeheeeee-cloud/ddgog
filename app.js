@@ -581,9 +581,11 @@ function renderFind() {
   box.classList.toggle("on", chips.length > 0);
   box.innerHTML = chips.length
     ? `<b>🔎 이번에 올리는 사진에서 이 아이만 찾아요:</b>
-       ${chips.map((d) => `<span class="find-chip">${esc(d.name)}${refCount(d) ? "" : ` <small>(대표 사진 없음)</small>`}<b class="x" data-unfind="${d.id}">×</b></span>`).join("")}
+       ${chips.map((d) => `<span class="find-chip">${esc(d.name)} <small>${refCount(d) ? `대표 ${refCount(d)}장` : "대표 사진 없음"}</small>
+         <button class="find-ref" data-find-ref="${d.id}" title="${esc(d.name)} 대표 사진 추가">📷 추가</button><b class="x" data-unfind="${d.id}">×</b></span>`).join("")}
        <input id="find-input" list="find-list" placeholder="아이 더 추가">
-       <button id="find-off" class="btn ghost mini">끄기 (전체 분류)</button>`
+       <button id="find-off" class="btn ghost mini">끄기 (전체 분류)</button>
+       <small class="muted find-tip">여러 마리를 같이 찾아도 돼요. 📷 추가로 그 아이 사진을 대표 사진에 더 넣으면 더 잘 찾아요(명단에도 그대로 저장)</small>`
     : `<button id="find-on" class="btn ghost mini">🔎 특정 아이만 찾기</button>
        <small class="muted">예: 사진 500장 중 꼬미만 찾기. 고른 아이가 없는 사진은 따로 모아 둬요</small>`;
   box.insertAdjacentHTML("beforeend", `<datalist id="find-list">${named.map((d) => `<option value="${esc(d.name)}">`).join("")}</datalist>`);
@@ -605,6 +607,10 @@ function renderFind() {
   });
   $("#find-input")?.addEventListener("change", (e) => add(e.target.value));
   $("#find-off")?.addEventListener("click", () => { state.find = []; renderFind(); });
+  $$("[data-find-ref]", box).forEach((b) => b.addEventListener("click", () => {
+    refTarget = b.dataset.findRef;
+    $("#ref-file").click();
+  }));
   $$("[data-unfind]", box).forEach((x) => x.addEventListener("click", () => {
     state.find = state.find.filter((id) => id !== x.dataset.unfind);
     renderFind();
@@ -1069,6 +1075,7 @@ $("#ref-file").addEventListener("change", async (e) => {
   const n = await addRefs(dog, files);
   toast(n ? `${dog.name} 얼굴을 기억했어요 (${n}장)` : "올리지 못했어요. 다시 시도해 주세요.");
   renderRoll();
+  renderFind();
 });
 
 /* ---------- 올리기 + 분류 ---------- */
