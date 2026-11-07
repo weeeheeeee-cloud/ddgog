@@ -1,9 +1,10 @@
+@font-face { font-family:"BHS Up"; src:url("fonts/bhs-up.woff2") format("woff2"); font-weight:400 900; font-display:swap; }
 :root {
   --navy: #003B89;
   --navy-2: #0a4ea8;
   --yellow: #FCCC00;
   --cream: #EFECE7;
-  --bg: #F7F5F1;
+  --bg: #f0ede6;
   --card: #fff;
   --ink: #1d2430;
   --muted: #6b7280;
@@ -535,3 +536,50 @@ body.practice #practice-reset{display:flex}
 .rc-tile:not(.on) .rc-check{border-color:#999}
 .rc-tile .burst{position:absolute;right:6px;bottom:6px;background:rgba(0,0,0,.65);color:#fff;font-size:12px;font-weight:700;border-radius:999px;padding:2px 8px}
 @media (max-width:600px){.rc-grid{grid-template-columns:repeat(3,1fr)}}
+
+/* ===== 브랜드 (로고 느낌: 남색 포스터 + 노란 막대 + 두꺼운 글씨) ===== */
+:root { --display:"BHS Up", Pretendard, sans-serif; --line:#e4dfd4; --radius:18px; }
+.login h1, .logo b, .drop strong { font-family:var(--display); font-weight:900; font-synthesis:none; letter-spacing:0; }
+
+/* 로그인 */
+.login { background:var(--navy); }
+.login-card { background:var(--bg); border-radius:28px; padding:30px 22px 24px; max-width:380px; box-shadow:0 20px 60px rgba(0,0,0,.25); }
+.brand-mark { width:88px; height:88px; border-radius:22px; background:var(--navy); display:block; margin:0 auto 14px; font-size:0; }
+.login h1 { font-size:34px; color:var(--navy); margin:0 0 4px; }
+.login-card input { background:#fff; border-color:transparent; border-radius:14px; padding:13px 14px; }
+.login-card .btn.primary { border-radius:999px; padding:13px; font-weight:800; background:var(--yellow); color:var(--navy);
+  box-shadow:0 5px 0 -1px #d8ae00; margin-top:10px; }
+.login-card .btn.primary:active { transform:translateY(3px); box-shadow:0 2px 0 -1px #d8ae00; }
+
+/* 상단 */
+.top { padding-left:18px; padding-right:18px; }
+.logo { display:inline-flex; align-items:center; gap:10px; }
+.logo img { width:34px; height:34px; border-radius:10px; display:block; }
+.logo b { font-size:22px; color:var(--cream); }
+.top .link { color:rgba(239,236,231,.7); font-size:13px; text-decoration:none; border:1px solid rgba(239,236,231,.3); border-radius:999px; padding:5px 12px; }
+.date-row input { border-radius:12px; font-weight:600; }
+.icon { border-radius:12px; }
+.top .chip { border-color:rgba(252,204,0,.6); color:var(--yellow); font-weight:700; }
+.tabs button { font-size:15px; }
+.tabs button.on { color:var(--yellow); border-bottom-width:4px; }
+
+/* 사진 올리기: 노란 캡슐 버튼 */
+.drop { grid-template-columns:auto 1fr auto; grid-template-areas:"face title arr" "face hint arr"; justify-items:start; align-items:center;
+  text-align:left; column-gap:14px; row-gap:2px; border:0; background:var(--yellow); border-radius:999px; padding:12px 24px 12px 12px;
+  box-shadow:0 8px 0 -2px #d8ae00, 0 16px 28px rgba(0,59,137,.14); margin-bottom:22px; transition:transform .12s, box-shadow .12s; }
+.drop:active { transform:translateY(4px); box-shadow:0 4px 0 -2px #d8ae00, 0 8px 16px rgba(0,59,137,.12); }
+.drop-icon { grid-area:face; width:62px; height:62px; border-radius:50%; background:var(--navy); display:grid; place-items:center; font-size:0; }
+.drop-icon .smile { width:44px; height:28px; }
+.smile .nose { fill:var(--yellow); }
+.smile .mouth { fill:none; stroke:var(--cream); stroke-width:3.2; stroke-linecap:round; }
+.smile circle { fill:var(--cream); }
+.drop strong { grid-area:title; font-size:26px; color:var(--navy); line-height:1.1; }
+.drop #drop-hint { grid-area:hint; color:#5a4a00; font-size:13px; font-weight:600; line-height:1.4; }
+.drop-arr { grid-area:arr; width:26px; height:26px; stroke:var(--navy); fill:none; stroke-width:2.6; stroke-linecap:round; stroke-linejoin:round; }
+@media (max-width:420px) { .drop { border-radius:28px; } .drop strong { font-size:22px; } }
+
+/* 카드·그룹 */
+.card, .dog-group { border-color:transparent; box-shadow:0 1px 2px rgba(15,27,45,.04), 0 6px 20px rgba(15,27,45,.05); }
+.btn { border-radius:12px; }
+.bar { height:12px; }
+.bar i { background:var(--yellow); background-image:repeating-linear-gradient(-45deg, rgba(0,59,137,.14) 0 6px, transparent 6px 12px); }
