@@ -2749,7 +2749,7 @@ async function renderRoster() {
   $("#roster-list").innerHTML = named.length
     ? (ddDogs.length ? `<h3 class="sec">다이얼독 명단 ${ddDogs.length}마리 <small class="muted">이름은 다이얼독과 같게 맞춰요</small></h3>` + ddDogs.map(card).join("") : "") +
       (kakao.length ? `<h3 class="sec kakao-sec">다이얼독에 없는 아이 ${kakao.length}마리 <small class="muted">호텔링·데이케어로 와서 알림장 대신 카톡으로 사진을 보내는 아이예요. 사진이 쌓이면 대표 사진을 직접 골라 주세요</small></h3>` + kakao.map(card).join("") : "")
-    : `<div class="empty">${q ? "찾는 이름이 없어요." : "아직 명단이 없어요. 위에서 등록하거나, 사진 탭에서 출석 보드를 올려 보세요."}</div>`;
+    : `<div class="empty">${q ? "찾는 이름이 없어요." : "아직 명단이 없어요. 위에서 등록하거나, 알림장 탭에서 출석 보드를 올려 보세요."}</div>`;
   $("#roster-auto").innerHTML = autos.length
     ? `<h3 class="sec">이름 없는 그룹 ${autos.length}개 <button class="btn ghost mini danger" id="del-all-auto">모두 삭제</button> <small class="muted">AI가 만든 그룹이에요. 이름을 붙이면 명단에 들어가요 (같은 이름이 있으면 합쳐져요). 삭제해도 사진은 지워지지 않고 '분류 안 된 사진'으로 돌아가요</small></h3>` + autos.map(card).join("")
     : "";
@@ -3165,7 +3165,7 @@ $("#dd-new")?.addEventListener("click", async () => {
 // 사진 탭의 '다이얼독 알림장' 버튼: 다이얼독을 열고 북마크를 누르라고 안내
 function openDialdogPush() {
   window.open("https://dialodog.com/partners/#reports/drafts", "dialodog");
-  toast("다이얼독에서 북마크 ‘댕겨올개 알림장’을 눌러 주세요. 아직 없으면 관리 탭에서 만들어요.", 6000);
+  toast("다이얼독에서 북마크 ‘댕겨올개 알림장’을 눌러 주세요. 아직 없으면 관리자 탭에서 만들어요.", 6000);
 }
 
 // 새로 추가되는 사진 알림: 다른 사람(선생님 링크·다른 직원 계정)이 올린 오늘 사진을 세어서,
@@ -3359,7 +3359,7 @@ $("#reset-all").addEventListener("click", async () => {
     for (let i = 0; i < refs.length; i += 100) await sb.storage.from("refs").remove(refs.slice(i, i + 100));
     if (dogs?.length) await sb.from("dogs").delete().in("id", dogs.map((d) => d.id));
     urlCache.clear();
-    msg.textContent = "초기화했어요. 사진 탭에서 새로 올려 보세요.";
+    msg.textContent = "초기화했어요. 알림장 탭에서 새로 올려 보세요.";
     await render();
   } catch { msg.textContent = "초기화 중 오류가 났어요. 다시 눌러 주세요."; }
 });

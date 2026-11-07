@@ -40,7 +40,7 @@
   const panel = document.createElement("div");
   panel.id = "ddg-panel";
   panel.innerHTML = `<style>${css}</style>
-    <div class="hd"><b>댕겨올개 사진함 → 알림장<small>오늘 유치원 아이만 임시저장해요</small></b><button class="x" title="닫기">×</button></div>
+    <div class="hd"><b>댕겨올개 → 알림장<small>오늘 유치원 아이만 임시저장해요</small></b><button class="x" title="닫기">×</button></div>
     <div class="bd"><p class="msg">불러오는 중…</p></div>
     <div class="ft"></div>`;
   document.body.appendChild(panel);
@@ -65,8 +65,8 @@
     const x = new XMLHttpRequest();
     x.open("POST", FN);
     x.setRequestHeader("content-type", "application/json");
-    x.onload = () => { let j = {}; try { j = JSON.parse(x.responseText); } catch { /* 무시 */ } x.status === 200 ? res(j) : rej(new Error(j.error || `사진함 ${x.status}`)); };
-    x.onerror = () => rej(new Error("사진함에 연결하지 못했어요"));
+    x.onload = () => { let j = {}; try { j = JSON.parse(x.responseText); } catch { /* 무시 */ } x.status === 200 ? res(j) : rej(new Error(j.error || `댕겨올개 ${x.status}`)); };
+    x.onerror = () => rej(new Error("댕겨올개 사이트에 연결하지 못했어요"));
     x.send(JSON.stringify({ token: TOKEN, ...body }));
   });
   const getBlob = (url) => new Promise((res, rej) => {
@@ -115,7 +115,7 @@
   }
 
   /* ---------- 목록 ---------- */
-  if (!TOKEN) return fail("북마크에 열쇠가 없어요. 사진함 관리 탭에서 북마크를 다시 만들어 주세요.");
+  if (!TOKEN) return fail("북마크에 열쇠가 없어요. 댕겨올개 관리자 탭에서 북마크를 다시 만들어 주세요.");
   let daycare, unsent, drafts, mine;
   try {
     [daycare, unsent, drafts, mine] = await Promise.all([
@@ -134,14 +134,14 @@
     let state = "ready", note = "";
     if (!unsentIds.has(String(p.id))) { state = "sent"; note = "오늘 알림장 이미 보냄"; }
     else if (draftText.includes(String(p.id))) { state = "draft"; note = "임시저장 알림장이 이미 있어요"; }
-    else if (!fresh.length) { state = "none"; note = d?.photos?.length ? "사진을 이미 넣었어요" : "사진함에 분류된 사진이 없어요"; }
+    else if (!fresh.length) { state = "none"; note = d?.photos?.length ? "사진을 이미 넣었어요" : "댕겨올개에 분류된 사진이 없어요"; }
     else if (fresh.length > MAX) note = `${fresh.length}장 중 ${MAX}장만 (다이얼독 최대)`;
     return { pet: p, photos: fresh.slice(0, MAX), state, note, on: state === "ready" };
   }).sort((a, b) => (a.state === "ready" ? 0 : 1) - (b.state === "ready" ? 0 : 1) || a.pet.name.localeCompare(b.pet.name, "ko"));
 
   function drawList() {
     const ready = rows.filter((r) => r.on);
-    $bd.innerHTML = `<p class="msg">${+mine.day.slice(5, 7)}월 ${+mine.day.slice(8, 10)}일 유치원 ${rows.length}마리 · 사진함에서 분류된 사진을 아이별 알림장으로 <b>임시저장</b>해요. 보호자에게 바로 가지 않아요.</p>`
+    $bd.innerHTML = `<p class="msg">${+mine.day.slice(5, 7)}월 ${+mine.day.slice(8, 10)}일 유치원 ${rows.length}마리 · 댕겨올개에서 분류된 사진을 아이별 알림장으로 <b>임시저장</b>해요. 보호자에게 바로 가지 않아요.</p>`
       + (rows.length ? rows.map((r, i) => `<label class="row ${r.state === "ready" ? "" : "off"}">
           <input type="checkbox" data-i="${i}" ${r.on ? "checked" : ""} ${r.state === "ready" ? "" : "disabled"}>
           <span class="nm">${esc(r.pet.name)}${r.note ? `<small>${esc(r.note)}</small>` : ""}</span>

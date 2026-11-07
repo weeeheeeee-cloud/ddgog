@@ -2,7 +2,7 @@
 <section id="login" class="login hidden">
   <div class="login-card">
     <img class="brand-mark" src="logo.png" alt="댕겨올개">
-    <h1>사진함</h1>
+    <h1>댕겨올개</h1>
     <p class="muted">직원 계정으로 로그인하세요</p>
     <form id="login-form">
       <input id="login-email" type="email" placeholder="이메일" autocomplete="username" required>
@@ -32,7 +32,7 @@
 <div id="app" class="hidden">
   <header class="top">
     <div class="top-row">
-      <span class="logo"><img src="logo-180.png" alt=""><b>사진함</b></span>
+      <span class="logo"><img src="logo-180.png" alt=""><b>댕겨올개</b></span>
       <span class="top-links"><button id="my-pw" class="link">비밀번호</button><button id="logout" class="link">로그아웃</button></span>
     </div>
     <div class="date-row">
@@ -42,10 +42,10 @@
       <button id="today" class="chip">오늘</button>
     </div>
     <nav class="tabs">
-      <button data-tab="photos" class="on">사진</button>
-      <button data-tab="roster">명단</button>
+      <button data-tab="photos" class="on">알림장</button>
       <button data-tab="hotel">호텔링</button>
-      <button data-tab="admin" id="tab-admin-btn" class="hidden">관리</button>
+      <button data-tab="roster">DB</button>
+      <button data-tab="admin" id="tab-admin-btn" class="hidden">관리자</button>
     </nav>
   </header>
 
@@ -161,7 +161,7 @@
 
       <div class="card hidden" id="staff-card">
         <h2>👥 직원 계정 <span class="tag-owner">최고 관리자</span></h2>
-        <p class="muted small">사진함에 로그인할 직원을 초대하고 뺄 수 있어요. 이 칸은 최고 관리자에게만 보여요.</p>
+        <p class="muted small">댕겨올개에 로그인할 직원을 초대하고 뺄 수 있어요. 이 칸은 최고 관리자에게만 보여요.</p>
         <div id="staff-list"></div>
         <form id="staff-new" class="staff-new">
           <b class="small">직원 초대</b>
@@ -169,7 +169,7 @@
           <input id="sn-email" type="email" placeholder="이메일" required autocomplete="off">
           <input id="sn-pw" type="text" placeholder="처음 비밀번호 (6자 이상)" minlength="6" required autocomplete="off">
           <button class="btn primary" type="submit">초대하기</button>
-          <p class="muted small" style="margin:0">만든 뒤 이메일과 처음 비밀번호를 직원에게 알려 주세요. 직원은 로그인 후 관리 탭에서 비밀번호를 바꿀 수 있어요.</p>
+          <p class="muted small" style="margin:0">만든 뒤 이메일과 처음 비밀번호를 직원에게 알려 주세요. 직원은 로그인 후 관리자 탭에서 비밀번호를 바꿀 수 있어요.</p>
         </form>
       </div>
 
@@ -178,7 +178,7 @@
         <p class="muted small">사진 정리가 끝나면 <b>오늘 유치원으로 온 아이만</b> 분류된 사진을 아이별 알림장으로 다이얼독 <b>임시보관함</b>에 넣어요. 보호자에게 바로 가지 않으니, 다이얼독에서 확인하고 보내면 돼요.</p>
         <ol class="small dd-steps">
           <li>컴퓨터 크롬에서 아래 <b>노란 버튼을 북마크바로 끌어다 놓아요</b>. (북마크바가 안 보이면 Ctrl+Shift+B)</li>
-          <li>사진 탭의 <b>다이얼독 알림장</b> 버튼을 누르면 다이얼독이 열려요.</li>
+          <li>알림장 탭의 <b>다이얼독 알림장</b> 버튼을 누르면 다이얼독이 열려요.</li>
           <li>다이얼독에서 북마크 <b>‘댕겨올개 알림장’</b>을 누르고 <b>임시저장</b>을 누르면 끝.</li>
         </ol>
         <div id="dd-links"></div>
