@@ -1109,11 +1109,21 @@ function blobToBase64(blob) {
 
 // 보드 이름 → 명단의 아이. "구름"처럼 같은 이름이 여럿(구름(포메라니안)·구름(비숑 프리제))이면 고르게 함
 const baseName = (s) => norm(String(s || "").replace(/\s*\(.*\)\s*$/, ""));
+// 이름 가족: 괄호·띄어쓰기 앞 첫 이름 ("토리 비숑", "토리(푸들)" → "토리")
+const famKey = (s) => norm(String(s || "").replace(/\s*\(.*$/, "").trim().split(/\s+/)[0]);
+const familyOf = (n) => { const k = famKey(n); return k ? state.dogs.filter((d) => !d.auto && famKey(d.name) === k) : []; };
 function matchDog(n, draft = state.draft, usePick = true) {
   const pick = usePick && draft?.pick?.[norm(n)];
   if (pick === NEW_DOG) return { isNew: true };
   if (pick && dogById(pick)) return { dog: dogById(pick) };
   const named = state.dogs.filter((d) => !d.auto);
+  // 같은 이름 아이가 여럿이면 무조건 모두와 대조해서 고르게 함 (보드에 "토리 비숑"처럼 정확히 쓴 경우만 바로 연결)
+  const fam = familyOf(n);
+  if (fam.length > 1) {
+    const exactOne = fam.filter((d) => norm(d.name) === norm(n));
+    if (exactOne.length === 1 && norm(n) !== famKey(n)) return { dog: exactOne[0] };
+    return { choices: [...fam].sort((a, b) => refCount(b) - refCount(a) || a.name.localeCompare(b.name, "ko")) };
+  }
   const exact = named.filter((d) => norm(d.name) === norm(n));
   const withRefs = (arr) => arr.filter((d) => refCount(d) > 0);
   if (withRefs(exact).length === 1) return { dog: withRefs(exact)[0] };
@@ -1295,13 +1305,14 @@ async function renderRoll() {
   body.innerHTML = `
     ${need.length ? `<p class="small">명단에 없던 아이예요. <b>대표 사진</b>을 올려 주세요. 정면·옆·뒤·엎드린 모습 등 <b>여러 장</b>을 한 번에 고를수록 더 잘 알아봐요. 한 번 올리면 다음부터는 묻지 않아요.</p>
     <div class="need-list">${need.map((dg) => `
-      <div class="need-row"><span class="avatar"></span><b class="grow">${esc(dg.name)}</b>
+      <div class="need-row"><span class="avatar"></span><b class="grow swap-name" data-swap="${dg.id}" title="다른 아이로 바꾸기">${esc(dg.name)}</b>
         <button class="btn primary sm" data-ref-for="${dg.id}">대표 사진 올리기</button></div>`).join("")}</div>` : ""}
     ${known.length ? `<div class="known-list">${known.map((dg) => `
-      <span class="known" title="얼굴 기억함"><img src="${ref(dg.ref_path)}" alt="">${esc(dg.name)}<i>✓</i></span>`).join("")}</div>` : ""}
+      <button class="known" data-swap="${dg.id}" title="눌러서 다른 아이로 바꾸기"><img src="${ref(dg.ref_path)}" alt="">${esc(dg.name)}${familyOf(dg.name).length > 1 ? `<small class="fam-n">${familyOf(dg.name).length}</small>` : `<i>✓</i>`}</button>`).join("")}</div>` : ""}
     ${hotelDogs.length ? `<p class="small" style="margin:10px 0 4px">🏨 <b>호텔링</b> · 대표 사진 없이 분류해요. AI가 모르는 아이는 '모르는 아이' 칸에 모이니, 묶음째 골라 이 이름으로 옮기면 얼굴도 기억해요.</p>
     <div class="known-list">${hotelDogs.map((dg) => `
-      <span class="known hotel">${dg.ref_path ? `<img src="${ref(dg.ref_path)}" alt="">` : ""}<b class="tag-h">H</b>${esc(dg.name)}</span>`).join("")}</div>` : ""}
+      <button class="known hotel" data-swap="${dg.id}" title="눌러서 다른 아이로 바꾸기">${dg.ref_path ? `<img src="${ref(dg.ref_path)}" alt="">` : ""}<b class="tag-h">H</b>${esc(dg.name)}</button>`).join("")}</div>` : ""}
+    <p class="muted small" style="margin:10px 0 0">이름을 누르면 <b>다른 아이로 바꿀 수 있어요</b>. 오늘 그 아이로 분류된 사진도 함께 옮겨져요.${roll.some((dg) => familyOf(dg.name).length > 1) ? ` 숫자 표시는 이름이 같은 아이가 여럿이라는 뜻이에요.` : ""}</p>
     <div class="row" style="margin-top:10px">
       <button id="roll-edit" class="btn ghost sm">명단 수정</button>
       <button id="roll-board" class="btn ghost sm">보드·캡처 다시 읽기</button>
@@ -1310,11 +1321,89 @@ async function renderRoll() {
     refTarget = b.dataset.refFor;
     $("#ref-file").click();
   }));
+  $$("[data-swap]", body).forEach((b) => b.addEventListener("click", () => openSwap(dogById(b.dataset.swap))));
   $("#roll-edit").addEventListener("click", () => {
-    state.draft = { names: roll.map((dg) => dg.name), unsure: [], img: "", hotel: hotelDogs.map((dg) => dg.name) };
+    state.draft = { names: roll.map((dg) => dg.name), unsure: [], img: "", hotel: hotelDogs.map((dg) => dg.name),
+      pick: Object.fromEntries(roll.map((dg) => [norm(dg.name), dg.id])) };
     renderRoll();
   });
   $("#roll-board").addEventListener("click", () => $("#board-file").click());
+}
+
+// 확정된 명단에서 한 아이를 다른 아이로 바꾸기 (같은 이름 아이·비슷한 이름 먼저 보여 줌)
+async function openSwap(from) {
+  if (!from) return;
+  document.querySelector(".rc-overlay")?.remove();
+  const ov = document.createElement("div");
+  ov.className = "rc-overlay";
+  document.body.appendChild(ov);
+  const fam = familyOf(from.name).filter((d) => d.id !== from.id);
+  const sim = similarDogs(from.name, from.id).filter((d) => !fam.some((f) => f.id === d.id));
+  const cands = [...fam, ...sim];
+  const ref = await signed("refs", [from, ...cands].map((d) => d.ref_path));
+  const nPhotos = state.photos.filter((p) => p.dog_ids.includes(from.id)).length;
+  const opt = (d) => `<button class="same-opt" data-to="${d.id}">${d.ref_path ? `<img src="${ref(d.ref_path)}" alt="">` : `<span class="avatar"></span>`}<span>${esc(d.name)}${state.attendance.has(d.id) ? ` <small class="muted">(이미 명단)</small>` : ""}</span></button>`;
+  ov.innerHTML = `<div class="rc-box swap-box">
+    <div class="rc-head"><div class="grow"><b>'${esc(from.name)}'을(를) 다른 아이로 바꾸기</b>
+      <small class="muted">오늘 ${esc(from.name)}(으)로 분류된 사진 ${nPhotos}장도 바꾼 아이로 함께 옮겨요.</small></div>
+      <button class="btn ghost sm" data-x>닫기</button></div>
+    <div class="rc-body">
+      <div class="swap-from">${from.ref_path ? `<img src="${ref(from.ref_path)}" alt="">` : `<span class="avatar"></span>`}<b>${esc(from.name)}</b><span class="muted">→</span></div>
+      ${fam.length ? `<p class="small"><b>이름이 같은 아이</b></p><div class="same-opts">${fam.map(opt).join("")}</div>` : ""}
+      ${sim.length ? `<p class="small" style="margin-top:14px"><b>비슷한 이름</b></p><div class="same-opts">${sim.map(opt).join("")}</div>` : ""}
+      <form class="row swap-search" style="margin-top:16px">
+        <input class="grow" list="swap-names" placeholder="다른 이름 찾기 (예: 토리 비숑)">
+        <datalist id="swap-names">${state.dogs.filter((d) => !d.auto && d.id !== from.id).map((d) => `<option value="${esc(d.name)}">`).join("")}</datalist>
+        <button class="btn primary sm" type="submit">바꾸기</button>
+      </form>
+    </div></div>`;
+  const close = () => ov.remove();
+  ov.addEventListener("click", (e) => { if (e.target === ov) close(); });
+  ov.querySelector("[data-x]").addEventListener("click", close);
+  $$("[data-to]", ov).forEach((b) => b.addEventListener("click", async () => { close(); await swapDog(from, dogById(b.dataset.to)); }));
+  ov.querySelector(".swap-search").addEventListener("submit", async (e) => {
+    e.preventDefault();
+    const v = ov.querySelector(".swap-search input").value.trim();
+    if (!v) return;
+    const to = await findOrCreateDog(v);
+    if (!to || to.id === from.id) return;
+    close();
+    await swapDog(from, to);
+  });
+}
+async function swapDog(from, to) {
+  if (!from || !to || from.id === to.id) return;
+  toast(`${from.name} → ${to.name} 바꾸는 중…`);
+  try {
+    const wasHotel = state.hotel.has(from.id);
+    await sb.from("assignments").delete().eq("day", state.day).eq("dog_id", from.id);
+    if (!state.attendance.has(to.id)) {
+      const { error } = await sb.from("assignments").insert({ day: state.day, dog_id: to.id, hotel: wasHotel });
+      if (error) throw error;
+    }
+    state.attendance.delete(from.id); state.attendance.add(to.id);
+    if (wasHotel) { state.hotel.delete(from.id); state.hotel.add(to.id); }
+    if (!to.active) { await sb.from("dogs").update({ active: true }).eq("id", to.id); to.active = true; }
+    // 오늘 그 아이로 분류된 사진을 바꾼 아이로
+    const moved = state.photos.filter((p) => p.dog_ids.includes(from.id));
+    await pool(moved, 6, async (p) => {
+      const ids = [...new Set(p.dog_ids.map((d) => (d === from.id ? to.id : d)))];
+      const not = (p.not_dogs || []).filter((d) => d !== to.id);
+      await sb.from("photos").update({ dog_ids: ids, not_dogs: not }).eq("id", p.id);
+      p.dog_ids = ids; p.not_dogs = not;
+    });
+    // 오늘 잘못된 아이 이름으로 배운 학습 사진·실수 기록도 옮김 (원래 아이 얼굴이 섞이지 않게)
+    const since = new Date(`${state.day}T00:00:00+09:00`).toISOString();
+    await sb.from("dog_refs").update({ dog_id: to.id }).eq("dog_id", from.id).like("path", "%-learn-%").gte("created_at", since);
+    await sb.from("lessons").update({ right_dog: to.id }).eq("right_dog", from.id).gte("created_at", since);
+    await loadDogs();
+    toast(`${from.name} → ${to.name}(으)로 바꿨어요${moved.length ? ` · 사진 ${moved.length}장도 옮김` : ""}`);
+  } catch (err) {
+    console.error(err);
+    toast("바꾸지 못했어요. 다시 시도해 주세요.");
+  }
+  await renderRoll();
+  await renderPhotos();
 }
 
 // 보드 사진·앱 캡처(여러 장) → 이름 읽기

@@ -583,3 +583,13 @@ body.practice #practice-reset{display:flex}
 .btn { border-radius:12px; }
 .bar { height:12px; }
 .bar i { background:var(--yellow); background-image:repeating-linear-gradient(-45deg, rgba(0,59,137,.14) 0 6px, transparent 6px 12px); }
+
+/* 확정 명단: 눌러서 바꾸기 */
+button.known { border:0; font:inherit; font-size:14px; font-weight:600; color:var(--ink); cursor:pointer; }
+button.known:hover { box-shadow:0 0 0 2px var(--navy) inset; }
+.known .fam-n { background:var(--yellow); color:var(--navy); border-radius:999px; font-size:11px; font-weight:800; padding:0 6px; }
+.swap-name { cursor:pointer; text-decoration:underline dotted; text-underline-offset:3px; }
+.swap-box { width:min(560px,100%); }
+.swap-from { display:flex; align-items:center; gap:10px; margin-bottom:12px; font-size:16px; }
+.swap-from img, .swap-from .avatar { width:44px; height:44px; border-radius:10px; object-fit:cover; }
+.swap-box .same-opt .avatar { width:44px; height:44px; border-radius:8px; }
