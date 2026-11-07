@@ -141,7 +141,7 @@
 
   function drawList() {
     const ready = rows.filter((r) => r.on);
-    $bd.innerHTML = `<p class="msg">${mine.day.slice(5).replace("-", "월 ")}일 유치원 ${rows.length}마리 · 사진함에서 분류된 사진을 아이별 알림장으로 <b>임시저장</b>해요. 보호자에게 바로 가지 않아요.</p>`
+    $bd.innerHTML = `<p class="msg">${+mine.day.slice(5, 7)}월 ${+mine.day.slice(8, 10)}일 유치원 ${rows.length}마리 · 사진함에서 분류된 사진을 아이별 알림장으로 <b>임시저장</b>해요. 보호자에게 바로 가지 않아요.</p>`
       + (rows.length ? rows.map((r, i) => `<label class="row ${r.state === "ready" ? "" : "off"}">
           <input type="checkbox" data-i="${i}" ${r.on ? "checked" : ""} ${r.state === "ready" ? "" : "disabled"}>
           <span class="nm">${esc(r.pet.name)}${r.note ? `<small>${esc(r.note)}</small>` : ""}</span>
