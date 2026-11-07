@@ -32,11 +32,18 @@ const VAX = [["antibody", "항체검사"], ["corona", "코로나장염"], ["rabi
 const kindTag = (k) => `<b class="hk ${k === "K" ? "k" : "h"}">${k === "K" ? "K" : "H"}</b>`;
 function toast(m, ms) { C?.toast?.(m, ms); }
 
+/* ================= 추가 서비스 ================= */
+// 기본 가격을 모르면 null → 예약할 때 금액을 적음 (가격이 정해지면 여기 숫자만 넣으면 자동 계산)
+export const SERVICE_PRICE = { bath: null, hygiene: null, grooming: null, daycare_hour: null };
+const SVC = [["bath", "🛁", "목욕"], ["hygiene", "🧼", "위생미용"], ["grooming", "✂️", "미용"], ["pickup", "🚗", "픽업"], ["drop", "🏠", "드랍"], ["daycare", "☀️", "추가데이케어"]];
+const svcOn = (b, k) => (k === "pickup" ? !!b.pickup : k === "drop" ? !!b.drop_off : !!(b.services || {})[k]);
+const svcText = (b) => SVC.filter(([k]) => svcOn(b, k)).map(([k, ic, n]) => `${ic}${n}${k === "daycare" && b.services?.daycare?.hours ? ` ${b.services.daycare.hours}시간` : ""}`).join(" ");
+
 /* ================= 요금 계산 ================= */
 // K 유치원생: 평일(월~금) 40,000 / 주말(토·일) 50,000, 추가 아이 1박 30,000, 픽업·드랍 편도 5,000
 // H 일반: 1박 62,000 (3박 이상이면 전체 57,000), 추가 아이 1박 40,000, 픽업·드랍 편도 8,000
 // 퇴실일은 숙박에 넣지 않음. 픽업·드랍은 마릿수와 상관없이 한 번
-export function calcFee({ kind, check_in, check_out, label, pickup, drop_off }) {
+export function calcFee({ kind, check_in, check_out, label, pickup, drop_off, services = {} }) {
   const nights = nightsOf(check_in, check_out);
   const n = nights.length;
   const extraDogs = dogsIn(label) - 1;
@@ -58,13 +65,29 @@ export function calcFee({ kind, check_in, check_out, label, pickup, drop_off }) 
     nights: n, dogs: extraDogs + 1, base, base_detail: detail,
     extra, extra_detail: extraDogs && n ? `추가 ${extraDogs}마리 × ${n}박 × ${extraRate.toLocaleString("ko-KR")}` : "",
     pickup: pickup ? way : 0, drop: drop_off ? way : 0,
+    ...svcFee(services),
   };
+}
+// 목욕·위생미용·미용·추가데이케어: 적은 금액 → 없으면 기본 가격 → 없으면 0
+function svcFee(services = {}) {
+  const svc = [];
+  for (const k of ["bath", "hygiene", "grooming"]) {
+    if (!services[k]) continue;
+    const amt = services[k].price != null ? Number(services[k].price) : (SERVICE_PRICE[k] ?? null);
+    svc.push({ key: k, amount: amt ?? 0, set: amt != null });
+  }
+  if (services.daycare) {
+    const h = Number(services.daycare.hours) || 0;
+    const amt = services.daycare.price != null ? Number(services.daycare.price) : (SERVICE_PRICE.daycare_hour != null ? SERVICE_PRICE.daycare_hour * h : null);
+    svc.push({ key: "daycare", hours: h, amount: amt ?? 0, set: amt != null });
+  }
+  return { svc, services_total: svc.reduce((a, x) => a + x.amount, 0) };
 }
 // 직원이 고친 금액(manual)이 있으면 그걸 쓰고, 없으면 자동 계산 금액
 export function settle(calc, manual = {}, extra_cost = 0, discount = 0) {
   const pick = (k) => (manual[k] != null ? Number(manual[k]) : Number(calc[k] || 0));
   const items = { base: pick("base"), extra: pick("extra"), pickup: pick("pickup"), drop: pick("drop") };
-  const sum = items.base + items.extra + items.pickup + items.drop + Number(extra_cost || 0) - Number(discount || 0);
+  const sum = items.base + items.extra + items.pickup + items.drop + Number(calc.services_total || 0) + Number(extra_cost || 0) - Number(discount || 0);
   return { ...items, auto_total: sum, total: manual.total != null ? Number(manual.total) : sum };
 }
 
@@ -190,7 +213,7 @@ async function openCustomer(id) {
   const row = (k, val) => val ? `<div class="ho-kv"><span>${k}</span><b>${val}</b></div>` : "";
   const bRow = (b) => `<button class="ho-bk ${b.status}" data-bk="${b.id}">
       ${kindTag(b.kind)}<span class="grow"><b>${esc(b.label)}</b> <small class="muted">${md(b.check_in)}${b.in_time ? " " + b.in_time : ""} → ${md(b.check_out)}${b.out_time ? " " + b.out_time : ""}</small>
-      <br><small class="muted">${STATUS[b.status]}${b.pickup ? " · 픽업" : ""}${b.drop_off ? " · 드랍" : ""}${b.notes ? " · " + esc(b.notes) : ""}</small></span>
+      <br><small class="muted">${STATUS[b.status]}${svcText(b) ? " · " + svcText(b) : ""}${b.notes ? " · " + esc(b.notes) : ""}</small></span>
       <b>${won(b.total)}</b></button>`;
   const { ov, close } = modal(`
     <div class="rc-head"><div class="grow"><b class="ho-title">${kindTag(c.kind)} ${esc(custLabel(c))}</b>
@@ -246,7 +269,7 @@ async function openImport() {
   const dogs = C.dogs.filter((d) => !d.auto);
   const ref = await C.signed("refs", dogs.map((d) => d.ref_path));
   const { ov, close } = modal(`
-    <div class="rc-head"><div class="grow"><b>유치원생 불러오기</b><small class="muted">사진 분류 명단에서 아이를 골라 K 고객으로 등록해요. 명단은 바뀌지 않아요.</small></div>
+    <div class="rc-head"><div class="grow"><b>유치원생 불러오기</b><small class="muted">아이를 고르면 입실·퇴실 날짜와 시간만 넣어서 바로 예약해요. 사진 분류 명단은 바뀌지 않아요.</small></div>
       <button class="btn ghost sm" data-close>닫기</button></div>
     <div class="rc-body"><input class="ho-search" id="imp-q" type="search" placeholder="강아지 이름 검색" autocomplete="off"><div id="imp-list" class="ho-imp"></div></div>`);
   const drawImp = () => {
@@ -254,13 +277,14 @@ async function openImport() {
     const list = dogs.filter((d) => !q || d.name.toLowerCase().includes(q)).slice(0, 60);
     $("#imp-list", ov).innerHTML = list.map((d) => `<button data-dog="${d.id}" class="${linked.has(d.id) ? "done" : ""}">
         ${d.ref_path ? `<img src="${ref(d.ref_path)}" alt="">` : `<span class="avatar"></span>`}
-        <span class="grow"><b>${esc(d.name)}</b>${linked.has(d.id) ? `<br><small>이미 호텔링 고객이에요 · 보기</small>` : ""}</span></button>`).join("")
+        <span class="grow"><b>${esc(d.name)}</b>${linked.has(d.id) ? `<br><small>호텔링 고객 · 바로 예약</small>` : ""}</span></button>`).join("")
       || `<p class="muted">명단에 없는 이름이에요. 신규 고객으로 등록해 주세요.</p>`;
     $$("[data-dog]", ov).forEach((b) => b.addEventListener("click", () => {
       const d = dogs.find((x) => x.id === b.dataset.dog);
       close();
-      if (linked.has(d.id)) return openCustomer(linked.get(d.id));
-      openCustomerForm(null, { kind: "K", pets: [{ name: baseName(d.name), breed: breedOf(d.name), dog_id: d.id }] });
+      // 유치원생은 정보를 따로 넣지 않고 입실·퇴실 날짜와 시간만 넣어서 바로 예약
+      if (linked.has(d.id)) return openBooking(null, { customer: custById(linked.get(d.id)), quick: true });
+      openBooking(null, { quickDog: d, quick: true });
     }));
   };
   $("#imp-q", ov).addEventListener("input", drawImp);
@@ -542,36 +566,40 @@ function openStatList(kind, list) {
     <div class="rc-body">${list.length ? list.map((b) => {
       const c = custById(b.customer_id);
       return `<button class="ho-bk ${b.status}" data-bk="${b.id}">${kindTag(b.kind)}<span class="grow"><b>${esc(b.label)}</b> <small class="muted">${esc(c?.owner_name || "")} ${esc(c?.phone || "")}</small>
-        <br><small class="muted">${md(b.check_in)}${b.in_time ? " " + b.in_time : ""} → ${md(b.check_out)}${b.out_time ? " " + b.out_time : ""} · ${STATUS[b.status]}${b.pickup ? " · 픽업" : ""}${b.drop_off ? " · 드랍" : ""}</small></span></button>`;
+        <br><small class="muted">${md(b.check_in)}${b.in_time ? " " + b.in_time : ""} → ${md(b.check_out)}${b.out_time ? " " + b.out_time : ""} · ${STATUS[b.status]}${svcText(b) ? " · " + svcText(b) : ""}</small></span></button>`;
     }).join("") : `<p class="muted">없어요</p>`}</div>`);
   $$("[data-bk]", ov).forEach((b) => b.addEventListener("click", () => { close(); openBooking(hs.bookings.find((x) => x.id === b.dataset.bk)); }));
 }
 
 /* ---------- 예약 등록·수정 ---------- */
 function openBooking(bk, preset = {}) {
-  const b = bk ? { ...bk, manual: { ...(bk.manual || {}) } } : {
-    customer_id: preset.customer?.id || null, kind: preset.customer?.kind || "H",
-    label: preset.customer ? custLabel(preset.customer) : "",
+  const qd = preset.quickDog || null; // 유치원 명단에서 처음 불러온 아이 (저장할 때 K 고객으로 등록)
+  const quick = !!preset.quick && !bk;
+  const b = bk ? { ...bk, manual: { ...(bk.manual || {}) }, services: JSON.parse(JSON.stringify(bk.services || {})) } : {
+    customer_id: preset.customer?.id || null, kind: qd ? "K" : preset.customer?.kind || "H",
+    label: qd ? baseName(qd.name) : preset.customer ? custLabel(preset.customer) : "", services: {},
     check_in: preset.check_in || today(), check_out: preset.check_out || addDays(preset.check_in || today(), 1),
     in_time: preset.in_time || "", out_time: preset.out_time || "",
     pickup: false, drop_off: false, status: "booked", notes: "", manual: {}, extra_cost: 0, discount: 0,
   };
   const { ov, close } = modal(`
-    <div class="rc-head"><div class="grow"><b>${bk ? "예약 상세" : "호텔링 예약 등록"}</b><small class="muted" id="bk-sub"></small></div>
+    <div class="rc-head"><div class="grow"><b>${bk ? "예약 상세" : quick ? "유치원생 호텔링 예약" : "호텔링 예약 등록"}</b><small class="muted" id="bk-sub"></small></div>
       <button class="btn ghost sm" data-close>닫기</button></div>
-    <div class="rc-body ho-form">
+    <div class="rc-body ho-form ${quick ? "quick" : ""}">
       <label class="ho-line">고객<div id="bk-cust"></div></label>
       <div class="ho-grid">
-        <label>구분<div class="ho-seg" id="bk-kind"><button type="button" data-k="H">H 일반</button><button type="button" data-k="K">K 유치원생</button></div></label>
-        <label>예약 상태<select id="bk-status">${Object.entries(STATUS).map(([k, n]) => `<option value="${k}" ${b.status === k ? "selected" : ""}>${n}</option>`).join("")}</select></label>
-        <label class="full">강아지 이름 <small class="muted">다견은 슬래시로: 비비/모모</small><input id="bk-label" value="${esc(b.label)}"><small id="bk-dogs" class="muted"></small></label>
+        <label class="q-hide">구분<div class="ho-seg" id="bk-kind"><button type="button" data-k="H">H 일반</button><button type="button" data-k="K">K 유치원생</button></div></label>
+        <label class="q-hide">예약 상태<select id="bk-status">${Object.entries(STATUS).map(([k, n]) => `<option value="${k}" ${b.status === k ? "selected" : ""}>${n}</option>`).join("")}</select></label>
+        <label class="full q-hide">강아지 이름 <small class="muted">다견은 슬래시로: 비비/모모</small><input id="bk-label" value="${esc(b.label)}"><small id="bk-dogs" class="muted"></small></label>
         <label>입실 날짜<input id="bk-in" type="date" value="${b.check_in}"></label>
         <label>입실 시간<input id="bk-intime" type="time" value="${esc(b.in_time || "")}"></label>
         <label>퇴실 날짜<input id="bk-out" type="date" value="${b.check_out}"></label>
         <label>퇴실 시간<input id="bk-outtime" type="time" value="${esc(b.out_time || "")}"></label>
       </div>
-      <div class="ho-vax"><label><input type="checkbox" id="bk-pick" ${b.pickup ? "checked" : ""}> 픽업</label><label><input type="checkbox" id="bk-drop" ${b.drop_off ? "checked" : ""}> 드랍</label></div>
-      <label class="ho-line">메모<textarea id="bk-notes" rows="2">${esc(b.notes || "")}</textarea></label>
+      <h3>추가 서비스 <small class="muted">눌러서 켜고 꺼요</small></h3>
+      <div class="ho-svc">${SVC.map(([k, ic, n]) => `<button type="button" data-svc="${k}"><span>${ic}</span>${n}</button>`).join("")}</div>
+      <div id="bk-dc" class="ho-dc"></div>
+      <label class="ho-line q-hide">메모<textarea id="bk-notes" rows="2">${esc(b.notes || "")}</textarea></label>
       <h3>요금 내역</h3>
       <div id="bk-fee" class="ho-fee"></div>
     </div>
@@ -582,6 +610,10 @@ function openBooking(bk, preset = {}) {
 
   // 고객 고르기
   const drawCust = () => {
+    if (qd) {
+      $("#bk-cust", ov).innerHTML = `<div class="ho-picked">${kindTag("K")} <b>${esc(baseName(qd.name))}</b> <small class="muted">유치원 명단에서 불러옴 · 저장하면 호텔링 고객으로도 등록돼요</small></div>`;
+      return;
+    }
     const c = custById(b.customer_id);
     $("#bk-sub", ov).textContent = c ? `${c.owner_name || ""} ${c.phone || ""}` : "";
     $("#bk-cust", ov).innerHTML = c
@@ -594,8 +626,12 @@ function openBooking(bk, preset = {}) {
     q?.addEventListener("input", () => {
       const s = q.value.trim();
       const res = s ? hs.customers.filter((c) => matches(c, s)).slice(0, 8) : [];
+      const linkedIds = new Set(hs.pets.map((p) => p.dog_id).filter(Boolean));
+      const roster = s ? C.dogs.filter((d) => !d.auto && !linkedIds.has(d.id) && d.name.toLowerCase().includes(s.toLowerCase())).slice(0, 6) : [];
       $("#bk-cres", ov).innerHTML = res.map((c) => `<button type="button" data-pc="${c.id}">${kindTag(c.kind)} ${esc(custLabel(c))} <small>${esc(c.owner_name || "")} ${esc(c.phone || "")}</small></button>`).join("")
+        + roster.map((d) => `<button type="button" data-pd="${d.id}">${kindTag("K")} ${esc(d.name)} <small>유치원 명단</small></button>`).join("")
         || (s ? `<p class="muted small">없어요. ‘새 고객 등록’을 눌러 주세요.</p>` : "");
+      $$("[data-pd]", ov).forEach((x) => x.addEventListener("click", () => { close(); openBooking(null, { ...preset, quickDog: C.dogs.find((d) => d.id === x.dataset.pd), quick: true, check_in: b.check_in, check_out: b.check_out }); }));
       $$("[data-pc]", ov).forEach((x) => x.addEventListener("click", () => {
         const c = custById(x.dataset.pc);
         b.customer_id = c.id; b.kind = c.kind;
@@ -613,10 +649,24 @@ function openBooking(bk, preset = {}) {
     b.label = $("#bk-label", ov).value.trim();
     b.check_in = $("#bk-in", ov).value; b.check_out = $("#bk-out", ov).value;
     b.in_time = $("#bk-intime", ov).value; b.out_time = $("#bk-outtime", ov).value;
-    b.pickup = $("#bk-pick", ov).checked; b.drop_off = $("#bk-drop", ov).checked;
     b.status = $("#bk-status", ov).value; b.notes = $("#bk-notes", ov).value.trim();
   };
   const fee = () => calcFee(b);
+  const drawSvc = () => {
+    $$("[data-svc]", ov).forEach((x) => x.classList.toggle("on", svcOn(b, x.dataset.svc)));
+    const dc = b.services.daycare;
+    $("#bk-dc", ov).innerHTML = dc ? `<label>☀️ 추가데이케어 <input id="bk-dch" type="number" min="0" step="0.5" inputmode="decimal" value="${dc.hours ?? ""}" placeholder="0"> 시간</label>` : "";
+    $("#bk-dch", ov)?.addEventListener("input", (e) => { b.services.daycare.hours = Number(e.target.value) || 0; drawFee(); });
+  };
+  $$("[data-svc]", ov).forEach((x) => x.addEventListener("click", () => {
+    const k = x.dataset.svc;
+    if (k === "pickup") b.pickup = !b.pickup;
+    else if (k === "drop") b.drop_off = !b.drop_off;
+    else if (b.services[k]) delete b.services[k];
+    else b.services[k] = k === "daycare" ? { hours: null } : {};
+    drawSvc(); drawFee();
+    if (k === "daycare" && b.services.daycare) $("#bk-dch", ov)?.focus();
+  }));
   function drawFee() {
     read();
     const calc = fee();
@@ -632,8 +682,13 @@ function openBooking(bk, preset = {}) {
       <div class="ho-fr head"><span>${kindTag(b.kind)} ${esc(b.label || "")}</span><span>${md(b.check_in)} → ${md(b.check_out)} · <b>${calc.nights}박</b></span></div>
       ${line("base", "호텔링 기본 요금", calc.base_detail)}
       ${line("extra", "다견 추가 요금", calc.extra_detail)}
-      ${line("pickup", "픽업", b.pickup ? `편도 ${b.kind === "K" ? "5,000" : "8,000"}` : "")}
-      ${line("drop", "드랍", b.drop_off ? `편도 ${b.kind === "K" ? "5,000" : "8,000"}` : "")}
+      ${b.pickup || s.pickup ? line("pickup", "🚗 픽업", b.pickup ? `편도 ${b.kind === "K" ? "5,000" : "8,000"}` : "") : ""}
+      ${b.drop_off || s.drop ? line("drop", "🏠 드랍", b.drop_off ? `편도 ${b.kind === "K" ? "5,000" : "8,000"}` : "") : ""}
+      ${calc.svc.map((x) => {
+        const [, ic, n] = SVC.find(([k]) => k === x.key);
+        return `<div class="ho-fr ${x.set ? "" : "need"}"><span>${ic} ${n}${x.key === "daycare" ? `<small>${x.hours || 0}시간</small>` : ""}${x.set ? "" : `<small class="warn">금액을 적어 주세요</small>`}</span>
+          <span class="ho-amt"><input type="number" step="1000" data-svcp="${x.key}" value="${x.set ? x.amount : ""}" placeholder="금액"></span></div>`;
+      }).join("")}
       <div class="ho-fr"><span>기타 추가 비용</span><span class="ho-amt"><input type="number" step="1000" id="bk-xtra" value="${b.extra_cost || 0}"></span></div>
       <div class="ho-fr"><span>할인</span><span class="ho-amt">−<input type="number" step="1000" id="bk-disc" value="${b.discount || 0}"></span></div>
       <div class="ho-fr total ${b.manual.total != null ? "man" : ""}"><span>최종 합계</span><span class="ho-amt">${b.manual.total != null ? `<em>직접 입력</em>` : ""}<input type="number" step="1000" data-man="total" value="${s.total}">${b.manual.total != null ? `<button type="button" class="btn ghost mini" data-reset="total" title="자동 합계로">↺ ${won(s.auto_total)}</button>` : ""}</span></div>
@@ -645,17 +700,35 @@ function openBooking(bk, preset = {}) {
       drawFee();
     }));
     $$("[data-reset]", ov).forEach((el) => el.addEventListener("click", () => { delete b.manual[el.dataset.reset]; drawFee(); }));
+    $$("[data-svcp]", ov).forEach((el) => el.addEventListener("change", () => {
+      const k = el.dataset.svcp;
+      if (el.value === "") delete b.services[k].price; else b.services[k].price = Math.round(Number(el.value) || 0);
+      drawFee();
+    }));
     $("#bk-xtra", ov)?.addEventListener("change", (e) => { b.extra_cost = Math.round(Number(e.target.value) || 0); drawFee(); });
     $("#bk-disc", ov)?.addEventListener("change", (e) => { b.discount = Math.round(Number(e.target.value) || 0); drawFee(); });
   }
-  ["#bk-label", "#bk-in", "#bk-out", "#bk-intime", "#bk-outtime", "#bk-pick", "#bk-drop"].forEach((s) => $(s, ov).addEventListener(s === "#bk-label" ? "input" : "change", () => {
+  ["#bk-label", "#bk-in", "#bk-out", "#bk-intime", "#bk-outtime"].forEach((s) => $(s, ov).addEventListener(s === "#bk-label" ? "input" : "change", () => {
     if (s === "#bk-in" && $("#bk-out", ov).value < $("#bk-in", ov).value) $("#bk-out", ov).value = addDays($("#bk-in", ov).value, 1);
     drawFee();
   }));
-  drawKind(); drawCust(); drawFee();
+  drawKind(); drawCust(); drawSvc(); drawFee();
 
   $("#bk-save", ov).addEventListener("click", async () => {
     read();
+    if (b.services.daycare && !(Number(b.services.daycare.hours) > 0)) { toast("추가데이케어가 몇 시간인지 적어 주세요"); $("#bk-dch", ov)?.focus(); return; }
+    if (qd && !b.customer_id) {
+      if (!b.check_in || !b.check_out || b.check_out < b.check_in) { toast("입실·퇴실 날짜를 확인해 주세요"); return; }
+      const dup = hs.pets.find((p) => p.dog_id === qd.id);
+      if (dup) b.customer_id = dup.customer_id;
+      else {
+        const { data: cu, error } = await C.sb.from("hotel_customers").insert({ kind: "K" }).select().single();
+        if (error) { toast("저장하지 못했어요"); return; }
+        const pr = await C.sb.from("hotel_pets").insert({ customer_id: cu.id, name: baseName(qd.name), breed: breedOf(qd.name) || null, dog_id: qd.id });
+        if (pr.error) { await C.sb.from("hotel_customers").delete().eq("id", cu.id); toast("저장하지 못했어요"); return; }
+        b.customer_id = cu.id;
+      }
+    }
     if (!b.customer_id) { toast("고객을 골라 주세요"); return; }
     if (!b.label) { toast("강아지 이름을 적어 주세요"); return; }
     if (!b.check_in || !b.check_out || b.check_out < b.check_in) { toast("입실·퇴실 날짜를 확인해 주세요"); return; }
@@ -663,7 +736,7 @@ function openBooking(bk, preset = {}) {
     const s = settle(calc, b.manual, b.extra_cost, b.discount);
     const row = {
       customer_id: b.customer_id, kind: b.kind, label: b.label, check_in: b.check_in, in_time: b.in_time || null,
-      check_out: b.check_out, out_time: b.out_time || null, pickup: b.pickup, drop_off: b.drop_off, status: b.status,
+      check_out: b.check_out, out_time: b.out_time || null, pickup: !!b.pickup, drop_off: !!b.drop_off, status: b.status, services: b.services,
       notes: b.notes || null, calc, manual: b.manual, extra_cost: b.extra_cost || 0, discount: b.discount || 0, total: s.total,
       updated_at: new Date().toISOString(),
     };
