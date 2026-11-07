@@ -601,3 +601,10 @@ button.known:hover { box-shadow:0 0 0 2px var(--navy) inset; }
 .roll-chips span.new { box-shadow:0 0 0 1.5px var(--navy) inset; }
 .need-row .avatar { object-fit:cover; }
 .need-row b { display:flex; align-items:center; gap:2px; flex-wrap:wrap; }
+
+/* 다이얼독 알림장 */
+.dd-push-btn { background:var(--yellow); color:var(--navy); font-weight:800; border:0; }
+.dd-steps { margin:8px 0 12px; padding-left:20px; line-height:1.7; }
+.dd-mark { display:flex; align-items:center; gap:10px; flex-wrap:wrap; margin-bottom:6px; }
+.dd-bm { display:inline-flex; align-items:center; gap:6px; background:var(--yellow); color:var(--navy); font-weight:800; text-decoration:none;
+  border-radius:999px; padding:10px 18px; box-shadow:0 4px 0 -1px #d8ae00; cursor:grab; }

@@ -33,12 +33,12 @@ function esc(s) {
   return String(s ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
 }
 let toastTimer;
-function toast(msg) {
+function toast(msg, ms = 2600) {
   const t = $("#toast");
   t.textContent = msg;
   t.classList.remove("hidden");
   clearTimeout(toastTimer);
-  toastTimer = setTimeout(() => t.classList.add("hidden"), 2600);
+  toastTimer = setTimeout(() => t.classList.add("hidden"), ms);
 }
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
@@ -466,7 +466,7 @@ async function render() {
   await Promise.all([loadDogs(), loadAttendance(), loadPractice()]);
   if (state.tab === "photos") { await loadPhotos(); await renderPhotos(); }
   else if (state.tab === "roster") renderRoster();
-  else if (state.tab === "admin") { renderUpLinks(); loadPractice(); }
+  else if (state.tab === "admin") { renderUpLinks(); renderDdLinks(); loadPractice(); }
   renderSide();
 }
 
@@ -485,8 +485,15 @@ async function renderPhotos() {
        <span>분류 완료 <b>${done.length}</b></span>
        ${unsorted.length ? `<span class="warn">분류 안 됨 <b>${unsorted.length}</b></span>` : ""}
        ${pending.length && !state.busy ? `<button id="resume" class="btn primary sm">남은 ${pending.length}장 분류하기</button>` : ""}
-       ${done.length ? `<button id="save-all" class="btn primary sm">📥 전체 다운로드</button>` : ""}`
+       ${done.length ? `<button id="save-all" class="btn primary sm">📥 전체 다운로드</button>` : ""}
+       ${done.length && state.day === kstToday() && !state.practice ? `<button id="dd-push" class="btn sm dd-push-btn">📮 다이얼독 알림장</button>` : ""}`
     : "";
+  $("#dd-push")?.addEventListener("click", () => {
+    if (pending.length || unsorted.length) {
+      if (!confirm(`아직 ${pending.length ? `분류 중인 사진 ${pending.length}장` : ""}${pending.length && unsorted.length ? ", " : ""}${unsorted.length ? `분류 안 된 사진 ${unsorted.length}장` : ""}이 있어요.\n지금 넣으면 그 사진은 빠져요. (나중에 다시 누르면 새로 분류된 사진만 따로 넣을 수 있어요)\n\n다이얼독을 열까요?`)) return;
+    }
+    openDialdogPush();
+  });
   $("#resume")?.addEventListener("click", () => classifyPending());
   $("#save-all")?.addEventListener("click", (e) => saveAll(e.currentTarget));
 
@@ -3011,6 +3018,42 @@ $("#up-new").addEventListener("click", async () => {
   await renderUpLinks();
   try { await navigator.clipboard.writeText(upUrl(token)); toast("새 링크를 만들고 복사했어요"); } catch { /* 무시 */ }
 });
+
+// ---- 다이얼독 알림장 임시저장 북마크
+const siteBase = () => `${location.origin}${location.pathname.replace(/[^/]*$/, "")}`;
+const ddBookmarklet = (t) => `javascript:(()=>{window.__DDG_TOKEN='${t}';var s=document.createElement('script');s.src='${siteBase()}dd-push.js?v='+Date.now();document.body.appendChild(s)})()`;
+async function renderDdLinks() {
+  const box = $("#dd-links");
+  if (!box) return;
+  const { data } = await sb.from("dd_push_links").select("*").eq("active", true).order("created_at", { ascending: false }).limit(1);
+  const l = data?.[0];
+  box.innerHTML = l ? `<div class="dd-mark"><a class="dd-bm" href="${esc(ddBookmarklet(l.token))}" onclick="event.preventDefault();alert('이 버튼은 누르는 게 아니라 북마크바로 끌어다 놓는 거예요.')">📮 댕겨올개 알림장</a>
+      <small class="muted">${l.last_used ? `마지막 사용 ${new Date(l.last_used).toLocaleString("ko-KR", { month: "numeric", day: "numeric", hour: "numeric", minute: "2-digit" })}` : "아직 안 써 봤어요"}</small>
+      <button class="btn ghost mini" data-dd-copy>주소 복사</button></div>
+      <p class="muted small">끌어다 놓기가 안 되면 ‘주소 복사’ 후 북마크를 하나 만들고 URL 칸에 붙여 넣어 주세요.</p>`
+    : `<p class="muted small">아직 북마크가 없어요. 아래 버튼으로 만들어 주세요.</p>`;
+  $("#dd-new").textContent = l ? "북마크 새로 만들기 (예전 것은 꺼짐)" : "북마크 만들기";
+  box.querySelector("[data-dd-copy]")?.addEventListener("click", async () => {
+    try { await navigator.clipboard.writeText(ddBookmarklet(l.token)); toast("복사했어요. 북마크 URL 칸에 붙여 넣어 주세요"); }
+    catch { prompt("이 주소를 복사해 주세요", ddBookmarklet(l.token)); }
+  });
+}
+$("#dd-new")?.addEventListener("click", async () => {
+  const { data: old } = await sb.from("dd_push_links").select("token").eq("active", true);
+  if (old?.length && !confirm("새로 만들면 예전 북마크는 더 이상 작동하지 않아요. 새로 만들까요?")) return;
+  const b = crypto.getRandomValues(new Uint8Array(18));
+  const token = btoa(String.fromCharCode(...b)).replace(/[+/=]/g, (c) => ({ "+": "-", "/": "_", "=": "" }[c]));
+  if (old?.length) await sb.from("dd_push_links").update({ active: false }).eq("active", true);
+  const { error } = await sb.from("dd_push_links").insert({ token, label: "다이얼독 북마크" });
+  if (error) { toast("만들지 못했어요"); return; }
+  await renderDdLinks();
+  toast("노란 버튼을 북마크바로 끌어다 놓아 주세요");
+});
+// 사진 탭의 '다이얼독 알림장' 버튼: 다이얼독을 열고 북마크를 누르라고 안내
+function openDialdogPush() {
+  window.open("https://dialodog.com/partners/#reports/drafts", "dialodog");
+  toast("다이얼독에서 북마크 ‘댕겨올개 알림장’을 눌러 주세요. 아직 없으면 관리 탭에서 만들어요.", 6000);
+}
 
 // 선생님이 링크로 올리는 사진: 실시간으로 받아서 알림 → 다 들어오면(20초 조용하면) 자동 분류
 const live = { n: 0, timer: null, last: 0 };
