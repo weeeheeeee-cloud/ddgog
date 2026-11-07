@@ -593,3 +593,11 @@ button.known:hover { box-shadow:0 0 0 2px var(--navy) inset; }
 .swap-from { display:flex; align-items:center; gap:10px; margin-bottom:12px; font-size:16px; }
 .swap-from img, .swap-from .avatar { width:44px; height:44px; border-radius:10px; object-fit:cover; }
 .swap-box .same-opt .avatar { width:44px; height:44px; border-radius:8px; }
+
+/* 처음 오는 아이(N) */
+.tag-n { display:inline-grid; place-items:center; width:18px; height:18px; border-radius:5px; background:#dbeafe; color:var(--navy); font-size:11px; font-weight:800; font-style:normal; margin-right:4px; }
+.roll-chips .n-toggle { display:inline-grid; place-items:center; width:18px; height:18px; border-radius:5px; font-size:11px; font-weight:800; color:#c4c4c4; border:1px dashed #d4d4d4; margin-right:4px; cursor:pointer; }
+.roll-chips span.new .n-toggle { background:var(--navy); color:var(--yellow); border:0; }
+.roll-chips span.new { box-shadow:0 0 0 1.5px var(--navy) inset; }
+.need-row .avatar { object-fit:cover; }
+.need-row b { display:flex; align-items:center; gap:2px; flex-wrap:wrap; }
