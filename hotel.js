@@ -155,8 +155,8 @@ function drawList() {
         <span class="ho-pet">${esc(custLabel(c))}</span>
         <span>${esc(c.owner_name || "")}</span>
         <span class="ho-phone">${esc(c.phone || "")}</span>
-        <span class="muted">${past ? md(past.check_in) : "-"}</span>
-        <span>${next ? `<em class="ho-next">${next.check_in <= t ? "투숙 중" : md(next.check_in) + " 입실"}</em>` : `<span class="muted">-</span>`}</span>
+        <span class="muted">${past ? `${md(past.check_in)} → ${md(past.check_out)}` : "-"}</span>
+        <span>${next ? `<em class="ho-next">${next.check_in <= t ? "투숙 중 · " : ""}${md(next.check_in)} → ${md(next.check_out)}</em>` : `<span class="muted">-</span>`}</span>
       </button>`;
     }).join("")}</div>`;
   $$("[data-cust]", $("#ho-list")).forEach((b) => b.addEventListener("click", () => openCustomer(b.dataset.cust)));
@@ -496,7 +496,20 @@ function drawCalendar() {
         </div>`;
       }).join("")}
     </div>
-    <p class="small muted">▸ 입실하는 날 · ◂ 퇴실하는 날 · 날짜를 누르면 그날 입실로 예약을 추가해요.</p>`;
+    <p class="small muted">▸ 입실하는 날 · ◂ 퇴실하는 날 · 날짜를 누르면 그날 입실로 예약을 추가해요.</p>
+    ${(() => {
+      const end = addDays(days[weeks * 7 - 1], 0);
+      const list = hs.bookings.filter((b) => b.check_in.slice(0, 7) <= hs.month && b.check_out.slice(0, 7) >= hs.month)
+        .sort((a, b) => a.check_in.localeCompare(b.check_in) || a.label.localeCompare(b.label, "ko"));
+      return `<h3 class="ho-sub">${m}월 호텔링 예약 <small class="muted">${list.filter(active).length}건</small></h3>` + (list.length ? `<div class="ho-table ho-mlist">
+        <div class="ho-tr ho-th"><span>구분</span><span>강아지</span><span>입실</span><span>퇴실</span><span>숙박</span><span>상태</span></div>
+        ${list.map((b) => `<button class="ho-tr ${b.status} ${b.id === hs.highlight ? "hl" : ""}" data-bk="${b.id}">
+          <span>${kindTag(b.kind)}</span><span class="ho-pet">${esc(b.label)}</span>
+          <span>${md(b.check_in)}${b.in_time ? ` ${b.in_time}` : ""}</span>
+          <span>${md(b.check_out)}${b.out_time ? ` ${b.out_time}` : ""}</span>
+          <span class="muted">${nightsOf(b.check_in, b.check_out).length}박</span>
+          <span class="muted">${STATUS[b.status]}</span></button>`).join("")}</div>` : `<p class="muted small">이번 달 예약이 없어요.</p>`);
+    })()}`;
   $$("[data-mv]", main).forEach((b) => b.addEventListener("click", () => {
     const k = +b.dataset.mv;
     if (!k) hs.month = today().slice(0, 7);

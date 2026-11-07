@@ -763,3 +763,22 @@ button.ho-tr:hover { background:#faf8f3; }
 .ho-picked { display:flex; align-items:center; gap:8px; flex-wrap:wrap; background:#faf8f3; border-radius:10px; padding:8px 10px; color:var(--ink); }
 
 .ho-box .btn.danger { background:#fff; color:#b91c1c; border:1px solid #f3c7c2; }
+
+.ho-sub { margin:20px 0 10px; font-size:16px; }
+.ho-mlist .ho-tr { grid-template-columns:52px 1.3fr 1.2fr 1.2fr .6fr 1fr; }
+.ho-mlist .ho-tr.cancelled { opacity:.5; text-decoration:line-through; }
+.ho-mlist .ho-tr.hl { background:#fff4e5; }
+@media (max-width: 760px) {
+  .ho-mlist .ho-tr { grid-template-columns:40px 1fr auto; grid-template-areas:"k pet st" "k in out"; }
+  .ho-mlist .ho-tr > span:nth-child(2) { grid-area:pet; }
+  .ho-mlist .ho-tr > span:nth-child(3) { grid-area:in; display:block; font-size:13px; color:var(--ink); }
+  .ho-mlist .ho-tr > span:nth-child(4) { grid-area:out; display:block; justify-self:end; font-size:13px; color:var(--ink); }
+  .ho-mlist .ho-tr > span:nth-child(5) { display:none; }
+  .ho-mlist .ho-tr > span:nth-child(6) { grid-area:st; display:block; font-size:12px; }
+  .ho-mlist .ho-tr > span:nth-child(3)::before { content:"입실 "; color:var(--muted); }
+  .ho-mlist .ho-tr > span:nth-child(4)::before { content:"퇴실 "; color:var(--muted); }
+}
+.ho-table:not(.ho-mlist) .ho-tr { grid-template-columns:52px 1.1fr .8fr 1.1fr 1.4fr 1.6fr; }
+.ho-tr > span { white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+.ho-next { white-space:nowrap; }
+@media (max-width: 760px) { .ho-table:not(.ho-mlist) .ho-tr { grid-template-columns:40px 1fr auto; } }
