@@ -29,6 +29,7 @@ const baseName = (n) => String(n || "").replace(/\s*\(.*\)\s*$/, "").trim();
 const breedOf = (n) => (String(n || "").match(/\(([^)]+)\)\s*$/) || [])[1] || "";
 const STATUS = { booked: "예약 완료", in: "입실 · 투숙 중", out: "퇴실 완료", cancelled: "예약 취소" };
 const VAX = [["antibody", "항체검사"], ["corona", "코로나장염"], ["rabies", "광견병"], ["combo", "종합접종"], ["kennel", "켄넬코프"], ["flu", "신종 인플루엔자"]];
+const payTag = (b) => (b.prepaid ? `<em class="ho-paid">선결제</em>` : "");
 const kindTag = (k) => `<b class="hk ${k === "K" ? "k" : "h"}">${k === "K" ? "K" : "H"}</b>`;
 function toast(m, ms) { C?.toast?.(m, ms); }
 
@@ -214,7 +215,7 @@ async function openCustomer(id) {
   const bRow = (b) => `<button class="ho-bk ${b.status}" data-bk="${b.id}">
       ${kindTag(b.kind)}<span class="grow"><b>${esc(b.label)}</b> <small class="muted">${md(b.check_in)}${b.in_time ? " " + b.in_time : ""} → ${md(b.check_out)}${b.out_time ? " " + b.out_time : ""}</small>
       <br><small class="muted">${STATUS[b.status]}${svcText(b) ? " · " + svcText(b) : ""}${b.notes ? " · " + esc(b.notes) : ""}</small></span>
-      <b>${won(b.total)}</b></button>`;
+      <b>${won(b.total)} ${payTag(b)}</b></button>`;
   const { ov, close } = modal(`
     <div class="rc-head"><div class="grow"><b class="ho-title">${kindTag(c.kind)} ${esc(custLabel(c))}</b>
       <small class="muted">${esc(c.owner_name || "보호자 이름 없음")}${c.consult_date ? ` · 상담 ${c.consult_date}` : ""}</small></div>
@@ -516,7 +517,7 @@ function drawCalendar() {
         const list = staysOn(d).sort((a, b) => a.check_in.localeCompare(b.check_in) || a.label.localeCompare(b.label, "ko"));
         return `<div class="ho-day ${d.slice(0, 7) !== hs.month ? "other" : ""} ${d === t ? "today" : ""} ${dow(d) === 0 ? "sun" : dow(d) === 6 ? "sat" : ""}" data-day="${d}">
           <span class="ho-dn">${+d.slice(8)}</span><span class="ho-add" title="이 날 입실로 예약 추가">+ 예약</span>
-          ${list.map((b) => `<button class="ho-chip ${b.kind === "K" ? "k" : "h"} ${b.id === hs.highlight ? "hl" : ""} ${b.status}" data-bk="${b.id}" title="${esc(b.label)} ${md(b.check_in)}~${md(b.check_out)}">${b.check_in === d ? "▸" : ""}${b.kind} ${esc(b.label)}${b.check_out === d ? "◂" : ""}</button>`).join("")}
+          ${list.map((b) => `<button class="ho-chip ${b.kind === "K" ? "k" : "h"} ${b.id === hs.highlight ? "hl" : ""} ${b.status}" data-bk="${b.id}" title="${esc(b.label)} ${md(b.check_in)}~${md(b.check_out)}">${b.check_in === d ? "▸" : ""}${b.kind} ${esc(b.label)}${b.check_out === d ? "◂" : ""}${b.check_in === d || (d.slice(8) === "01" && b.check_in < d) ? `<small class="ho-fee-s">${b.prepaid ? `<em class="ho-paid">선결제</em>` : ""}${won(b.total)}</small>` : ""}</button>`).join("")}
         </div>`;
       }).join("")}
     </div>
@@ -526,12 +527,13 @@ function drawCalendar() {
       const list = hs.bookings.filter((b) => b.check_in.slice(0, 7) <= hs.month && b.check_out.slice(0, 7) >= hs.month)
         .sort((a, b) => a.check_in.localeCompare(b.check_in) || a.label.localeCompare(b.label, "ko"));
       return `<h3 class="ho-sub">${m}월 호텔링 예약 <small class="muted">${list.filter(active).length}건</small></h3>` + (list.length ? `<div class="ho-table ho-mlist">
-        <div class="ho-tr ho-th"><span>구분</span><span>강아지</span><span>입실</span><span>퇴실</span><span>숙박</span><span>상태</span></div>
+        <div class="ho-tr ho-th"><span>구분</span><span>강아지</span><span>입실</span><span>퇴실</span><span>숙박</span><span>정산</span><span>상태</span></div>
         ${list.map((b) => `<button class="ho-tr ${b.status} ${b.id === hs.highlight ? "hl" : ""}" data-bk="${b.id}">
           <span>${kindTag(b.kind)}</span><span class="ho-pet">${esc(b.label)}</span>
           <span>${md(b.check_in)}${b.in_time ? ` ${b.in_time}` : ""}</span>
           <span>${md(b.check_out)}${b.out_time ? ` ${b.out_time}` : ""}</span>
           <span class="muted">${nightsOf(b.check_in, b.check_out).length}박</span>
+          <span class="ho-money">${won(b.total)} ${payTag(b)}</span>
           <span class="muted">${STATUS[b.status]}</span></button>`).join("")}</div>` : `<p class="muted small">이번 달 예약이 없어요.</p>`);
     })()}`;
   $$("[data-mv]", main).forEach((b) => b.addEventListener("click", () => {
@@ -601,6 +603,7 @@ function openBooking(bk, preset = {}) {
       <label class="ho-line q-hide">메모<textarea id="bk-notes" rows="2">${esc(b.notes || "")}</textarea></label>
       <h3>요금 내역</h3>
       <div id="bk-fee" class="ho-fee"></div>
+      <label class="ho-prepaid"><input type="checkbox" id="bk-prepaid" ${b.prepaid ? "checked" : ""}> 💳 선결제 완료</label>
     </div>
     <div class="rc-foot">
       ${bk ? `<button class="btn ghost sm danger" id="bk-del">삭제</button>${b.status !== "cancelled" ? `<button class="btn ghost sm" id="bk-cancel">예약 취소</button>` : ""}` : ""}
@@ -649,6 +652,7 @@ function openBooking(bk, preset = {}) {
     b.check_in = $("#bk-in", ov).value; b.check_out = $("#bk-out", ov).value;
     b.in_time = $("#bk-intime", ov).value; b.out_time = $("#bk-outtime", ov).value;
     b.status = $("#bk-status", ov).value; b.notes = $("#bk-notes", ov).value.trim();
+    b.prepaid = $("#bk-prepaid", ov).checked;
   };
   const fee = () => calcFee(b);
   // 목욕·미용 금액은 몸무게마다 달라서 직접 적음 → 참고용으로 몸무게 보여 줌
@@ -738,7 +742,7 @@ function openBooking(bk, preset = {}) {
     const s = settle(calc, b.manual, b.extra_cost, b.discount);
     const row = {
       customer_id: b.customer_id, kind: b.kind, label: b.label, check_in: b.check_in, in_time: b.in_time || null,
-      check_out: b.check_out, out_time: b.out_time || null, pickup: !!b.pickup, drop_off: !!b.drop_off, status: b.status, services: b.services,
+      check_out: b.check_out, out_time: b.out_time || null, pickup: !!b.pickup, drop_off: !!b.drop_off, status: b.status, services: b.services, prepaid: !!b.prepaid,
       notes: b.notes || null, calc, manual: b.manual, extra_cost: b.extra_cost || 0, discount: b.discount || 0, total: s.total,
       updated_at: new Date().toISOString(),
     };

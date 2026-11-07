@@ -803,3 +803,18 @@ button.ho-tr:hover { background:#faf8f3; }
 .ho-day:hover { background:#fffbe6; }
 .ho-day:active { background:#fff4c2; }
 @media (hover: none) { .ho-add { display:none; } }
+
+/* 캘린더 정산 요금·선결제 */
+.ho-chip { display:flex; flex-direction:column; align-items:flex-start; }
+.ho-fee-s { display:flex; align-items:center; gap:4px; font-size:10px; font-weight:600; opacity:.8; }
+.ho-paid { font-style:normal; font-size:10px; font-weight:800; background:#15803d; color:#fff; border-radius:4px; padding:0 5px; line-height:1.5; }
+.ho-money { font-weight:700; display:inline-flex; align-items:center; gap:6px; }
+.ho-mlist .ho-tr { grid-template-columns:52px 1.2fr 1.1fr 1.1fr .5fr 1.1fr .9fr; }
+.ho-prepaid { display:inline-flex !important; align-items:center; gap:8px; margin-top:10px; font-size:15px !important; color:var(--ink) !important; background:#e9f7ee; border-radius:12px; padding:10px 14px; cursor:pointer; }
+.ho-prepaid input { width:20px !important; height:20px; margin:0 !important; accent-color:#15803d; }
+@media (max-width: 760px) {
+  .ho-mlist .ho-tr { grid-template-areas:"k pet st" "k in out" "k pay pay"; }
+  .ho-mlist .ho-tr > span:nth-child(6) { grid-area:pay; display:flex; font-size:13px; }
+  .ho-mlist .ho-tr > span:nth-child(7) { grid-area:st; display:block; font-size:12px; }
+  .ho-fee-s { font-size:9px; }
+}
