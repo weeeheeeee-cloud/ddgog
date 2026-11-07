@@ -477,12 +477,19 @@ $$(".date-row [data-shift]").forEach((b) => b.addEventListener("click", () => se
 $("#today").addEventListener("click", () => setDay(kstToday()));
 $$(".tabs button").forEach((b) => b.addEventListener("click", () => { state.tab = b.dataset.tab; state.sel = null; renderSelBar(); render(); }));
 
+const HOTEL_V = Date.now();
 async function render() {
   $$(".tabs button").forEach((b) => b.classList.toggle("on", b.dataset.tab === state.tab));
+  document.querySelector(".layout")?.classList.toggle("wide", state.tab === "hotel");
+  $("#app")?.classList.toggle("tab-hotel", state.tab === "hotel");
   $$(".tab").forEach((s) => s.classList.toggle("hidden", s.id !== "tab-" + state.tab));
   await Promise.all([loadDogs(), loadAttendance(), loadPractice()]);
   if (state.tab === "photos") { await loadPhotos(); await renderPhotos(); }
   else if (state.tab === "roster") renderRoster();
+  else if (state.tab === "hotel") {
+    const m = await import(`./hotel.js?v=${HOTEL_V}`);
+    await m.renderHotel({ sb, toast, signed, esc, dogs: state.dogs });
+  }
   else if (state.tab === "admin" && state.owner === false) { state.tab = "photos"; return render(); }
   else if (state.tab === "admin") { renderStaff(); renderUpLinks(); renderDdLinks(); loadPractice(); }
   renderSide();
