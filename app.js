@@ -466,7 +466,7 @@ async function render() {
   await Promise.all([loadDogs(), loadAttendance(), loadPractice()]);
   if (state.tab === "photos") { await loadPhotos(); await renderPhotos(); }
   else if (state.tab === "roster") renderRoster();
-  else if (state.tab === "admin") { renderUpLinks(); renderDdLinks(); loadPractice(); }
+  else if (state.tab === "admin") { renderStaff(); renderUpLinks(); renderDdLinks(); loadPractice(); }
   renderSide();
 }
 
@@ -3017,6 +3017,70 @@ $("#up-new").addEventListener("click", async () => {
   if (error) { toast("만들지 못했어요"); return; }
   await renderUpLinks();
   try { await navigator.clipboard.writeText(upUrl(token)); toast("새 링크를 만들고 복사했어요"); } catch { /* 무시 */ }
+});
+
+// ---- 직원 계정 (최고 관리자만)
+async function staffCall(body) {
+  const { data, error } = await sb.functions.invoke("staff-admin", { body });
+  if (error) {
+    let msg = "잠시 후 다시 해 주세요";
+    try { msg = (await error.context?.json())?.error || msg; } catch { /* 무시 */ }
+    throw new Error(msg);
+  }
+  return data;
+}
+async function renderStaff() {
+  const card = $("#staff-card");
+  if (!card) return;
+  const { data: { user } } = await sb.auth.getUser();
+  const { data: me } = await sb.from("staff_roles").select("role").eq("user_id", user?.id).maybeSingle();
+  if (me?.role !== "owner") { card.classList.add("hidden"); return; }
+  card.classList.remove("hidden");
+  const box = $("#staff-list");
+  let list;
+  try { ({ users: list } = await staffCall({ action: "list" })); }
+  catch (e) { box.innerHTML = `<p class="err">${esc(e.message)}</p>`; return; }
+  const when = (t) => t ? new Date(t).toLocaleString("ko-KR", { month: "numeric", day: "numeric", hour: "numeric", minute: "2-digit" }) : "아직 로그인 안 함";
+  box.innerHTML = list.map((u) => `<div class="staff-row">
+      <div class="grow"><b>${esc(u.name || u.email.split("@")[0])}</b>${u.role === "owner" ? ` <span class="tag-owner">최고 관리자</span>` : ""}${u.id === user.id ? ` <small class="muted">(나)</small>` : ""}
+        <br><small class="muted">${esc(u.email)} · 마지막 로그인 ${when(u.last_sign_in_at)}</small></div>
+      <button class="btn ghost mini" data-st-name="${u.id}">이름</button>
+      <button class="btn ghost mini" data-st-pw="${u.id}">비밀번호</button>
+      ${u.role === "owner" ? "" : `<button class="btn ghost mini danger" data-st-del="${u.id}">빼기</button>`}
+    </div>`).join("");
+  const find = (id) => list.find((u) => u.id === id);
+  const label = (u) => u.name || u.email;
+  $$("[data-st-name]", box).forEach((b) => b.addEventListener("click", async () => {
+    const u = find(b.dataset.stName);
+    const v = prompt(`${u.email}의 이름`, u.name || "");
+    if (v === null) return;
+    try { await staffCall({ action: "rename", user_id: u.id, name: v }); renderStaff(); } catch (e) { toast(e.message); }
+  }));
+  $$("[data-st-pw]", box).forEach((b) => b.addEventListener("click", async () => {
+    const u = find(b.dataset.stPw);
+    const v = prompt(`${label(u)}의 새 비밀번호 (6자 이상)\n바꾼 뒤 직원에게 알려 주세요.`, "");
+    if (v === null) return;
+    if (v.length < 6) { toast("6자 이상으로 정해 주세요"); return; }
+    try { await staffCall({ action: "reset", user_id: u.id, password: v }); toast(`${label(u)} 비밀번호를 바꿨어요`, 3500); } catch (e) { toast(e.message, 3500); }
+  }));
+  $$("[data-st-del]", box).forEach((b) => b.addEventListener("click", async () => {
+    const u = find(b.dataset.stDel);
+    if (!confirm(`${label(u)}(${u.email}) 계정을 뺄까요?\n이 계정으로는 더 이상 로그인할 수 없어요. 사진과 명단은 그대로 남아요.`)) return;
+    try { await staffCall({ action: "remove", user_id: u.id }); toast(`${label(u)} 계정을 뺐어요`); renderStaff(); } catch (e) { toast(e.message, 3500); }
+  }));
+}
+$("#staff-new")?.addEventListener("submit", async (e) => {
+  e.preventDefault();
+  const name = $("#sn-name").value.trim(), email = $("#sn-email").value.trim(), password = $("#sn-pw").value;
+  if (password.length < 6) { toast("비밀번호는 6자 이상으로 정해 주세요"); return; }
+  const btn = e.submitter; if (btn) btn.disabled = true;
+  try {
+    await staffCall({ action: "create", name, email, password });
+    $("#sn-name").value = ""; $("#sn-email").value = ""; $("#sn-pw").value = "";
+    toast(`${name || email} 계정을 만들었어요. 이메일과 처음 비밀번호를 알려 주세요`, 4500);
+    renderStaff();
+  } catch (err) { toast(err.message, 3500); }
+  if (btn) btn.disabled = false;
 });
 
 // ---- 내 비밀번호 바꾸기
