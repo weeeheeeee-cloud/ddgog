@@ -517,11 +517,11 @@ function drawCalendar() {
         const list = staysOn(d).sort((a, b) => a.check_in.localeCompare(b.check_in) || a.label.localeCompare(b.label, "ko"));
         return `<div class="ho-day ${d.slice(0, 7) !== hs.month ? "other" : ""} ${d === t ? "today" : ""} ${dow(d) === 0 ? "sun" : dow(d) === 6 ? "sat" : ""}" data-day="${d}">
           <span class="ho-dn">${+d.slice(8)}</span><span class="ho-add" title="이 날 입실로 예약 추가">+ 예약</span>
-          ${list.map((b) => `<button class="ho-chip ${b.kind === "K" ? "k" : "h"} ${b.id === hs.highlight ? "hl" : ""} ${b.status}" data-bk="${b.id}" title="${esc(b.label)} ${md(b.check_in)}~${md(b.check_out)}">${b.check_in === d ? "▸" : ""}${b.kind} ${esc(b.label)}${b.check_out === d ? "◂" : ""}${b.check_in === d || (d.slice(8) === "01" && b.check_in < d) ? `<small class="ho-fee-s">${b.prepaid ? `<em class="ho-paid">선결제</em>` : ""}${won(b.total)}</small>` : ""}</button>`).join("")}
+          ${list.map((b) => `<button class="ho-chip ${b.kind === "K" ? "k" : "h"} ${b.id === hs.highlight ? "hl" : ""} ${b.status}" data-bk="${b.id}" title="${esc(b.label)} ${md(b.check_in)}~${md(b.check_out)}${svcText(b) ? ` · ${esc(svcText(b))}` : ""}"><span class="ho-cl">${b.check_in === d ? "▸" : ""}${b.kind} ${esc(b.label)}${b.check_out === d ? "◂" : ""}${svcText(b) ? `<i class="ho-bang">!</i>` : ""}</span>${b.check_out === d ? `<small class="ho-fee-s">${b.prepaid ? `<em class="ho-paid">선결제</em>` : ""}${won(b.total)}</small>` : ""}</button>`).join("")}
         </div>`;
       }).join("")}
     </div>
-    <p class="small muted"><b>날짜를 누르면 그날 입실로 새 예약</b>을 추가해요 · ▸ 입실하는 날 · ◂ 퇴실하는 날</p>
+    <p class="small muted"><b>날짜를 누르면 그날 입실로 새 예약</b>을 추가해요 · ▸ 입실하는 날 · ◂ 퇴실하는 날(요금 표시) · <i class="ho-bang">!</i> 미용·픽드랍 등 추가 서비스 있음</p>
     ${(() => {
       const end = addDays(days[weeks * 7 - 1], 0);
       const list = hs.bookings.filter((b) => b.check_in.slice(0, 7) <= hs.month && b.check_out.slice(0, 7) >= hs.month)

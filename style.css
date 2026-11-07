@@ -818,3 +818,7 @@ button.ho-tr:hover { background:#faf8f3; }
   .ho-mlist .ho-tr > span:nth-child(7) { grid-area:st; display:block; font-size:12px; }
   .ho-fee-s { font-size:9px; }
 }
+
+.ho-cl { display:flex; align-items:center; gap:3px; max-width:100%; overflow:hidden; text-overflow:ellipsis; }
+.ho-bang { display:inline-flex; align-items:center; justify-content:center; flex:none; width:13px; height:13px; border-radius:50%; background:#dc2626; color:#fff; font-style:normal; font-size:10px; font-weight:900; line-height:1; }
+@media (max-width:700px){ .ho-bang { width:11px; height:11px; font-size:8px; } }
