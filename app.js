@@ -485,7 +485,7 @@ async function renderPhotos() {
        <span>분류 완료 <b>${done.length}</b></span>
        ${unsorted.length ? `<span class="warn">분류 안 됨 <b>${unsorted.length}</b></span>` : ""}
        ${pending.length && !state.busy ? `<button id="resume" class="btn primary sm">남은 ${pending.length}장 분류하기</button>` : ""}
-       ${done.length ? `<button id="save-all" class="btn primary sm">📥 전체 다운로드</button>` : ""}
+       ${done.length || unsorted.length ? `<button id="save-all" class="btn primary sm">📥 전체 다운로드</button>` : ""}
        ${done.length && state.day === kstToday() && !state.practice ? `<button id="dd-push" class="btn sm dd-push-btn">📮 다이얼독 알림장</button>` : ""}`
     : "";
   $("#dd-push")?.addEventListener("click", () => {
@@ -548,7 +548,7 @@ async function renderPhotos() {
   (unsorted.length ? `<div class="dog-group unsorted" data-list="unsorted">
       <div class="dog-head"><span class="avatar q">?</span>
         <div class="grow"><b>모르는 아이·분류 안 된 사진 ${unsorted.length}장</b><small class="muted">처음 보는 아이, 뺀 사진, AI가 확신하지 못한 사진을 한곳에 모았어요. 비슷한 사진끼리 묶어 두었으니 묶음째 선택해서 한 번에 넣을 수 있어요</small></div>
-        ${selBtn("unsorted")}${state.busy ? "" : `<button id="reclassify" class="btn ghost sm">AI로 다시 분류</button>`}</div>
+        ${selBtn("unsorted")}${state.busy ? "" : `<button id="reclassify" class="btn ghost sm">AI로 다시 분류</button>`}<button id="save-unsorted" class="btn ghost sm">📥 다운로드</button></div>
       <div class="tile-size">사진 크기
         ${[["s", "작게"], ["m", "보통"], ["l", "크게"], ["xl", "아주 크게"]].map(([k, t]) => `<button class="btn ${state.tileSize === k ? "primary" : "ghost"} mini" data-tile="${k}">${t}</button>`).join("")}
         <small class="muted">비슷하게 생긴 사진끼리 붙여서 보여줘요</small></div>
@@ -614,6 +614,7 @@ async function renderPhotos() {
   // 그룹이 늘어난 뒤 다시 돌리면 대부분 자리를 찾아감
   // 바로 넣지 않고, 어디로 갈지 먼저 보여준 뒤 확인하고 넣음
   $("#reclassify")?.addEventListener("click", () => previewReclassify(unsorted));
+  $("#save-unsorted")?.addEventListener("click", (e) => saveAll(e.currentTarget, true));
   $$("[data-rename]", box).forEach((b) => b.addEventListener("click", async () => {
     if (await renameDog(dogById(b.dataset.rename))) renderPhotos();
   }));
@@ -2398,9 +2399,11 @@ async function saveFolder() {
   return picked;
 }
 
-async function saveAll(btn) {
+const UNSORTED_DIR = { id: "__unsorted", name: "분류 안 됨" };
+const isUnsortedPhoto = (p) => p.status === "review" || p.status === "error" || (p.status === "done" && !p.dog_ids.some((d) => dogById(d)));
+async function saveAll(btn, onlyUnsorted = false) {
   const groups = new Map();
-  state.photos.filter((p) => p.status === "done").forEach((p) => p.dog_ids.forEach((d) => {
+  if (!onlyUnsorted) state.photos.filter((p) => p.status === "done").forEach((p) => p.dog_ids.forEach((d) => {
     const dog = dogById(d);
     if (!dog) return;
     if (!groups.has(d)) groups.set(d, []);
@@ -2410,6 +2413,11 @@ async function saveAll(btn) {
     const { shown, extra } = splitSimilar(list);
     groups.set(id, state.expanded.has(id) ? [...shown, ...extra] : shown);
   }
+  // 분류 안 된 사진은 '분류 안 됨' 폴더로
+  const loose = state.photos.filter(isUnsortedPhoto);
+  if (loose.length) groups.set(UNSORTED_DIR.id, loose);
+  if (!groups.size) { toast("받을 사진이 없어요"); return; }
+  const dogOf = (id) => (id === UNSORTED_DIR.id ? UNSORTED_DIR : dogById(id));
   const label = btn.textContent;
   btn.disabled = true;
   try {
@@ -2425,7 +2433,7 @@ async function saveAll(btn) {
     const tick = () => { n++; btn.textContent = `저장 중 ${n}/${total}`; progress("📥 다운로드 중… 창을 닫지 마세요", n, total, `새로 받는 사진 ${added}장 · 이미 받은 사진 ${kept}장 건너뜀`); };
     progress("📥 다운로드 중… 창을 닫지 마세요", 0, total);
     for (const [id, photos] of groups) {
-      const dog = dogById(id);
+      const dog = dogOf(id);
       if (root) {
         const r = await syncFolder(await root.getDirectoryHandle(safeName(dog.name), { create: true }), dog, photos,
           (skipped) => { skipped ? kept++ : added++; tick(); });
@@ -2436,9 +2444,9 @@ async function saveAll(btn) {
     }
     if (zip) {
       downloadBlob(await zip.generateAsync({ type: "blob" }), `${state.day}.zip`);
-      doneBanner(`${state.day}.zip · 강아지 ${groups.size}마리, ${total}장`);
+      doneBanner(`${state.day}.zip · ${onlyUnsorted ? "분류 안 된 사진" : `강아지 ${groups.size - (loose.length ? 1 : 0)}마리`}, ${total}장${loose.length && !onlyUnsorted ? ` (분류 안 됨 ${loose.length}장 포함)` : ""}`);
     } else {
-      doneBanner(`'${window.__saveDirName || "다운로드"}/${state.day}' 폴더 · 강아지 ${groups.size}마리 · 새로 받은 사진 ${added}장${kept ? ` (이미 받은 ${kept}장은 건너뜀)` : ""}`);
+      doneBanner(`'${window.__saveDirName || "다운로드"}/${state.day}' 폴더 · ${onlyUnsorted ? "'분류 안 됨' 폴더" : `강아지 ${groups.size - (loose.length ? 1 : 0)}마리${loose.length ? ` + '분류 안 됨' ${loose.length}장` : ""}`} · 새로 받은 사진 ${added}장${kept ? ` (이미 받은 ${kept}장은 건너뜀)` : ""}`);
     }
   } catch (err) {
     if (err?.name !== "AbortError") toast("저장하지 못했어요. 다시 시도해 주세요.");
