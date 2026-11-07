@@ -58,7 +58,8 @@
   .prog { display:none; margin-top:26px; background:#fff; border-radius:24px; padding:20px; }
   .prog.on { display:block; }
   .prog-top { display:flex; align-items:flex-end; justify-content:space-between; gap:10px; margin-bottom:14px; }
-  .msg { font-size:14px; font-weight:700; color:var(--muted); }
+  .msg { font-size:14px; font-weight:700; color:var(--muted); line-height:1.35; }
+  .msg .sub { display:block; font-size:12px; font-weight:600; color:#9aa0a8; margin-top:3px; }
   .count { font-family:var(--display); font-weight:900; font-size:34px; color:var(--navy); line-height:1; font-variant-numeric:tabular-nums; }
   .count small { font-family:Pretendard, sans-serif; font-size:14px; font-weight:700; color:var(--muted); margin-left:2px; }
   .bar { height:14px; background:var(--cream); border-radius:99px; overflow:hidden; }
@@ -114,7 +115,7 @@
 
   <ul class="tips">
     <li>같은 사진을 두 번 올려도 한 장만 들어가요.</li>
-    <li>다 올라갈 때까지 이 화면을 닫지 말아 주세요.</li>
+    <li>‘사진 준비 중’이 끝나면 다른 앱을 봐도 돼요. 돌아오면 이어서 올려요.</li>
     <li>원장님 화면에서 아이별로 자동 분류돼요.</li>
   </ul>
   <div class="foot">DAENGGYEOLGAE · YONGIN</div>
@@ -228,64 +229,134 @@ $("#file").addEventListener("change", (e) => {
   e.target.value = "";
   if (files.length) handleFiles(files);
 });
-async function handleFiles(files) {
-  $("#done").style.display = "none"; $("#err").style.display = "none";
-  $("#pick-label").classList.add("busy");
+
+/* ---------- 올릴 사진을 휴대폰에 먼저 저장해 두고 차례로 올리기 ----------
+   화면을 벗어나면 휴대폰이 잠시 멈추게 하지만, 돌아오면(또는 링크를 다시 열면) 멈춘 데서 이어서 올림 */
+const DB = new Promise((res, rej) => {
+  const r = indexedDB.open("ddg-upload", 1);
+  r.onupgradeneeded = () => r.result.createObjectStore("q", { keyPath: "id" });
+  r.onsuccess = () => res(r.result); r.onerror = () => rej(r.error);
+});
+async function q(mode, fn) {
+  const db = await DB;
+  return new Promise((res, rej) => {
+    const tx = db.transaction("q", mode); const st = tx.objectStore("q");
+    const out = fn(st);
+    tx.oncomplete = () => res(out?.result ?? out); tx.onerror = () => rej(tx.error); tx.onabort = () => rej(tx.error);
+  });
+}
+const qPut = (item) => q("readwrite", (st) => st.put(item));
+const qDel = (ids) => q("readwrite", (st) => ids.forEach((id) => st.delete(id)));
+const qAll = async () => (await q("readonly", (st) => st.getAll())).filter((x) => x.token === token);
+
+const run = { active: false, total: 0, done: 0, added: 0, skipped: 0, failed: 0, prepping: 0 };
+let wake = null;
+async function keepAwake() { try { if ("wakeLock" in navigator && !wake && document.visibilityState === "visible") { wake = await navigator.wakeLock.request("screen"); wake.addEventListener("release", () => (wake = null)); } } catch { /* 지원 안 함 */ } }
+function draw() {
+  const total = Math.max(run.total, 1);
   $("#prog").classList.add("on");
-  $("#bar").style.width = "0";
-  showThumbs(files);
-  let n = 0, added = 0, skipped = 0, failed = 0;
-  // 사진 지문 모델 준비 (처음 한 번만 다운로드, 실패해도 업로드는 계속)
-  let fpReady = false;
-  try { $("#msg").textContent = "준비 중… (처음 한 번만 조금 걸려요)"; await loadFingerprint(); fpReady = true; } catch { /* 지문 없이 진행 */ }
-  const tick = () => {
-    $("#bar").style.width = `${(n / files.length) * 100}%`;
-    $("#msg").textContent = "올리는 중…";
-    $("#count").innerHTML = `${n}<small>/ ${files.length}장</small>`;
-  };
-  tick();
-  // 20장씩 묶어서: 주소 받기 → 올리기 → 등록
-  const chunks = [];
-  for (let i = 0; i < files.length; i += 20) chunks.push(files.slice(i, i + 20));
-  for (const chunk of chunks) {
-    try {
-      const prepared = [];
-      await pool(chunk, 3, async (file) => {
-        try {
-          const [full, small, taken] = await Promise.all([resize(file, 1600, 0.85), resize(file, 640, 0.8), exifTime(file)]);
-          const st = await imageStats(small).catch(() => ({}));
-          const vec = fpReady ? await fingerprint(small) : null;
-          prepared.push({ id: crypto.randomUUID(), full, small, taken_at: taken, vec, ...st });
-        } catch { failed++; n++; tick(); }
-      });
-      if (!prepared.length) continue;
-      const { urls } = await call({ action: "sign", items: prepared.map((p) => ({ id: p.id })) });
-      const ok = [];
-      await pool(prepared, 3, async (p) => {
-        const u = urls.find((x) => x.id === p.id);
-        const a = await sb.storage.from("photos").uploadToSignedUrl(u.fullPath, u.full, p.full, { contentType: "image/jpeg" });
-        const b = await sb.storage.from("photos").uploadToSignedUrl(u.thumbPath, u.thumb, p.small, { contentType: "image/jpeg" });
-        if (a.error || b.error) failed++; else ok.push(p);
-        n++; tick();
-      });
-      if (ok.length) {
-        const r = await call({ action: "done", items: ok.map(({ id, taken_at, phash, sharp, vec }) => ({ id, taken_at, phash, sharp, vec })) });
-        added += r.added; skipped += r.skipped;
-      }
-    } catch (err) {
-      failed += chunk.length; n = Math.min(files.length, n + chunk.length); tick();
-      showErr(err.message || "올리지 못한 사진이 있어요");
-    }
-  }
+  $("#pick-label").classList.add("busy");
+  $("#bar").style.width = `${(run.done / total) * 100}%`;
+  $("#msg").innerHTML = run.prepping ? `사진 준비 중… <small class="sub">이 단계만 화면을 켜 두세요</small>`
+    : `올리는 중… <small class="sub">다른 앱을 봐도 돼요. 돌아오면 이어서 올려요</small>`;
+  $("#count").innerHTML = `${run.done}<small>/ ${run.total}장</small>`;
+}
+function finish() {
   $("#bar").style.width = "100%";
   $("#prog").classList.remove("on");
-  $("#done").innerHTML = `<div class="big"><i><svg viewBox="0 0 24 24"><path d="M5 12.5l4.5 4.5L19 7.5"/></svg></i>${added}장 올렸어요</div>`
+  $("#done").innerHTML = `<div class="big"><i><svg viewBox="0 0 24 24"><path d="M5 12.5l4.5 4.5L19 7.5"/></svg></i>${run.added}장 올렸어요</div>`
     + `<small>더 올릴 사진이 있으면 위에서 다시 골라 주세요</small>`
-    + (skipped ? `<small>이미 올라온 똑같은 사진 ${skipped}장은 건너뛰었어요</small>` : "")
-    + (failed ? `<small class="warn">${failed}장은 올리지 못했어요. 그 사진만 다시 골라 올려 주세요</small>` : "");
+    + (run.skipped ? `<small>이미 올라온 똑같은 사진 ${run.skipped}장은 건너뛰었어요</small>` : "")
+    + (run.failed ? `<small class="warn">${run.failed}장은 올리지 못했어요. 그 사진만 다시 골라 올려 주세요</small>` : "");
   $("#done").style.display = "block";
   $("#pick-label").classList.remove("busy");
+  Object.assign(run, { total: 0, done: 0, added: 0, skipped: 0, failed: 0 });
+  wake?.release?.(); wake = null;
 }
+
+// 1단계: 고른 사진을 줄여서 휴대폰에 저장 (빠름). 저장되면 화면을 벗어나도 사진을 다시 고를 필요 없음
+async function handleFiles(files) {
+  $("#done").style.display = "none"; $("#err").style.display = "none";
+  showThumbs(files);
+  run.total += files.length; run.prepping += files.length;
+  keepAwake(); draw();
+  await pool(files, 4, async (file) => {
+    try {
+      const [full, small, taken] = await Promise.all([resize(file, 1600, 0.85), resize(file, 640, 0.8), exifTime(file)]);
+      await qPut({ id: crypto.randomUUID(), token, full, small, taken_at: taken, tries: 0, at: Date.now() });
+    } catch { run.failed++; run.done++; }
+    run.prepping--; draw();
+    upload(); // 준비되는 대로 바로 올리기 시작
+  });
+}
+
+// 2단계: 저장된 사진을 올리고 등록 (멈췄다가 돌아오면 이어서)
+let fpReady = null;
+async function upload() {
+  if (run.active) return;
+  run.active = true;
+  try {
+    if (fpReady === null) { fpReady = false; try { await loadFingerprint(); fpReady = true; } catch { /* 지문 없이 진행 */ } }
+    for (;;) {
+      const all = (await qAll()).sort((x, y) => x.at - y.at);
+      const next = all.filter((x) => !x.busy).slice(0, 10);
+      if (!next.length) break;
+      if (!run.total) { run.total = all.length; }
+      draw();
+      let urls;
+      try { ({ urls } = await call({ action: "sign", items: next.map((p) => ({ id: p.id })) })); }
+      catch (e) { if (!navigator.onLine || document.hidden) break; throw e; }
+      const ok = [];
+      await pool(next, 4, async (p) => {
+        const u = urls.find((x) => x.id === p.id);
+        const put = async (path, tk, blob) => {
+          const r = await sb.storage.from("photos").uploadToSignedUrl(path, tk, blob, { contentType: "image/jpeg" });
+          if (r.error && !/exist|duplicate/i.test(r.error.message || "")) throw r.error;
+        };
+        try {
+          await put(u.fullPath, u.full, p.full);
+          await put(u.thumbPath, u.thumb, p.small);
+          const st = await imageStats(p.small).catch(() => ({}));
+          const vec = fpReady ? await fingerprint(p.small).catch(() => null) : null;
+          ok.push({ id: p.id, taken_at: p.taken_at, vec, ...st });
+        } catch {
+          // 화면을 벗어나서 끊긴 거면 다음에 다시. 여러 번 실패하면 포기
+          if (document.hidden || !navigator.onLine) return;
+          p.tries = (p.tries || 0) + 1;
+          if (p.tries >= 4) { await qDel([p.id]); run.failed++; run.done++; draw(); }
+          else await qPut(p);
+        }
+      });
+      if (ok.length) {
+        const r = await call({ action: "done", items: ok });
+        run.added += r.added; run.skipped += r.skipped;
+        await qDel(ok.map((x) => x.id));
+        run.done += ok.length; draw();
+      }
+      if (document.hidden) break; // 백그라운드에서 멈추면 돌아왔을 때 이어서
+    }
+  } catch (err) {
+    showErr((err && err.message) || "잠시 연결이 끊겼어요. 돌아오면 이어서 올려요");
+  } finally {
+    run.active = false;
+  }
+  const left = (await qAll()).length;
+  if (!left && !run.prepping && run.total) finish();
+  else if (left && !document.hidden && navigator.onLine) setTimeout(upload, 3000);
+}
+
+// 돌아오면 이어서 올리기
+document.addEventListener("visibilitychange", () => { if (!document.hidden) { $("#err").style.display = "none"; keepAwake(); upload(); } });
+addEventListener("online", () => upload());
+// 링크를 다시 열었을 때 남은 사진이 있으면 이어서
+if (token) qAll().then((left) => {
+  if (!left.length) return;
+  run.total = left.length;
+  $("#err").style.display = "none";
+  draw();
+  $("#msg").innerHTML = `지난번에 다 못 올린 사진 ${left.length}장을 이어서 올릴게요`;
+  upload();
+}).catch(() => {});
 </script>
 </body>
 </html>
