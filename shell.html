@@ -13,12 +13,27 @@
   </div>
 </section>
 
+<!-- 내 비밀번호 바꾸기 (직원 누구나) -->
+<div id="pw-dialog" class="rc-overlay hidden">
+      <div class="rc-box pw-box">
+        <div class="rc-head"><b class="grow">🔑 내 비밀번호 바꾸기</b><button class="btn ghost sm" id="pw-close" type="button">닫기</button></div>
+        <div class="rc-body">
+        <p class="muted small">지금 로그인한 계정(<b id="me-email"></b>)의 비밀번호를 바꿔요. 6자 이상으로 정해 주세요.</p>
+        <form id="pw-form" class="row" style="flex-wrap:wrap;gap:8px">
+          <input id="pw-new" type="password" autocomplete="new-password" placeholder="새 비밀번호" minlength="6" required style="flex:1;min-width:160px">
+          <input id="pw-new2" type="password" autocomplete="new-password" placeholder="한 번 더" minlength="6" required style="flex:1;min-width:160px">
+          <button class="btn primary" type="submit">바꾸기</button>
+        </form>
+      </div>
+      </div>
+</div>
+
 <!-- 앱 -->
 <div id="app" class="hidden">
   <header class="top">
     <div class="top-row">
       <span class="logo"><img src="logo-180.png" alt=""><b>사진함</b></span>
-      <button id="logout" class="link">로그아웃</button>
+      <span class="top-links"><button id="my-pw" class="link">비밀번호</button><button id="logout" class="link">로그아웃</button></span>
     </div>
     <div class="date-row">
       <button class="icon" data-shift="-1" aria-label="전날">‹</button>
@@ -29,7 +44,7 @@
     <nav class="tabs">
       <button data-tab="photos" class="on">사진</button>
       <button data-tab="roster">명단</button>
-      <button data-tab="admin">관리</button>
+      <button data-tab="admin" id="tab-admin-btn" class="hidden">관리</button>
     </nav>
   </header>
 
@@ -152,16 +167,6 @@
           <input id="sn-pw" type="text" placeholder="처음 비밀번호 (6자 이상)" minlength="6" required autocomplete="off">
           <button class="btn primary" type="submit">초대하기</button>
           <p class="muted small" style="margin:0">만든 뒤 이메일과 처음 비밀번호를 직원에게 알려 주세요. 직원은 로그인 후 관리 탭에서 비밀번호를 바꿀 수 있어요.</p>
-        </form>
-      </div>
-
-      <div class="card">
-        <h2>🔑 내 비밀번호 바꾸기</h2>
-        <p class="muted small">지금 로그인한 계정(<b id="me-email"></b>)의 비밀번호를 바꿔요. 6자 이상으로 정해 주세요.</p>
-        <form id="pw-form" class="row" style="flex-wrap:wrap;gap:8px">
-          <input id="pw-new" type="password" autocomplete="new-password" placeholder="새 비밀번호" minlength="6" required style="flex:1;min-width:160px">
-          <input id="pw-new2" type="password" autocomplete="new-password" placeholder="한 번 더" minlength="6" required style="flex:1;min-width:160px">
-          <button class="btn primary" type="submit">바꾸기</button>
         </form>
       </div>
 

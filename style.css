@@ -618,3 +618,8 @@ button.known:hover { box-shadow:0 0 0 2px var(--navy) inset; }
 .staff-new #sn-pw { grid-column:1 / -1; }
 .btn.danger { color:#b91c1c; }
 @media (max-width:480px) { .staff-new { grid-template-columns:1fr; } }
+
+/* 상단 비밀번호·로그아웃 */
+.top-links { display:inline-flex; gap:6px; }
+.pw-box { width:min(460px,100%); }
+.rc-overlay.hidden { display:none; }

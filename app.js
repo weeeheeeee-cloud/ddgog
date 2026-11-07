@@ -377,11 +377,28 @@ $("#login-form").addEventListener("submit", async (e) => {
   else startApp();
 });
 $("#logout").addEventListener("click", () => sb.auth.signOut());
+$("#my-pw").addEventListener("click", async () => {
+  const { data } = await sb.auth.getUser();
+  $("#me-email").textContent = data?.user?.email || "";
+  $("#pw-dialog").classList.remove("hidden");
+  $("#pw-new").focus();
+});
+$("#pw-close").addEventListener("click", () => $("#pw-dialog").classList.add("hidden"));
+$("#pw-dialog").addEventListener("click", (e) => { if (e.target.id === "pw-dialog") $("#pw-dialog").classList.add("hidden"); });
 
 let started = false;
+// 관리 탭은 최고 관리자만
+async function applyRole() {
+  const { data: { user } } = await sb.auth.getUser();
+  const { data: me } = user ? await sb.from("staff_roles").select("role").eq("user_id", user.id).maybeSingle() : { data: null };
+  state.owner = me?.role === "owner";
+  $("#tab-admin-btn").classList.toggle("hidden", !state.owner);
+  if (!state.owner && state.tab === "admin") { state.tab = "photos"; await render(); }
+}
 async function startApp() {
   $("#login").classList.add("hidden");
   $("#app").classList.remove("hidden");
+  applyRole();
   if (started) return;
   started = true;
   $("#day").value = state.day;
@@ -466,6 +483,7 @@ async function render() {
   await Promise.all([loadDogs(), loadAttendance(), loadPractice()]);
   if (state.tab === "photos") { await loadPhotos(); await renderPhotos(); }
   else if (state.tab === "roster") renderRoster();
+  else if (state.tab === "admin" && state.owner === false) { state.tab = "photos"; return render(); }
   else if (state.tab === "admin") { renderStaff(); renderUpLinks(); renderDdLinks(); loadPractice(); }
   renderSide();
 }
@@ -3103,6 +3121,7 @@ $("#pw-form")?.addEventListener("submit", async (e) => {
   if (btn) btn.disabled = false;
   if (error) { toast(/same/i.test(error.message) ? "지금 비밀번호와 같아요" : /weak|short/i.test(error.message) ? "더 길거나 복잡한 비밀번호로 정해 주세요" : "바꾸지 못했어요. 다시 로그인한 뒤 해 주세요", 4000); return; }
   $("#pw-new").value = ""; $("#pw-new2").value = "";
+  $("#pw-dialog").classList.add("hidden");
   toast("비밀번호를 바꿨어요. 다음 로그인부터 새 비밀번호로 들어와요", 4000);
 });
 
