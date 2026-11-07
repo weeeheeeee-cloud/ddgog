@@ -490,6 +490,31 @@ function todayStats() {
     out: live.filter((b) => b.check_out === t),
   };
 }
+// 한 주(7일) 줄: 날짜 칸을 바탕으로 깔고, 예약은 입실~퇴실을 하나로 이어진 막대로 그 위에 올림
+function drawWeek(wk, t) {
+  const ws = wk[0], we = wk[6];
+  const list = hs.bookings.filter((b) => active(b) && b.check_in <= we && b.check_out >= ws)
+    .sort((a, b) => a.check_in.localeCompare(b.check_in) || b.check_out.localeCompare(a.check_out) || a.label.localeCompare(b.label, "ko"));
+  const lanes = []; // 줄마다 마지막으로 차지한 칸 번호
+  const segs = list.map((b) => {
+    const s0 = b.check_in < ws ? 0 : wk.indexOf(b.check_in);
+    const s1 = b.check_out > we ? 6 : wk.indexOf(b.check_out);
+    let lane = lanes.findIndex((end) => end < s0);
+    if (lane < 0) { lane = lanes.length; lanes.push(s1); } else lanes[lane] = s1;
+    return { b, s0, s1, lane, head: b.check_in >= ws, tail: b.check_out <= we };
+  });
+  const cells = wk.map((d, i) => `<div class="ho-day ${d.slice(0, 7) !== hs.month ? "other" : ""} ${d === t ? "today" : ""} ${dow(d) === 0 ? "sun" : dow(d) === 6 ? "sat" : ""}" data-day="${d}" style="grid-column:${i + 1}">
+      <span class="ho-dn">${+d.slice(8)}</span><span class="ho-add" title="이 날 입실로 예약 추가">+ 예약</span></div>`).join("");
+  const bars = segs.map(({ b, s0, s1, lane, head, tail }) => {
+    const svc = svcText(b);
+    return `<button class="ho-chip ho-bar ${b.kind === "K" ? "k" : "h"} ${head ? "head" : ""} ${tail ? "tail" : ""} ${s0 === s1 ? "one" : ""} ${b.id === hs.highlight ? "hl" : ""} ${b.status}" data-bk="${b.id}"
+      style="grid-column:${s0 + 1} / span ${s1 - s0 + 1};grid-row:${lane + 2}"
+      title="${esc(b.label)} ${md(b.check_in)}~${md(b.check_out)}${svc ? ` · ${esc(svc)}` : ""}">
+      <span class="ho-cl">${head ? "▸" : "…"}${b.kind} ${esc(b.label)}${svc ? `<i class="ho-bang">!</i>` : ""}</span>
+      ${tail ? `<small class="ho-fee-s">${b.prepaid ? `<em class="ho-paid">선결제</em>` : ""}${won(b.total)}◂</small>` : ""}</button>`;
+  }).join("");
+  return `<div class="ho-week" style="grid-template-rows:28px ${lanes.length ? `repeat(${lanes.length}, auto) ` : ""}minmax(10px, 1fr)">${cells}${bars}</div>`;
+}
 function drawCalendar() {
   const main = $("#ho-main");
   const [y, m] = hs.month.split("-").map(Number);
@@ -513,15 +538,9 @@ function drawCalendar() {
     </div>
     <div class="ho-cal">
       ${DOW.map((d, i) => `<div class="ho-dow ${i === 0 ? "sun" : i === 6 ? "sat" : ""}">${d}</div>`).join("")}
-      ${days.slice(0, weeks * 7).map((d) => {
-        const list = staysOn(d).sort((a, b) => a.check_in.localeCompare(b.check_in) || a.label.localeCompare(b.label, "ko"));
-        return `<div class="ho-day ${d.slice(0, 7) !== hs.month ? "other" : ""} ${d === t ? "today" : ""} ${dow(d) === 0 ? "sun" : dow(d) === 6 ? "sat" : ""}" data-day="${d}">
-          <span class="ho-dn">${+d.slice(8)}</span><span class="ho-add" title="이 날 입실로 예약 추가">+ 예약</span>
-          ${list.map((b) => `<button class="ho-chip ${b.kind === "K" ? "k" : "h"} ${b.id === hs.highlight ? "hl" : ""} ${b.status}" data-bk="${b.id}" title="${esc(b.label)} ${md(b.check_in)}~${md(b.check_out)}${svcText(b) ? ` · ${esc(svcText(b))}` : ""}"><span class="ho-cl">${b.check_in === d ? "▸" : ""}${b.kind} ${esc(b.label)}${b.check_out === d ? "◂" : ""}${svcText(b) ? `<i class="ho-bang">!</i>` : ""}</span>${b.check_out === d ? `<small class="ho-fee-s">${b.prepaid ? `<em class="ho-paid">선결제</em>` : ""}${won(b.total)}</small>` : ""}</button>`).join("")}
-        </div>`;
-      }).join("")}
+      ${Array.from({ length: weeks }, (_, w) => drawWeek(days.slice(w * 7, w * 7 + 7), t)).join("")}
     </div>
-    <p class="small muted"><b>날짜를 누르면 그날 입실로 새 예약</b>을 추가해요 · ▸ 입실하는 날 · ◂ 퇴실하는 날(요금 표시) · <i class="ho-bang">!</i> 미용·픽드랍 등 추가 서비스 있음</p>
+    <p class="small muted"><b>날짜를 누르면 그날 입실로 새 예약</b>을 추가해요 · 막대 하나가 입실(▸)부터 퇴실(◂)까지 · 요금은 퇴실하는 날 끝에 표시 · <i class="ho-bang">!</i> 미용·픽드랍 등 추가 서비스 있음</p>
     ${(() => {
       const end = addDays(days[weeks * 7 - 1], 0);
       const list = hs.bookings.filter((b) => b.check_in.slice(0, 7) <= hs.month && b.check_out.slice(0, 7) >= hs.month)
