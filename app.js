@@ -3019,6 +3019,21 @@ $("#up-new").addEventListener("click", async () => {
   try { await navigator.clipboard.writeText(upUrl(token)); toast("새 링크를 만들고 복사했어요"); } catch { /* 무시 */ }
 });
 
+// ---- 내 비밀번호 바꾸기
+sb.auth.getUser().then(({ data }) => { if ($("#me-email")) $("#me-email").textContent = data?.user?.email || ""; });
+$("#pw-form")?.addEventListener("submit", async (e) => {
+  e.preventDefault();
+  const a = $("#pw-new").value, b = $("#pw-new2").value;
+  if (a.length < 6) { toast("6자 이상으로 정해 주세요"); return; }
+  if (a !== b) { toast("두 칸이 서로 달라요"); return; }
+  const btn = e.submitter; if (btn) btn.disabled = true;
+  const { error } = await sb.auth.updateUser({ password: a });
+  if (btn) btn.disabled = false;
+  if (error) { toast(/same/i.test(error.message) ? "지금 비밀번호와 같아요" : /weak|short/i.test(error.message) ? "더 길거나 복잡한 비밀번호로 정해 주세요" : "바꾸지 못했어요. 다시 로그인한 뒤 해 주세요", 4000); return; }
+  $("#pw-new").value = ""; $("#pw-new2").value = "";
+  toast("비밀번호를 바꿨어요. 다음 로그인부터 새 비밀번호로 들어와요", 4000);
+});
+
 // ---- 다이얼독 알림장 임시저장 북마크
 const siteBase = () => `${location.origin}${location.pathname.replace(/[^/]*$/, "")}`;
 const ddBookmarklet = (t) => `javascript:(()=>{window.__DDG_TOKEN='${t}';var s=document.createElement('script');s.src='${siteBase()}dd-push.js?v='+Date.now();document.body.appendChild(s)})()`;
