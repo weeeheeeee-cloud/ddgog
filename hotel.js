@@ -652,6 +652,8 @@ function openBooking(bk, preset = {}) {
     b.status = $("#bk-status", ov).value; b.notes = $("#bk-notes", ov).value.trim();
   };
   const fee = () => calcFee(b);
+  // 목욕·미용 금액은 몸무게마다 달라서 직접 적음 → 참고용으로 몸무게 보여 줌
+  const weights = () => petsOf(b.customer_id).filter((p) => p.weight).map((p) => `${p.name} ${p.weight}kg`).join(", ");
   const drawSvc = () => {
     $$("[data-svc]", ov).forEach((x) => x.classList.toggle("on", svcOn(b, x.dataset.svc)));
     const dc = b.services.daycare;
@@ -684,6 +686,7 @@ function openBooking(bk, preset = {}) {
       ${line("extra", "다견 추가 요금", calc.extra_detail)}
       ${b.pickup || s.pickup ? line("pickup", "🚗 픽업", b.pickup ? `편도 ${b.kind === "K" ? "5,000" : "8,000"}` : "") : ""}
       ${b.drop_off || s.drop ? line("drop", "🏠 드랍", b.drop_off ? `편도 ${b.kind === "K" ? "5,000" : "8,000"}` : "") : ""}
+      ${calc.svc.length && weights() ? `<div class="ho-fr"><small>참고 몸무게 · ${esc(weights())}</small></div>` : ""}
       ${calc.svc.map((x) => {
         const [, ic, n] = SVC.find(([k]) => k === x.key);
         return `<div class="ho-fr ${x.set ? "" : "need"}"><span>${ic} ${n}${x.key === "daycare" ? `<small>${x.hours || 0}시간</small>` : ""}${x.set ? "" : `<small class="warn">금액을 적어 주세요</small>`}</span>
