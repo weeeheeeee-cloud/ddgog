@@ -508,19 +508,19 @@ function drawCalendar() {
       <div class="ho-month"><button class="btn ghost sm" data-mv="-1">‹</button><h2>${y}년 ${m}월</h2><button class="btn ghost sm" data-mv="1">›</button>
         <button class="btn ghost sm" data-mv="0">오늘</button></div>
       <div class="ho-actions"><div class="ho-csearch"><input id="cal-q" type="search" placeholder="강아지 이름으로 예약 찾기" autocomplete="off"><div id="cal-res"></div></div>
-        <button class="btn primary sm" id="cal-new">+ 예약</button></div>
+</div>
     </div>
     <div class="ho-cal">
       ${DOW.map((d, i) => `<div class="ho-dow ${i === 0 ? "sun" : i === 6 ? "sat" : ""}">${d}</div>`).join("")}
       ${days.slice(0, weeks * 7).map((d) => {
         const list = staysOn(d).sort((a, b) => a.check_in.localeCompare(b.check_in) || a.label.localeCompare(b.label, "ko"));
         return `<div class="ho-day ${d.slice(0, 7) !== hs.month ? "other" : ""} ${d === t ? "today" : ""} ${dow(d) === 0 ? "sun" : dow(d) === 6 ? "sat" : ""}" data-day="${d}">
-          <span class="ho-dn">${+d.slice(8)}</span>
+          <span class="ho-dn">${+d.slice(8)}</span><span class="ho-add" title="이 날 입실로 예약 추가">+ 예약</span>
           ${list.map((b) => `<button class="ho-chip ${b.kind === "K" ? "k" : "h"} ${b.id === hs.highlight ? "hl" : ""} ${b.status}" data-bk="${b.id}" title="${esc(b.label)} ${md(b.check_in)}~${md(b.check_out)}">${b.check_in === d ? "▸" : ""}${b.kind} ${esc(b.label)}${b.check_out === d ? "◂" : ""}</button>`).join("")}
         </div>`;
       }).join("")}
     </div>
-    <p class="small muted">▸ 입실하는 날 · ◂ 퇴실하는 날 · 날짜를 누르면 그날 입실로 예약을 추가해요.</p>
+    <p class="small muted"><b>날짜를 누르면 그날 입실로 새 예약</b>을 추가해요 · ▸ 입실하는 날 · ◂ 퇴실하는 날</p>
     ${(() => {
       const end = addDays(days[weeks * 7 - 1], 0);
       const list = hs.bookings.filter((b) => b.check_in.slice(0, 7) <= hs.month && b.check_out.slice(0, 7) >= hs.month)
@@ -543,7 +543,6 @@ function drawCalendar() {
   $$("[data-st]", main).forEach((b) => b.addEventListener("click", () => openStatList(b.dataset.st, st[b.dataset.st])));
   $$("[data-bk]", main).forEach((b) => b.addEventListener("click", (e) => { e.stopPropagation(); openBooking(hs.bookings.find((x) => x.id === b.dataset.bk)); }));
   $$("[data-day]", main).forEach((c) => c.addEventListener("click", () => openBooking(null, { check_in: c.dataset.day, check_out: addDays(c.dataset.day, 1) })));
-  $("#cal-new").addEventListener("click", () => openBooking(null, { check_in: t, check_out: addDays(t, 1) }));
   const q = $("#cal-q");
   q.addEventListener("input", () => {
     const s = q.value.trim().toLowerCase();
