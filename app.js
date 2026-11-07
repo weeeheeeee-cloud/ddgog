@@ -3168,24 +3168,37 @@ function openDialdogPush() {
   toast("다이얼독에서 북마크 ‘댕겨올개 알림장’을 눌러 주세요. 아직 없으면 관리 탭에서 만들어요.", 6000);
 }
 
-// 선생님이 링크로 올리는 사진: 실시간으로 받아서 알림 → 다 들어오면(20초 조용하면) 자동 분류
-const live = { n: 0, timer: null, last: 0 };
+// 새로 추가되는 사진 알림: 다른 사람(선생님 링크·다른 직원 계정)이 올린 오늘 사진을 세어서,
+// 원장님이 ×(확인)을 누를 때까지 계속 띄워 둠. 사이트를 닫아 둔 동안 올라온 사진도 열면 알려 줌.
+const live = { n: 0, timer: null, last: 0, me: null };
 const baseTitle = document.title;
-function showLive() {
+const seenKey = () => `ddgog-seen-${kstToday()}`;
+function getSeen() { try { return localStorage.getItem(seenKey()); } catch (e) { return null; } }
+function setSeen(t) { try { localStorage.setItem(seenKey(), t); } catch (e) {} }
+function showLive(away = false) {
+  if (!live.n) return;
   const bar = $("#live-bar");
-  const quiet = Date.now() - live.last > 15000;
-  $("#live-text").innerHTML = quiet
-    ? `📲 선생님이 올린 사진 <b>${live.n}장</b>이 들어왔어요${state.attendance.size ? " · 분류 시작" : " · 명단을 확정하면 분류해요"}`
-    : `📲 선생님이 사진을 올리고 있어요… <b>${live.n}장</b> 들어옴`;
-  bar.classList.toggle("receiving", !quiet);
+  const receiving = !away && Date.now() - live.last < 15000;
+  const tail = state.attendance.size ? " · 분류 시작" : " · 명단을 확정하면 분류해요";
+  $("#live-text").innerHTML = receiving
+    ? `📲 새 사진이 올라오고 있어요… <b>${live.n}장</b> 추가됨`
+    : `📲 새 사진 <b>${live.n}장</b>이 추가됐어요${away ? " (자리 비운 동안)" : ""}${tail} · 확인하면 ×`;
+  bar.classList.toggle("receiving", receiving);
   bar.classList.remove("hidden");
   document.title = `(${live.n}) ${baseTitle}`;
 }
-$("#live-x").addEventListener("click", () => { $("#live-bar").classList.add("hidden"); live.n = 0; document.title = baseTitle; });
+function ackLive() {
+  $("#live-bar").classList.add("hidden");
+  live.n = 0;
+  document.title = baseTitle;
+  setSeen(new Date().toISOString());
+}
+$("#live-x").addEventListener("click", ackLive);
+const notMine = (p) => !live.me || p.uploaded_by !== live.me;
 sb.channel("teacher-photos")
   .on("postgres_changes", { event: "INSERT", schema: "public", table: "photos" }, (msg) => {
     const p = msg.new || {};
-    if (p.source !== "teacher" || p.day !== kstToday()) return;
+    if (p.day !== kstToday() || p.practice || !notMine(p)) return;
     live.n++;
     live.last = Date.now();
     showLive();
@@ -3194,10 +3207,23 @@ sb.channel("teacher-photos")
       showLive();
       if (state.day === kstToday()) { await loadPhotos(); if (state.tab === "photos") await renderPhotos(); }
       if (!state.busy && !state.draft && state.attendance.size && state.day === kstToday()) classifyPending();
-      setTimeout(() => { if (Date.now() - live.last > 60000) { $("#live-bar").classList.add("hidden"); live.n = 0; document.title = baseTitle; } }, 60000);
     }, 20000);
   })
   .subscribe();
+// 사이트를 열 때·다른 창에서 돌아올 때: 마지막으로 확인한 뒤 올라온 사진이 있으면 알림
+async function checkMissed() {
+  const { data: { session } } = await sb.auth.getSession();
+  if (!session) return;
+  live.me = session.user.id;
+  const seen = getSeen();
+  if (!seen) { setSeen(new Date().toISOString()); return; }
+  const { count } = await sb.from("photos").select("id", { count: "exact", head: true })
+    .eq("day", kstToday()).eq("practice", false).gt("created_at", seen)
+    .or(`uploaded_by.is.null,uploaded_by.neq.${live.me}`);
+  if (count && count > live.n) { live.n = count; showLive(true); }
+}
+setTimeout(checkMissed, 1500);
+document.addEventListener("visibilitychange", () => { if (!document.hidden) checkMissed(); });
 
 // 실시간 연결이 끊겼을 때를 대비해 30초마다도 확인해서 자동 분류
 setInterval(async () => {
