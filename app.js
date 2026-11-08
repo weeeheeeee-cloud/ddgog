@@ -510,7 +510,7 @@ $$(".tabs button").forEach((b) => b.addEventListener("click", () => { state.tab 
 const HOTEL_V = Date.now();
 async function render() {
   $$(".tabs button").forEach((b) => b.classList.toggle("on", b.dataset.tab === state.tab));
-  document.querySelector(".layout")?.classList.toggle("wide", state.tab === "hotel");
+  document.querySelector(".layout")?.classList.toggle("wide", state.tab === "hotel" || state.tab === "pickup");
   $("#app")?.classList.toggle("tab-hotel", state.tab === "hotel");
   $("#app")?.classList.toggle("tab-pickup", state.tab === "pickup");
   $$(".tab").forEach((s) => s.classList.toggle("hidden", s.id !== "tab-" + state.tab));

@@ -925,3 +925,31 @@ button.ho-tr:hover { background:#faf8f3; }
 .pk-mrow .btn.mini { flex: none; }
 .pk-mrow.sent b { color: var(--ok); }
 .pk-mrow.sent { opacity: .7; }
+
+/* 픽드랍: 한 주 명단 (엑셀처럼 요일별 세로 칸) */
+.pk-head .pk-week { margin-bottom: 0; }
+.pk-board-wrap { padding: 0; overflow-x: auto; -webkit-overflow-scrolling: touch; }
+.pk-board { display: grid; grid-template-columns: repeat(7, minmax(92px, 1fr)); min-width: 644px; }
+.pk-col { border-right: 1px solid var(--line); min-height: 160px; }
+.pk-col:last-child { border-right: 0; }
+.pk-col-h { position: sticky; top: 0; background: #eef4e8; text-align: center; padding: 8px 4px 7px; border-bottom: 1px solid var(--line); }
+.pk-col:first-child .pk-col-h { border-top-left-radius: var(--radius); }
+.pk-col:last-child .pk-col-h { border-top-right-radius: var(--radius); }
+.pk-col-h b { font-size: 15px; font-weight: 800; }
+.pk-col-h small { display: block; font-size: 11px; color: var(--muted); font-weight: 600; }
+.pk-col-h em { display: inline-block; margin-top: 3px; font-style: normal; font-size: 12px; font-weight: 800; color: #fff; background: var(--navy); border-radius: 999px; padding: 0 8px; min-width: 22px; }
+.pk-col.we .pk-col-h b { color: #b45309; }
+.pk-col.today .pk-col-h { background: var(--navy); }
+.pk-col.today .pk-col-h b, .pk-col.today .pk-col-h small { color: #fff; }
+.pk-col.today .pk-col-h em { background: var(--yellow); color: var(--navy); }
+.pk-col.today { background: #f7f9fd; }
+.pk-col-b { display: flex; flex-direction: column; gap: 4px; padding: 6px 5px 10px; }
+.pk-n { display: flex; align-items: center; justify-content: center; gap: 2px; width: 100%; border: 0; background: var(--bg); border-radius: 9px;
+  padding: 7px 4px; font: inherit; font-size: 14px; font-weight: 600; color: var(--ink); cursor: pointer; line-height: 1.25; text-align: center; word-break: keep-all; }
+.pk-n span { min-width: 0; }
+.pk-n.add { background: #fff1a8; box-shadow: inset 0 0 0 1.5px var(--yellow); font-weight: 800; }
+.pk-n.x { background: transparent; color: #b91c1c; opacity: .75; }
+.pk-n.x span { text-decoration: line-through; }
+.pk-mi { position: relative; font-style: normal; font-size: 12px; flex: none; padding: 2px; margin: -2px -2px -2px 0; }
+.pk-mi.new::after, .pk-legend-dot { content: ""; display: inline-block; width: 7px; height: 7px; border-radius: 50%; background: #6366f1; }
+.pk-mi.new::after { position: absolute; top: 0; right: -1px; box-shadow: 0 0 0 1.5px #fff; }

@@ -80,7 +80,6 @@ function draw() {
   }
   const answered = new Set(ps.reqs.map((r) => r.dog_id));
   const missing = ps.dogs.filter((d) => d.active && !answered.has(d.id));
-  const sel = by[ps.day];
 
   root.innerHTML = `
     <div class="pk-head card">
@@ -89,28 +88,25 @@ function draw() {
         <div class="grow"><b>${wLabel}</b><small>${md(ps.week)} ~ ${md(addDays(ps.week, 6))}</small></div>
         <button class="icon" data-wk="7" aria-label="다음 주">›</button>
       </div>
-      <div class="pk-days">${dates.map((dt, i) => {
-        const d = i + 1, x = by[d];
-        const changed = x.on.some((o) => o.added) || x.cancelled.length;
-        return `<button data-day="${d}" class="${d === ps.day ? "on" : ""} ${dt === today ? "today" : ""} ${d >= 6 ? "we" : ""}">
-          <span>${DOW[d]}</span><small>${md(dt)}</small><b>${x.on.length}</b>${changed ? `<i class="pk-dot" title="주중 변경"></i>` : ""}</button>`;
-      }).join("")}</div>
     </div>
 
     <div class="pk-tools">
       <span id="pk-push"></span>
       <span class="grow"></span>
-      <button class="btn ghost sm" id="pk-grid">${ps.grid ? "요일별 보기" : "한 주 한눈에"}</button>
       ${C.owner ? `<button class="btn ghost sm" id="pk-manage">아이 관리</button>` : ""}
     </div>
 
-    ${ps.grid ? gridHtml(dates) : `
-    <section class="card pk-list">
-      <h2>${DOW[ps.day]}요일 ${md(dates[ps.day - 1])} <small class="muted">픽드랍 ${sel.on.length}마리</small></h2>
-      ${sel.on.length ? sel.on.map(({ r, dog, added }) => rowHtml(dog, r, added)).join("") : `<p class="muted small">이날 픽드랍 신청이 없어요.</p>`}
-      ${sel.cancelled.length ? `<h3 class="pk-sub">주중에 취소됨</h3>${sel.cancelled.map(({ r, dog, at }) => `
-        <button class="pk-row cancel" data-dog="${dog.id}"><span class="grow"><b>${esc(dog.name)}</b><small>${when(at)} 취소</small></span><em class="pk-tag x">취소</em></button>`).join("")}` : ""}
-    </section>`}
+    <section class="card pk-board-wrap"><div class="pk-board">${dates.map((dt, i) => {
+      const d = i + 1, x = by[d];
+      return `<div class="pk-col ${dt === today ? "today" : ""} ${d >= 6 ? "we" : ""}" ${dt === today ? 'id="pk-today"' : ""}>
+        <div class="pk-col-h"><b>${DOW[d]}</b><small>${md(dt)}</small><em>${x.on.length}</em></div>
+        <div class="pk-col-b">
+          ${x.on.map(({ r, dog, added }) => `<button class="pk-n ${added ? "add" : ""}" data-dog="${dog.id}" title="${added ? `${when(added)} 추가` : ""}">
+            <span>${esc(dog.name)}</span>${r.memo ? `<i class="pk-mi ${r.memo_changed_at ? "new" : ""}" data-memo="${dog.id}" aria-label="메모 보기">📝</i>` : ""}</button>`).join("")}
+          ${x.cancelled.map(({ dog, at }) => `<button class="pk-n x" data-dog="${dog.id}" title="${when(at)} 취소"><span>${esc(dog.name)}</span></button>`).join("")}
+        </div>
+      </div>`;
+    }).join("")}</div></section>
 
     <section class="card pk-miss">
       <h2>${wLabel} 아직 신청 안 한 아이 <small class="muted">${missing.length}마리</small></h2>
@@ -119,16 +115,17 @@ function draw() {
         : missing.length ? `<div class="pk-chips">${missing.map((d) => `<button data-dog="${d.id}">${esc(d.name)}</button>`).join("")}</div>`
         : `<p class="muted small">모두 신청했어요 👍</p>`}
     </section>
-    <p class="muted small pk-legend"><em class="pk-tag add">추가</em> <em class="pk-tag x">취소</em> <em class="pk-tag memo">메모 바뀜</em> 은 그 주가 시작된 뒤(월요일 0시 이후)에 바뀐 거예요.</p>`;
+    <p class="muted small pk-legend"><em class="pk-tag add">노란색</em> 주중에 추가 · <em class="pk-tag x">줄 그음</em> 주중에 취소 · 📝 메모 있음(누르면 보여요, <i class="pk-legend-dot"></i> 메모 바뀜)</p>`;
 
   $$("[data-wk]", root).forEach((b) => b.addEventListener("click", async () => { ps.week = addDays(ps.week, +b.dataset.wk); ps.day = ps.week === mondayOf(kstToday()) ? isoDow(kstToday()) : 1; await load(); draw(); }));
-  $$("[data-day]", root).forEach((b) => b.addEventListener("click", () => { ps.day = +b.dataset.day; ps.grid = false; draw(); }));
   $$("[data-dog]", root).forEach((b) => b.addEventListener("click", () => openDog(b.dataset.dog)));
   $$("[data-memo]", root).forEach((b) => b.addEventListener("click", (e) => { e.stopPropagation(); openMemo(b.dataset.memo); }));
-  $("#pk-grid", root).addEventListener("click", () => { ps.grid = !ps.grid; draw(); });
   $("#pk-manage", root)?.addEventListener("click", openManage);
   $("#pk-send-miss", root)?.addEventListener("click", () => openSender(missing, `${wLabel} 신청 링크 보내기`));
   drawPushBtn();
+  // 폰에서는 오늘 칸이 보이게
+  const tc = $("#pk-today", root), wrap = $(".pk-board-wrap", root);
+  if (tc && wrap && wrap.scrollWidth > wrap.clientWidth) wrap.scrollLeft = Math.max(0, tc.offsetLeft - 8);
 }
 
 function rowHtml(dog, r, added) {
