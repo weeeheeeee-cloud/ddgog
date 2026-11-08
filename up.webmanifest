@@ -6,11 +6,26 @@
   "scope": "up.html",
   "display": "standalone",
   "orientation": "portrait",
-  "background_color": "#003B89",
+  "background_color": "#FCCC00",
   "theme_color": "#003B89",
   "icons": [
-    { "src": "logo-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any" },
-    { "src": "logo-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any" },
-    { "src": "logo-maskable-512.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable" }
+    {
+      "src": "logo-up-192.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "logo-up-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "logo-up-maskable-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "maskable"
+    }
   ]
 }
