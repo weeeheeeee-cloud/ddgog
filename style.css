@@ -1033,3 +1033,29 @@ button.ho-tr:hover { background:#faf8f3; }
 @media (max-width: 760px) { .ho-more.d { display:none; } .ho-more.m { display:block; } }
 .ho-occ i { font-style:normal; }
 @media (max-width: 760px) { .ho-week.sum .ho-occ i { display:none; } .ho-week.sum .ho-dn { padding:1px 2px; } .ho-day.today .ho-dn { padding:1px 6px; } }
+
+/* 호텔링 월 예약 목록: 폰에서는 카드 모양 (겹침 방지) */
+@media (max-width: 760px) {
+  .ho-mlist .ho-th { display: none !important; }
+  .ho-mlist .ho-tr { grid-template-columns: 34px minmax(0, 1fr) auto !important; grid-template-areas: "k pet money" "k in st" "k out nt" !important; row-gap: 3px !important; column-gap: 10px !important; padding: 12px 14px !important; }
+  .ho-mlist .ho-tr > span { display: block !important; min-width: 0; }
+  .ho-mlist .ho-tr > span:nth-child(1) { grid-area: k; align-self: start; }
+  .ho-mlist .ho-tr > span:nth-child(2) { grid-area: pet; font-size: 16px; font-weight: 800; white-space: normal; word-break: keep-all; overflow: visible; }
+  .ho-mlist .ho-tr > span:nth-child(3) { grid-area: in; font-size: 13px; color: var(--ink); justify-self: start; }
+  .ho-mlist .ho-tr > span:nth-child(4) { grid-area: out; font-size: 13px; color: var(--ink); justify-self: start; }
+  .ho-mlist .ho-tr > span:nth-child(3)::before { content: "입실 "; color: #166534; font-weight: 800; }
+  .ho-mlist .ho-tr > span:nth-child(4)::before { content: "퇴실 "; color: #991b1b; font-weight: 800; }
+  .ho-mlist .ho-tr > span:nth-child(5) { grid-area: nt; font-size: 12px; justify-self: end; }
+  .ho-mlist .ho-tr > span:nth-child(6) { grid-area: money; font-size: 14px; justify-self: end; white-space: nowrap; }
+  .ho-mlist .ho-tr > span:nth-child(7) { grid-area: st; font-size: 12px; justify-self: end; white-space: nowrap; }
+}
+@media (max-width: 760px) {
+  .ho-week.big { min-height: 180px; }
+  .ho-week.big .ho-dn { display: none; }
+  .ho-week.big { grid-template-rows: 6px !important; grid-auto-rows: auto; }
+  .ho-week.big .ho-fee-s { display: none; }
+  .ho-week.big .ho-bar { padding: 6px 4px; font-size: 12px; }
+  .ho-week.big .ho-bar .ho-cl { white-space: normal; word-break: keep-all; line-height: 1.25; overflow: visible; }
+  .ho-cal-week .ho-dow { font-size: 12px; padding: 6px 0; }
+  .ho-cal-week .ho-occ { font-size: 10px; padding: 0 4px; }
+}
