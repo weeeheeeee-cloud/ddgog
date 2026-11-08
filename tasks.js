@@ -31,14 +31,14 @@ function autoItems(bookings) {
   for (const b of list) {
     const time = b.out_time ? `${b.out_time} ` : "";
     for (const [k, ic, n] of CARE) {
-      if ((b.services || {})[k]) out.push({ ref: `${k}:${b.id}`, icon: ic, title: `${n} · ${b.label}`, sub: `${time ? `${time}퇴실 전` : "퇴실 전"}에 해 주세요`, cls: "care" });
+      if ((b.services || {})[k]) out.push({ ref: `${k}:${b.id}`, icon: ic, title: `${n} · ${b.label}`, sub: `${time ? `${time}퇴실 전` : "퇴실 전"}`, cls: "care" });
     }
     out.push({
       ref: `out:${b.id}`, icon: "🏨", title: `퇴실 · ${b.label}`,
-      sub: `${time}${b.status === "out" ? "퇴실 완료 표시됨" : ""}`.trim(),
+      sub: b.out_time ? `${b.out_time} 퇴실` : "",
       money: won(b.total), paid: !!b.prepaid, cls: "out",
     });
-    if (!b.prepaid) out.push({ ref: `pay:${b.id}`, icon: "💳", title: `결제 받기 · ${b.label}`, sub: "퇴실할 때 받아 주세요", money: won(b.total), cls: "pay" });
+    if (!b.prepaid) out.push({ ref: `pay:${b.id}`, icon: "💳", title: `결제 받기 · ${b.label}`, sub: "", money: won(b.total), cls: "pay" });
   }
   return out;
 }
@@ -55,20 +55,42 @@ export async function renderTasks(ctx) {
   const byRef = new Map((rows || []).filter((r) => r.ref).map((r) => [r.ref, r]));
   const items = [
     ...autoItems(bks || []).map((a) => ({ ...a, auto: true, row: byRef.get(a.ref) })),
-    ...(rows || []).filter((r) => !r.ref).map((r) => ({ id: r.id, icon: "📌", title: r.title, sub: r.created_by ? `${r.created_by} 추가` : "", row: r, cls: "manual" })),
+    ...(rows || []).filter((r) => !r.ref).map((r) => ({ id: r.id, icon: "📌", title: r.title, sub: r.created_by ? `${r.created_by}` : "", row: r, cls: "manual" })),
   ];
   const isDone = (it) => !!it.row?.done;
-  const todo = items.filter((it) => !isDone(it)), done = items.filter(isDone);
   const isToday = day === kstToday();
+  const left = items.filter((it) => !isDone(it)).length;
+  const groups = [
+    { key: "out", title: "퇴실", icon: "🏨", list: items.filter((it) => it.cls === "out") },
+    { key: "pay", title: "결제 받기", icon: "💳", list: items.filter((it) => it.cls === "pay") },
+    { key: "care", title: "목욕 · 미용", icon: "🛁", list: items.filter((it) => it.cls === "care") },
+    { key: "manual", title: "할 일", icon: "📌", list: items.filter((it) => it.cls === "manual"), add: true },
+  ];
+  const sum = (list) => list.filter((it) => !isDone(it)).length;
+  let openDone = false;
+  try { openDone = sessionStorage.getItem("tk-done-open") === "1"; } catch { /* 괜찮음 */ }
+  const doneList = items.filter(isDone);
 
   root.innerHTML = `
-    <div class="row between tk-head">
-      <h2>✅ ${isToday ? "오늘 할 일" : `${md(day)} 할 일`}</h2>
-      <span class="tk-count ${items.length && !todo.length ? "all" : ""}">${items.length ? (todo.length ? `남은 일 <b>${todo.length}</b> / ${items.length}` : "모두 끝! 🎉") : ""}</span>
+    <div class="tk-top">
+      <div><h2>${isToday ? "오늘 할 일" : `${md(day)} 할 일`}</h2><small class="muted">${md(day)}${isToday ? " · 오늘" : ""}</small></div>
+      <div class="tk-ring ${items.length && !left ? "all" : ""}">${items.length ? (left ? `<b>${left}</b><small>남음</small>` : `<b>🎉</b><small>모두 끝</small>`) : `<b>0</b><small>할 일</small>`}</div>
     </div>
-    <ul class="tk-list">${[...todo, ...done].map(itemHtml).join("") || `<li class="tk-empty muted small">할 일이 없어요. 아래에서 추가할 수 있어요.</li>`}</ul>
-    <form class="tk-add" autocomplete="off"><input id="tk-new" maxlength="120" placeholder="할 일 추가 (예: 콩이 약 먹이기, 사료 주문)"><button class="btn primary sm">추가</button></form>`;
+    ${groups.map((g) => {
+      const open = g.list.filter((it) => !isDone(it));
+      if (!open.length && !g.add) return "";
+      return `<section class="tk-group ${g.key}">
+        <h3><span>${g.icon} ${g.title}</span>${g.list.length ? `<em>${sum(g.list)}</em>` : ""}</h3>
+        <ul class="tk-list">${open.map(itemHtml).join("") || (g.add ? "" : "")}</ul>
+        ${g.add ? `<form class="tk-add" autocomplete="off"><input id="tk-new" maxlength="120" placeholder="+ 할 일 추가 (예: 콩이 약 먹이기)"><button class="btn primary sm">추가</button></form>` : ""}
+      </section>`;
+    }).join("")}
+    ${doneList.length ? `<section class="tk-group done-g">
+      <button class="tk-fold" id="tk-fold">${openDone ? "▾" : "▸"} 완료 ${doneList.length}개</button>
+      ${openDone ? `<ul class="tk-list">${doneList.map(itemHtml).join("")}</ul>` : ""}
+    </section>` : ""}`;
 
+  $("#tk-fold", root)?.addEventListener("click", () => { try { sessionStorage.setItem("tk-done-open", openDone ? "0" : "1"); } catch { /* 괜찮음 */ } renderTasks(C); });
   $$("[data-tk]", root).forEach((el) => el.addEventListener("change", () => toggle(items[+el.dataset.tk], el.checked)));
   $$("[data-del]", root).forEach((el) => el.addEventListener("click", async () => {
     const it = items[+el.dataset.del];
@@ -89,12 +111,13 @@ export async function renderTasks(ctx) {
   function itemHtml(it) {
     const i = items.indexOf(it);
     const d = isDone(it);
+    const name = it.auto ? it.title.split(" · ").slice(1).join(" · ") : it.title;
+    const kind = it.cls === "care" ? it.title.split(" · ")[0] : "";
+    const meta = [kind && `${it.icon} ${kind}`, it.sub, d && `✓ ${it.row.done_by || ""} ${it.row.done_at ? hm(it.row.done_at) : ""}`.trim()].filter(Boolean).join(" · ");
     return `<li class="tk-item ${it.cls} ${d ? "done" : ""}">
       <label class="tk-check"><input type="checkbox" data-tk="${i}" ${d ? "checked" : ""}><span class="tk-box"></span></label>
-      <div class="tk-main">
-        <div class="tk-title"><span class="tk-ic">${it.icon}</span>${esc(it.title)}${it.money ? ` <b class="tk-money">${it.money}</b>` : ""}${it.cls === "out" ? (it.paid ? ` <em class="tk-tag paid">선결제 완료</em>` : ` <em class="tk-tag due">결제 필요</em>`) : ""}</div>
-        ${it.sub || d ? `<small class="tk-sub">${esc(it.sub || "")}${d ? `${it.sub ? " · " : ""}✓ ${esc(it.row.done_by || "")} ${it.row.done_at ? hm(it.row.done_at) : ""}` : ""}</small>` : ""}
-      </div>
+      <div class="tk-main"><b class="tk-name">${esc(name)}</b>${meta ? `<small class="tk-sub">${esc(meta)}</small>` : ""}</div>
+      ${it.money ? `<div class="tk-right"><b class="tk-money">${it.money}</b>${it.cls === "out" ? (it.paid ? `<em class="tk-tag paid">선결제</em>` : `<em class="tk-tag due">결제 필요</em>`) : ""}</div>` : ""}
       ${it.cls === "manual" ? `<button class="tk-del" data-del="${i}" aria-label="지우기">×</button>` : ""}
     </li>`;
   }

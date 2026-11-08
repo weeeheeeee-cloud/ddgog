@@ -11,7 +11,7 @@ const state = {
   sel: null, // 여러 장 선택: { key: 그룹(강아지 id·"unsorted"·"skipped"), ids: Set }
   find: [], // 특정 아이만 찾기: 이번에 올리는 사진에서 이 아이(들)만 찾음
   day: kstToday(),
-  tab: "photos",
+  tab: "board",
   dogs: [],
   photos: [],
   expanded: new Set(), // 비슷한 사진을 펼쳐 둔 아이
@@ -395,7 +395,7 @@ async function applyRole() {
   // 초대된 선생님은 알림장·호텔링·픽드랍만 (DB·관리자는 최고 관리자만)
   $("#tab-admin-btn").classList.toggle("hidden", !state.owner);
   $("#tab-roster-btn")?.classList.toggle("hidden", !state.owner);
-  if (!state.owner && (state.tab === "admin" || state.tab === "roster")) { state.tab = "photos"; await render(); }
+  if (!state.owner && (state.tab === "admin" || state.tab === "roster")) { state.tab = "board"; await render(); }
   else if (state.tab === "pickup") await render(); // 관리 버튼 보이기
 }
 async function startApp() {
@@ -424,8 +424,8 @@ function setupPickupWatch() {
   let t = null;
   let tt = null;
   sb.channel("tasks-live")
-    .on("postgres_changes", { event: "*", schema: "public", table: "daily_tasks" }, () => { clearTimeout(tt); tt = setTimeout(() => { if (state.tab === "photos") drawTasks(); }, 300); })
-    .on("postgres_changes", { event: "*", schema: "public", table: "hotel_bookings" }, () => { clearTimeout(tt); tt = setTimeout(() => { if (state.tab === "photos") drawTasks(); }, 300); })
+    .on("postgres_changes", { event: "*", schema: "public", table: "daily_tasks" }, () => { clearTimeout(tt); tt = setTimeout(() => { if (state.tab === "board") drawTasks(); }, 300); })
+    .on("postgres_changes", { event: "*", schema: "public", table: "hotel_bookings" }, () => { clearTimeout(tt); tt = setTimeout(() => { if (state.tab === "board") drawTasks(); }, 300); })
     .subscribe();
   sb.channel("pd-live")
     .on("postgres_changes", { event: "*", schema: "public", table: "pd_requests" }, () => {
@@ -522,6 +522,12 @@ async function render() {
   $("#app")?.classList.toggle("tab-hotel", state.tab === "hotel");
   $("#app")?.classList.toggle("tab-pickup", state.tab === "pickup");
   $$(".tab").forEach((s) => s.classList.toggle("hidden", s.id !== "tab-" + state.tab));
+  if (state.tab === "board") {
+    Promise.all([loadDogs(), loadAttendance(), loadPractice()]).catch(() => {}); // 사진 자동 분류는 보드에 있어도 계속 돌도록
+    document.querySelector(".layout")?.classList.remove("with-side");
+    await drawTasks();
+    return;
+  }
   if (state.tab !== "pickup") await Promise.all([loadDogs(), loadAttendance(), loadPractice()]);
   if (state.tab === "photos") { await loadPhotos(); await renderPhotos(); }
   else if (state.tab === "roster") renderRoster();
@@ -533,7 +539,7 @@ async function render() {
     const m = await pickupMod();
     await m.renderPickup({ sb, toast, esc, owner: !!state.owner, root: $("#tab-pickup"), onSeen: () => $("#pk-dot")?.classList.add("hidden") });
   }
-  else if (state.tab === "admin" && state.owner === false) { state.tab = "photos"; return render(); }
+  else if (state.tab === "admin" && state.owner === false) { state.tab = "board"; return render(); }
   else if (state.tab === "admin") { renderStaff(); renderUpLinks(); renderDdLinks(); loadPractice(); }
   renderSide();
 }
@@ -548,7 +554,6 @@ async function drawTasks() {
   } catch (e) { console.error(e); }
 }
 async function renderPhotos() {
-  drawTasks();
   renderRoll(); // 왼쪽 오늘 명단(장수)도 함께 갱신
   renderFind();
   const P = state.photos;
