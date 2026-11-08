@@ -329,73 +329,46 @@ async function openDog(t) {
     editing = false;
     pick = new Set(S.weeks[wi].days);
     render();
-    if (G) $("#body").insertAdjacentHTML("afterbegin", `<button class="back" id="back">‹ 다른 아이 고르기</button>`), $("#back").onclick = startGroup;
+    if (G) $("#body").insertAdjacentHTML("afterbegin", `<button class="back" id="back">‹ 다른 아이</button>`), $("#back").onclick = startGroup;
   } catch (e) {
     $("#body").innerHTML = ""; showErr(e.message);
-    if (G) { $("#body").innerHTML = `<button class="back" id="back">‹ 아이 다시 고르기</button>`; $("#back").onclick = startGroup; }
+    if (G) { $("#body").innerHTML = `<button class="back" id="back">‹ 처음으로</button>`; $("#back").onclick = startGroup; }
   }
 }
 
-// ---- 단체 링크: 아이 고르기 → 보호자 전화번호 뒷자리 4개
-let ALL = null;
+// ---- 단체 링크: 보호자 전화번호로 우리 아이 찾기 (명단은 보여주지 않음)
 async function startGroup() {
   token = ""; S = null;
   $("#err").classList.remove("on");
   $("#title").innerHTML = `<em>픽드랍</em> 신청`;
   document.title = "댕겨올개 픽드랍 신청";
-  $("#body").className = "loading"; $("#body").textContent = "불러오는 중…";
-  try { ALL = ALL || (await call({ action: "list", g: G })).dogs; }
-  catch (e) { $("#body").innerHTML = ""; showErr(e.message); return; }
-  const mine = myDogs().filter((m) => ALL.some((d) => d.name === m.n));
+  const mine = myDogs();
   $("#body").className = "";
   $("#body").innerHTML = `
     ${mine.length ? `<h2>우리 아이 <small>누르면 바로 열려요</small></h2>
       <div class="mine">${mine.map((m) => `<button data-t="${esc(m.t)}">🐶 ${esc(m.n)}</button>`).join("")}</div>
-      <h2>다른 아이</h2>` : `<h2>우리 아이를 골라 주세요</h2>`}
-    <input id="q" class="q" type="search" placeholder="🔍 이름으로 찾기" autocomplete="off">
-    <div class="names" id="names"></div>
-    <p class="note">🐾 처음 한 번만 보호자 전화번호 뒷자리를 확인해요. 다음부터는 ‘우리 아이’를 누르면 바로 열려요.</p>`;
-  const drawNames = () => {
-    const q = $("#q").value.trim();
-    const list = ALL.filter((d) => !q || d.name.includes(q));
-    $("#names").innerHTML = list.map((d) => `<button data-id="${d.id}">${esc(d.name)}</button>`).join("") || `<p class="muted-p">찾는 이름이 없어요. 댕겨올개에 문의해 주세요.</p>`;
-    document.querySelectorAll("#names [data-id]").forEach((b) => b.onclick = () => askPhone(ALL.find((d) => d.id === b.dataset.id)));
-  };
-  $("#q").oninput = drawNames;
-  drawNames();
-  document.querySelectorAll(".mine [data-t]").forEach((b) => b.onclick = () => openDog(b.dataset.t));
-}
-function askPhone(dog) {
-  const ov = document.createElement("div");
-  ov.className = "ask";
-  ov.innerHTML = `<div class="ask-box">
-    <h3>${esc(dog.name)} 보호자님 맞으세요?</h3>
-    <p class="ask-week">댕겨올개에 등록된 보호자 전화번호 <b>뒷자리 4개</b>를 입력해 주세요.</p>
-    <input class="pin" inputmode="numeric" pattern="[0-9]*" maxlength="4" placeholder="0000" autocomplete="off">
-    <p class="pin-err"></p>
-    <div class="ask-btns"><button class="no">취소</button><button class="yes">확인</button></div>
-  </div>`;
-  document.body.appendChild(ov);
-  const inp = ov.querySelector(".pin");
-  setTimeout(() => inp.focus(), 50);
-  const close = () => ov.remove();
-  ov.addEventListener("click", (e) => { if (e.target === ov) close(); });
-  ov.querySelector(".no").onclick = close;
-  const go = async () => {
-    const btn = ov.querySelector(".yes");
-    if (inp.value.replace(/\D/g, "").length !== 4) { ov.querySelector(".pin-err").textContent = "숫자 4개를 입력해 주세요"; return; }
-    btn.disabled = true; btn.textContent = "확인 중…";
+      <h2>다른 번호로 찾기</h2>` : `<h2>보호자 전화번호를 입력해 주세요</h2>`}
+    <input id="ph" class="q" type="tel" inputmode="numeric" placeholder="010-0000-0000" autocomplete="tel">
+    <button id="find" class="save">우리 아이 찾기</button>
+    <div id="found"></div>
+    <p class="note">🐾 댕겨올개에 등록한 보호자 번호로 찾아요. 이 폰에서는 다음부터 ‘우리 아이’를 누르면 바로 열려요.</p>`;
+  const find = async () => {
+    const btn = $("#find");
+    $("#err").classList.remove("on");
+    if ($("#ph").value.replace(/\D/g, "").length < 10) { showErr("전화번호를 정확히 입력해 주세요. (예: 010-1234-5678)"); return; }
+    btn.disabled = true; btn.textContent = "찾는 중…";
     try {
-      const r = await call({ action: "verify", g: G, dog_id: dog.id, last4: inp.value });
-      close();
-      openDog(r.token);
-    } catch (e) {
-      ov.querySelector(".pin-err").textContent = e.message;
-      btn.disabled = false; btn.textContent = "확인";
-    }
+      const r = await call({ action: "find", g: G, phone: $("#ph").value });
+      if (r.dogs.length === 1) return openDog(r.dogs[0].token);
+      r.dogs.forEach((d) => rememberDog(d.token, d.name));
+      $("#found").innerHTML = `<h2>어느 아이를 신청할까요?</h2><div class="mine">${r.dogs.map((d) => `<button data-t="${esc(d.token)}">🐶 ${esc(d.name)}</button>`).join("")}</div>`;
+      document.querySelectorAll("#found [data-t]").forEach((b) => b.onclick = () => openDog(b.dataset.t));
+    } catch (e) { showErr(e.message); }
+    btn.disabled = false; btn.textContent = "우리 아이 찾기";
   };
-  ov.querySelector(".yes").onclick = go;
-  inp.onkeydown = (e) => { if (e.key === "Enter") go(); };
+  $("#find").onclick = find;
+  $("#ph").onkeydown = (e) => { if (e.key === "Enter") find(); };
+  document.querySelectorAll(".mine [data-t]").forEach((b) => b.onclick = () => openDog(b.dataset.t));
 }
 
 (async () => {

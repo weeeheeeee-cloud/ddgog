@@ -226,7 +226,7 @@ async function copyGroup() {
   const { data, error } = await C.sb.functions.invoke("pd", { body: { action: "group" } });
   if (error || !data?.key) { toast("링크를 만들지 못했어요"); return; }
   const url = `${location.origin}${location.pathname.replace(/[^/]*$/, "")}pd.html?g=${data.key}`;
-  copyText(`[댕겨올개] 다음 주 픽드랍 요일을 확정해 주세요 🚗\n아래 링크에서 우리 아이를 고르고 필요한 요일을 눌러 확정하면 돼요. (처음 한 번만 보호자 전화번호 뒷자리 확인)\n매주 일요일까지 확정해 주시고, 주중에 바꾸시면 카톡으로도 꼭 알려 주세요!\n${url}`,
+  copyText(`[댕겨올개] 다음 주 픽드랍 요일을 확정해 주세요 🚗\n아래 링크에서 보호자 전화번호를 넣으면 우리 아이가 나와요. 필요한 요일을 눌러 확정하면 돼요.\n매주 일요일까지 확정해 주시고, 주중에 바꾸시면 카톡으로도 꼭 알려 주세요!\n${url}`,
     "단체 안내문과 링크를 복사했어요. 단톡방이나 공지에 붙여 넣으세요");
 }
 const inviteText = (dog) => `[댕겨올개] ${dog.name} 픽드랍 신청 링크예요 🚗\n매주 일요일까지 다음 주 필요한 요일을 골라 확정해 주세요. 매주 같은 링크예요!\n(주중에 바꾸시면 카톡으로도 꼭 알려 주세요)\n${linkOf(dog.token)}`;
