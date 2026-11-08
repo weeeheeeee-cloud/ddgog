@@ -836,3 +836,15 @@ button.ho-tr:hover { background:#faf8f3; }
 .ho-bar.h { box-shadow:inset 0 0 0 1px #c9d6ee; }
 @media (max-width:700px){ .ho-week { min-height:76px; } .ho-bar { padding:2px 3px; gap:2px; } .ho-bar.head { margin-left:2px; } .ho-bar.tail { margin-right:2px; } }
 .ho-bar.one { flex-direction:column !important; align-items:flex-start !important; gap:0; }
+
+/* 홈 화면 앱(전체 화면)에서 창이 시계·배터리 줄과 아래 막대에 가리지 않게 */
+.rc-overlay, .ref-view {
+  padding: max(16px, calc(env(safe-area-inset-top) + 8px)) max(16px, env(safe-area-inset-right))
+           max(16px, calc(env(safe-area-inset-bottom) + 8px)) max(16px, env(safe-area-inset-left));
+}
+.rc-box { max-height: min(92vh, 100%); }
+.rv-box { max-height: 100%; }
+.sheet { padding-top: env(safe-area-inset-top); }
+.sheet-body { max-height: min(92vh, calc(100vh - env(safe-area-inset-top) - 8px)); }
+.viewer { padding: env(safe-area-inset-top) 0 env(safe-area-inset-bottom); }
+.viewer img { max-height: calc(100vh - env(safe-area-inset-top) - env(safe-area-inset-bottom)); }
