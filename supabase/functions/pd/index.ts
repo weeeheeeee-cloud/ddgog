@@ -3,6 +3,9 @@
 //  action "save"  { token | dog_id(직원 로그인), week_start, days: [1..7], memo } → { ok, days }
 //  action "vapid" {}                                       → { key }  폰 알림 공개 열쇠
 //  action "test"  {} (직원 로그인)                          → 내 폰들로 시험 알림
+//  action "group" {} (직원 로그인)                          → { key }  모든 보호자에게 보내는 단체 링크 열쇠
+//  action "list"  { g }                                    → { dogs: [{ id, name }] }  단체 링크: 아이 고르기
+//  action "verify"{ g, dog_id, last4 }                     → { token, name }  보호자 전화번호 뒷자리 4개 확인
 // 주가 시작된 뒤(그 주 월요일 0시 이후)에 바뀐 요일·메모는 표시해 두고, 선생님들 폰으로 알림을 보냄
 
 import { createClient } from "jsr:@supabase/supabase-js@2";
@@ -37,6 +40,15 @@ async function vapidKeys(admin: Admin) {
   await admin.from("server_secrets").upsert([{ name: "vapid_public", value: g.publicKey }, { name: "vapid_private", value: g.privateKey }], { onConflict: "name", ignoreDuplicates: true });
   k = await read();
   return k!;
+}
+
+async function groupKey(admin: Admin) {
+  const { data } = await admin.from("server_secrets").select("value").eq("name", "pd_group_key").maybeSingle();
+  if (data?.value) return data.value as string;
+  const key = crypto.randomUUID().replace(/-/g, "").slice(0, 16);
+  await admin.from("server_secrets").upsert({ name: "pd_group_key", value: key }, { onConflict: "name", ignoreDuplicates: true });
+  const { data: again } = await admin.from("server_secrets").select("value").eq("name", "pd_group_key").maybeSingle();
+  return again!.value as string;
 }
 
 async function pushAll(admin: Admin, payload: Record<string, unknown>, opts: { onlyUser?: string; exceptUser?: string } = {}) {
@@ -82,6 +94,33 @@ Deno.serve(async (req) => {
       if (!staff) return json({ error: "로그인이 필요해요" }, 401);
       const n = await pushAll(admin, { title: "🔔 알림이 켜졌어요", body: "픽드랍이 바뀌면 이렇게 알려 드릴게요.", url: SITE + "#pickup", tag: "pd-test" }, { onlyUser: staff.id });
       return json({ ok: true, sent: n });
+    }
+
+    // ---- 단체 링크 (모두에게 같은 링크 → 아이 고르고 전화번호 뒷자리 확인)
+    if (body.action === "group") {
+      if (!staff) return json({ error: "로그인이 필요해요" }, 401);
+      return json({ key: await groupKey(admin) });
+    }
+    if (body.action === "list" || body.action === "verify") {
+      if (!body.g || String(body.g) !== await groupKey(admin)) return json({ error: "링크가 맞지 않아요. 댕겨올개에서 받은 최신 링크로 열어 주세요." }, 403);
+      if (body.action === "list") {
+        const { data } = await admin.from("pd_dogs").select("id, name").eq("active", true).order("name");
+        return json({ dogs: data ?? [] });
+      }
+      const { data: d } = await admin.from("pd_dogs").select("id, name, token, phone, note, active").eq("id", String(body.dog_id ?? "")).maybeSingle();
+      if (!d?.active) return json({ error: "아이를 찾지 못했어요" }, 404);
+      const phones = [...String(`${d.phone ?? ""} ${d.note ?? ""}`).matchAll(/01[016789][-\s.]?\d{3,4}[-\s.]?\d{4}/g)].map((m) => m[0].replace(/\D/g, ""));
+      if (phones.length) {
+        const since = new Date(Date.now() - 3600e3).toISOString();
+        const { count } = await admin.from("pd_fails").select("id", { count: "exact", head: true }).eq("dog_id", d.id).gte("created_at", since);
+        if ((count ?? 0) >= 8) return json({ error: "여러 번 틀려서 잠시 막혔어요. 1시간 뒤 다시 해 주시거나 댕겨올개에 문의해 주세요." }, 429);
+        const last4 = String(body.last4 ?? "").replace(/\D/g, "");
+        if (last4.length !== 4 || !phones.some((p) => p.endsWith(last4))) {
+          await admin.from("pd_fails").insert({ dog_id: d.id });
+          return json({ error: "전화번호 뒷자리가 맞지 않아요. 댕겨올개에 등록된 보호자 번호로 입력해 주세요." }, 403);
+        }
+      }
+      return json({ token: d.token, name: d.name });
     }
 
     // 어떤 아이인지

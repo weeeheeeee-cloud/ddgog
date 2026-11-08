@@ -125,6 +125,16 @@
   .done-ic { width:52px; height:52px; border-radius:50%; background:var(--navy); color:var(--yellow); display:grid; place-items:center; font-size:26px; font-weight:900; margin-bottom:12px; }
   @keyframes fade { from { opacity:0; } }
   @keyframes up { from { transform:translateY(30px); opacity:.6; } }
+  .back { border:0; background:none; color:var(--navy); font-weight:800; font-size:14px; padding:0 2px 12px; cursor:pointer; }
+  .mine { display:grid; grid-template-columns:1fr 1fr; gap:8px; }
+  .mine button { border:0; border-radius:18px; background:var(--navy); color:#fff; font-weight:900; font-size:17px; padding:16px 10px; cursor:pointer; box-shadow:0 4px 0 -1px #00265a; }
+  .q { width:100%; border:0; border-radius:16px; padding:13px 16px; font-size:16px; background:#fff; margin-bottom:10px; }
+  .names { display:grid; grid-template-columns:repeat(3, 1fr); gap:6px; }
+  .names button { border:0; border-radius:14px; background:#fff; padding:13px 4px; font-weight:800; font-size:15px; color:var(--ink); cursor:pointer; word-break:keep-all; line-height:1.25; }
+  .names button:active { background:var(--yellow); }
+  .muted-p { grid-column:1/-1; color:var(--muted); font-size:14px; text-align:center; }
+  .pin { width:100%; margin-top:18px; border:0; border-radius:18px; background:#fff; text-align:center; font-size:32px; font-weight:900; letter-spacing:.4em; padding:14px 0 14px .4em; color:var(--navy); }
+  .pin-err { min-height:20px; margin:8px 0 0; color:var(--bad); font-weight:700; font-size:14px; }
 </style>
 </head>
 <body>
@@ -143,7 +153,11 @@
 <script type="module">
 import { SUPABASE_URL, SUPABASE_ANON_KEY } from "./config.js";
 const FN = `${SUPABASE_URL}/functions/v1/pd`;
-const token = new URLSearchParams(location.search).get("k") || new URLSearchParams(location.hash.slice(1)).get("k") || "";
+let token = new URLSearchParams(location.search).get("k") || new URLSearchParams(location.hash.slice(1)).get("k") || "";
+const G = new URLSearchParams(location.search).get("g") || ""; // 모두에게 보내는 단체 링크
+const MY_KEY = "pd-my";
+const myDogs = () => { try { return JSON.parse(localStorage.getItem(MY_KEY) || "[]"); } catch { return []; } };
+function rememberDog(t, n) { const l = myDogs().filter((x) => x.t !== t); l.unshift({ t, n }); try { localStorage.setItem(MY_KEY, JSON.stringify(l.slice(0, 6))); } catch { /* 저장 안 돼도 됨 */ } }
 const DOW = ["", "월", "화", "수", "목", "금", "토", "일"];
 const $ = (s) => document.querySelector(s);
 const esc = (s) => String(s ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
@@ -152,7 +166,7 @@ const md = (d) => `${+d.slice(5, 7)}/${+d.slice(8, 10)}`;
 const dayList = (days) => days.length ? days.map((d) => DOW[d]).join("·") : "없음";
 
 async function call(body) {
-  const r = await fetch(FN, { method: "POST", headers: { "content-type": "application/json", apikey: SUPABASE_ANON_KEY }, body: JSON.stringify({ token, ...body }) });
+  const r = await fetch(FN, { method: "POST", headers: { "content-type": "application/json", apikey: SUPABASE_ANON_KEY }, body: JSON.stringify({ ...(token ? { token } : {}), ...body }) });
   const j = await r.json().catch(() => ({}));
   if (!r.ok || j.error) throw new Error(j.error || "연결하지 못했어요. 잠시 후 다시 해 주세요.");
   return j;
@@ -301,17 +315,93 @@ function showDone(w, change) {
   ov.addEventListener("click", (e) => { if (e.target === ov) ov.remove(); });
 }
 
-(async () => {
-  if (!token) { $("#body").innerHTML = ""; showErr("링크가 맞지 않아요. 댕겨올개에서 받은 링크로 다시 열어 주세요."); return; }
+async function openDog(t) {
+  token = t;
+  $("#err").classList.remove("on");
+  $("#body").className = "loading"; $("#body").textContent = "불러오는 중…";
   try {
     S = await call({ action: "get" });
+    rememberDog(t, S.dog.name);
     $("#title").innerHTML = `${esc(S.dog.name)}<br><em>픽드랍</em> 신청`;
     document.title = `${S.dog.name} 픽드랍 신청 · 댕겨올개`;
     const sunday = new Date(S.today + "T00:00:00Z").getUTCDay() === 0;
     wi = sunday ? 1 : 0; // 일요일엔 다음 주부터
+    editing = false;
     pick = new Set(S.weeks[wi].days);
     render();
-  } catch (e) { $("#body").innerHTML = ""; showErr(e.message); }
+    if (G) $("#body").insertAdjacentHTML("afterbegin", `<button class="back" id="back">‹ 다른 아이 고르기</button>`), $("#back").onclick = startGroup;
+  } catch (e) {
+    $("#body").innerHTML = ""; showErr(e.message);
+    if (G) { $("#body").innerHTML = `<button class="back" id="back">‹ 아이 다시 고르기</button>`; $("#back").onclick = startGroup; }
+  }
+}
+
+// ---- 단체 링크: 아이 고르기 → 보호자 전화번호 뒷자리 4개
+let ALL = null;
+async function startGroup() {
+  token = ""; S = null;
+  $("#err").classList.remove("on");
+  $("#title").innerHTML = `<em>픽드랍</em> 신청`;
+  document.title = "댕겨올개 픽드랍 신청";
+  $("#body").className = "loading"; $("#body").textContent = "불러오는 중…";
+  try { ALL = ALL || (await call({ action: "list", g: G })).dogs; }
+  catch (e) { $("#body").innerHTML = ""; showErr(e.message); return; }
+  const mine = myDogs().filter((m) => ALL.some((d) => d.name === m.n));
+  $("#body").className = "";
+  $("#body").innerHTML = `
+    ${mine.length ? `<h2>우리 아이 <small>누르면 바로 열려요</small></h2>
+      <div class="mine">${mine.map((m) => `<button data-t="${esc(m.t)}">🐶 ${esc(m.n)}</button>`).join("")}</div>
+      <h2>다른 아이</h2>` : `<h2>우리 아이를 골라 주세요</h2>`}
+    <input id="q" class="q" type="search" placeholder="🔍 이름으로 찾기" autocomplete="off">
+    <div class="names" id="names"></div>
+    <p class="note">🐾 처음 한 번만 보호자 전화번호 뒷자리를 확인해요. 다음부터는 ‘우리 아이’를 누르면 바로 열려요.</p>`;
+  const drawNames = () => {
+    const q = $("#q").value.trim();
+    const list = ALL.filter((d) => !q || d.name.includes(q));
+    $("#names").innerHTML = list.map((d) => `<button data-id="${d.id}">${esc(d.name)}</button>`).join("") || `<p class="muted-p">찾는 이름이 없어요. 댕겨올개에 문의해 주세요.</p>`;
+    document.querySelectorAll("#names [data-id]").forEach((b) => b.onclick = () => askPhone(ALL.find((d) => d.id === b.dataset.id)));
+  };
+  $("#q").oninput = drawNames;
+  drawNames();
+  document.querySelectorAll(".mine [data-t]").forEach((b) => b.onclick = () => openDog(b.dataset.t));
+}
+function askPhone(dog) {
+  const ov = document.createElement("div");
+  ov.className = "ask";
+  ov.innerHTML = `<div class="ask-box">
+    <h3>${esc(dog.name)} 보호자님 맞으세요?</h3>
+    <p class="ask-week">댕겨올개에 등록된 보호자 전화번호 <b>뒷자리 4개</b>를 입력해 주세요.</p>
+    <input class="pin" inputmode="numeric" pattern="[0-9]*" maxlength="4" placeholder="0000" autocomplete="off">
+    <p class="pin-err"></p>
+    <div class="ask-btns"><button class="no">취소</button><button class="yes">확인</button></div>
+  </div>`;
+  document.body.appendChild(ov);
+  const inp = ov.querySelector(".pin");
+  setTimeout(() => inp.focus(), 50);
+  const close = () => ov.remove();
+  ov.addEventListener("click", (e) => { if (e.target === ov) close(); });
+  ov.querySelector(".no").onclick = close;
+  const go = async () => {
+    const btn = ov.querySelector(".yes");
+    if (inp.value.replace(/\D/g, "").length !== 4) { ov.querySelector(".pin-err").textContent = "숫자 4개를 입력해 주세요"; return; }
+    btn.disabled = true; btn.textContent = "확인 중…";
+    try {
+      const r = await call({ action: "verify", g: G, dog_id: dog.id, last4: inp.value });
+      close();
+      openDog(r.token);
+    } catch (e) {
+      ov.querySelector(".pin-err").textContent = e.message;
+      btn.disabled = false; btn.textContent = "확인";
+    }
+  };
+  ov.querySelector(".yes").onclick = go;
+  inp.onkeydown = (e) => { if (e.key === "Enter") go(); };
+}
+
+(async () => {
+  if (token) return openDog(token);
+  if (G) return startGroup();
+  $("#body").innerHTML = ""; showErr("링크가 맞지 않아요. 댕겨올개에서 받은 링크로 다시 열어 주세요.");
 })();
 </script>
 </body>
