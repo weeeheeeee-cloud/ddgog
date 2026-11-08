@@ -510,7 +510,8 @@ $$(".tabs button").forEach((b) => b.addEventListener("click", () => { state.tab 
 const HOTEL_V = Date.now();
 async function render() {
   $$(".tabs button").forEach((b) => b.classList.toggle("on", b.dataset.tab === state.tab));
-  document.querySelector(".layout")?.classList.toggle("wide", state.tab === "hotel" || state.tab === "pickup");
+  document.querySelector(".layout")?.classList.toggle("wide", state.tab === "hotel" || state.tab === "pickup" || state.tab === "admin");
+  $("#app")?.classList.toggle("tab-admin", state.tab === "admin");
   $("#app")?.classList.toggle("tab-hotel", state.tab === "hotel");
   $("#app")?.classList.toggle("tab-pickup", state.tab === "pickup");
   $$(".tab").forEach((s) => s.classList.toggle("hidden", s.id !== "tab-" + state.tab));
@@ -3054,6 +3055,18 @@ async function deletePhotos(applyFilter, onProgress) {
   return removed;
 }
 
+// ---- 관리자 탭 왼쪽 메뉴
+function admSecSaved() { try { return localStorage.getItem("adm-sec"); } catch { return null; } }
+var admSec = admSecSaved() || "clean";
+function showAdmSec(sec, save) {
+  admSec = sec;
+  $$("#tab-admin [data-sec].card").forEach((c) => c.classList.toggle("adm-hide", c.dataset.sec !== sec));
+  $$("#adm-nav [data-sec]").forEach((b) => b.classList.toggle("on", b.dataset.sec === sec));
+  if (save) { try { localStorage.setItem("adm-sec", sec); } catch { /* 괜찮음 */ } }
+}
+$$("#adm-nav [data-sec]").forEach((b) => b.addEventListener("click", () => { showAdmSec(b.dataset.sec, true); window.scrollTo({ top: 0, behavior: "smooth" }); }));
+showAdmSec(admSec);
+
 // ---- 선생님 업로드 링크
 const upUrl = (t) => `${location.origin}${location.pathname.replace(/[^/]*$/, "")}up.html?k=${t}`;
 async function renderUpLinks() {
@@ -3063,7 +3076,16 @@ async function renderUpLinks() {
       <div class="grow"><b>${esc(l.label || "선생님 링크")}</b>${l.active ? "" : ` <span class="tag off">꺼짐</span>`}<br><small class="muted">${esc(upUrl(l.token))}</small></div>
       ${l.active ? `<button class="btn primary mini" data-copy="${l.token}">링크 복사</button>` : ""}
       <button class="btn ghost mini" data-onoff="${l.token}">${l.active ? "끄기" : "켜기"}</button>
+      <button class="btn ghost mini danger" data-del="${l.token}">삭제</button>
     </div>`).join("") : `<p class="muted small">아직 링크가 없어요.</p>`;
+  $$("#up-links [data-del]").forEach((b) => b.addEventListener("click", async () => {
+    const l = list.find((x) => x.token === b.dataset.del);
+    if (!confirm(`'${l.label || "선생님 링크"}' 링크를 삭제할까요?\n이 링크로는 더 이상 사진을 올릴 수 없어요. (이미 올라온 사진은 그대로예요)`)) return;
+    const { error } = await sb.from("upload_links").delete().eq("token", l.token);
+    if (error) { toast("삭제하지 못했어요"); return; }
+    toast("링크를 삭제했어요");
+    renderUpLinks();
+  }));
   $$("[data-copy]").forEach((b) => b.addEventListener("click", async () => {
     const url = upUrl(b.dataset.copy);
     try { await navigator.clipboard.writeText(url); toast("링크를 복사했어요. 선생님 단톡방에 붙여 넣어 주세요"); }
@@ -3102,8 +3124,10 @@ async function renderStaff() {
   if (!card) return;
   const { data: { user } } = await sb.auth.getUser();
   const { data: me } = await sb.from("staff_roles").select("role").eq("user_id", user?.id).maybeSingle();
-  if (me?.role !== "owner") { card.classList.add("hidden"); return; }
+  if (me?.role !== "owner") { card.classList.add("hidden"); $("#adm-nav-staff")?.classList.add("hidden"); if (admSec === "staff") showAdmSec("clean"); return; }
   card.classList.remove("hidden");
+  $("#adm-nav-staff")?.classList.remove("hidden");
+  if (!admSecSaved()) showAdmSec("staff");
   const box = $("#staff-list");
   let list;
   try { ({ users: list } = await staffCall({ action: "list" })); }

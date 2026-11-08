@@ -134,34 +134,16 @@
     <section id="tab-pickup" class="tab hidden"></section>
 
     <section id="tab-admin" class="tab hidden">
-
-      <div class="card">
-        <h2>🧪 학습 모드</h2>
-        <p class="muted small">켜면 기존 사진은 화면에서 숨기고(지워지지 않아요), 새로 올리는 사진(선생님 링크 포함)만 따로 모아서 등록된 모든 아이 중에서 찾아 분류해요. 고쳐 주는 건 전부 학습돼요. 끄면 원래 사진으로 돌아와요. 평소 운영할 때는 꺼 두세요.</p>
-        <label class="switch-row"><input type="checkbox" id="practice-on"> <b>학습 모드 켜기</b></label>
-        <div id="practice-reset" class="practice-only">
-          <button id="practice-clear" class="btn ghost danger">🧹 학습 모드 사진 싹 비우기</button>
-          <label class="small"><input type="checkbox" id="practice-clear-learn"> 학습 모드에서 고쳐 주며 배운 것(학습 사진·실수 기록)도 함께 지우기</label>
-          <p class="muted small">학습 모드로 올린 사진만 모두 지워서 처음부터 다시 해볼 수 있어요. 평소 운영 사진과 다이얼독 대표 사진은 그대로예요.</p>
-          <p id="practice-clear-msg" class="muted small"></p>
-        </div>
-      </div>
-
-      <div class="card">
-        <h2>🐾 사진 지문 (쓸수록 아이를 알아보는 기능)</h2>
-        <p class="muted small">사진마다 지문을 만들어 두면, 이미 아는 아이는 AI에게 묻지 않고 바로 분류해요. 화면이 켜져 있으면 자동으로 채워지고, 아래 버튼으로 바로 시작할 수도 있어요.</p>
-        <button id="fp-run" class="btn ghost">지금 지문 만들기</button>
-        <p id="fp-msg" class="muted small"></p>
-      </div>
-
-      <div class="card">
-        <h2>📲 선생님 사진 올리기 링크</h2>
-        <p class="muted small">선생님들이 로그인 없이 폰에서 사진만 올리는 링크예요. 사진 보기·삭제는 안 돼요. 올라온 사진은 이 화면이 켜져 있으면 자동으로 분류돼요.</p>
-        <div id="up-links"></div>
-        <button id="up-new" class="btn primary">새 링크 만들기</button>
-      </div>
-
-      <div class="card hidden" id="staff-card">
+      <div class="adm">
+        <nav class="adm-nav" id="adm-nav">
+          <button data-sec="staff" id="adm-nav-staff" class="hidden">👥 <span>직원 계정</span></button>
+          <button data-sec="clean">🧹 <span>사진 정리</span></button>
+          <button data-sec="learn">🧪 <span>학습 모드</span></button>
+          <button data-sec="links">📲 <span>사진 링크</span></button>
+          <button data-sec="dd">📮 <span>다이얼독 버튼</span></button>
+        </nav>
+        <div class="adm-body">
+      <div data-sec="staff" class="card hidden" id="staff-card">
         <h2>👥 직원 계정 <span class="tag-owner">최고 관리자</span></h2>
         <p class="muted small">댕겨올개에 로그인할 직원을 초대하고 뺄 수 있어요. 이 칸은 최고 관리자에게만 보여요.</p>
         <div id="staff-list"></div>
@@ -175,20 +157,8 @@
         </form>
       </div>
 
-      <div class="card">
-        <h2>📮 다이얼독 알림장 임시저장 버튼</h2>
-        <p class="muted small">사진 정리가 끝나면 <b>오늘 유치원으로 온 아이만</b> 분류된 사진을 아이별 알림장으로 다이얼독 <b>임시보관함</b>에 넣어요. 보호자에게 바로 가지 않으니, 다이얼독에서 확인하고 보내면 돼요.</p>
-        <ol class="small dd-steps">
-          <li>컴퓨터 크롬에서 아래 <b>노란 버튼을 북마크바로 끌어다 놓아요</b>. (북마크바가 안 보이면 Ctrl+Shift+B)</li>
-          <li>알림장 탭의 <b>다이얼독 알림장</b> 버튼을 누르면 다이얼독이 열려요.</li>
-          <li>다이얼독에서 북마크 <b>‘댕겨올개 알림장’</b>을 누르고 <b>임시저장</b>을 누르면 끝.</li>
-        </ol>
-        <div id="dd-links"></div>
-        <button id="dd-new" class="btn ghost">북마크 새로 만들기</button>
-      </div>
-
-      <div class="card">
-        <h2>오래된 사진 정리</h2>
+      <div data-sec="clean" class="card">
+        <h2>🗓️ 오래된 사진 정리</h2>
         <div class="row">
           <select id="purge-days">
             <option value="3">3일</option>
@@ -202,11 +172,51 @@
         <p id="purge-msg" class="muted small"></p>
       </div>
 
-      <div class="card danger-zone">
-        <h2>전체 초기화</h2>
+      <div data-sec="clean" class="card danger-zone">
+        <h2>⚠️ 전체 초기화</h2>
         <p class="muted small">모든 사진과 강아지 그룹을 지우고 처음 상태로 돌려요.</p>
         <button id="reset-all" class="btn danger">전체 초기화</button>
         <p id="reset-msg" class="muted small"></p>
+      </div>
+
+      <div data-sec="learn" class="card">
+        <h2>🧪 학습 모드</h2>
+        <p class="muted small">켜면 기존 사진은 화면에서 숨기고(지워지지 않아요), 새로 올리는 사진(선생님 링크 포함)만 따로 모아서 등록된 모든 아이 중에서 찾아 분류해요. 고쳐 주는 건 전부 학습돼요. 끄면 원래 사진으로 돌아와요. 평소 운영할 때는 꺼 두세요.</p>
+        <label class="switch-row"><input type="checkbox" id="practice-on"> <b>학습 모드 켜기</b></label>
+        <div id="practice-reset" class="practice-only">
+          <button id="practice-clear" class="btn ghost danger">🧹 학습 모드 사진 싹 비우기</button>
+          <label class="small"><input type="checkbox" id="practice-clear-learn"> 학습 모드에서 고쳐 주며 배운 것(학습 사진·실수 기록)도 함께 지우기</label>
+          <p class="muted small">학습 모드로 올린 사진만 모두 지워서 처음부터 다시 해볼 수 있어요. 평소 운영 사진과 다이얼독 대표 사진은 그대로예요.</p>
+          <p id="practice-clear-msg" class="muted small"></p>
+        </div>
+      </div>
+
+      <div data-sec="learn" class="card">
+        <h2>🐾 사진 지문 (쓸수록 아이를 알아보는 기능)</h2>
+        <p class="muted small">사진마다 지문을 만들어 두면, 이미 아는 아이는 AI에게 묻지 않고 바로 분류해요. 화면이 켜져 있으면 자동으로 채워지고, 아래 버튼으로 바로 시작할 수도 있어요.</p>
+        <button id="fp-run" class="btn ghost">지금 지문 만들기</button>
+        <p id="fp-msg" class="muted small"></p>
+      </div>
+
+      <div data-sec="links" class="card">
+        <h2>📲 선생님 사진 올리기 링크</h2>
+        <p class="muted small">선생님들이 로그인 없이 폰에서 사진만 올리는 링크예요. 사진 보기·삭제는 안 돼요. 올라온 사진은 이 화면이 켜져 있으면 자동으로 분류돼요.</p>
+        <div id="up-links"></div>
+        <button id="up-new" class="btn primary">새 링크 만들기</button>
+      </div>
+
+      <div data-sec="dd" class="card">
+        <h2>📮 다이얼독 알림장 임시저장 버튼</h2>
+        <p class="muted small">사진 정리가 끝나면 <b>오늘 유치원으로 온 아이만</b> 분류된 사진을 아이별 알림장으로 다이얼독 <b>임시보관함</b>에 넣어요. 보호자에게 바로 가지 않으니, 다이얼독에서 확인하고 보내면 돼요.</p>
+        <ol class="small dd-steps">
+          <li>컴퓨터 크롬에서 아래 <b>노란 버튼을 북마크바로 끌어다 놓아요</b>. (북마크바가 안 보이면 Ctrl+Shift+B)</li>
+          <li>알림장 탭의 <b>다이얼독 알림장</b> 버튼을 누르면 다이얼독이 열려요.</li>
+          <li>다이얼독에서 북마크 <b>‘댕겨올개 알림장’</b>을 누르고 <b>임시저장</b>을 누르면 끝.</li>
+        </ol>
+        <div id="dd-links"></div>
+        <button id="dd-new" class="btn ghost">북마크 새로 만들기</button>
+      </div>
+        </div>
       </div>
     </section>
   </main>
