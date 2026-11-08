@@ -7,6 +7,33 @@
 <title>댕겨올개 사진 올리기</title>
 <link rel="icon" type="image/png" href="logo-180.png">
 <link rel="apple-touch-icon" href="logo-180.png">
+<!-- 폰 홈 화면 아이콘: 앱처럼 전체 화면으로 열림 -->
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-title" content="사진 올리기">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="application-name" content="사진 올리기">
+<meta name="referrer" content="same-origin">
+<script>
+  // 홈 화면 아이콘이 선생님 링크(k)를 기억하도록: #k= 링크를 ?k= 로 바꿔 둠 (아이콘은 지금 주소를 저장함)
+  (() => {
+    try {
+      const h = new URLSearchParams(location.hash.slice(1)).get("k");
+      const q = new URLSearchParams(location.search).get("k");
+      let k = q || h;
+      if (!k) { try { k = localStorage.getItem("ddg-up-k"); } catch {} }
+      if (k) {
+        try { localStorage.setItem("ddg-up-k", k); } catch {}
+        if (q !== k || location.hash) history.replaceState(null, "", location.pathname + "?k=" + encodeURIComponent(k));
+      }
+    } catch {}
+    // 주소를 정리한 뒤에 앱 정보 연결 (시작 주소 = 지금 주소)
+    const m = document.createElement("link");
+    m.rel = "manifest";
+    m.href = "up.webmanifest";
+    document.head.appendChild(m);
+  })();
+</script>
 <link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/orioncactus/pretendard@v1.3.9/dist/web/static/pretendard.min.css">
 <link rel="preload" href="fonts/bhs-up.woff2" as="font" type="font/woff2" crossorigin>
 <style>

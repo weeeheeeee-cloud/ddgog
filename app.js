@@ -3020,7 +3020,7 @@ async function deletePhotos(applyFilter, onProgress) {
 }
 
 // ---- 선생님 업로드 링크
-const upUrl = (t) => `${location.origin}${location.pathname.replace(/[^/]*$/, "")}up.html#k=${t}`;
+const upUrl = (t) => `${location.origin}${location.pathname.replace(/[^/]*$/, "")}up.html?k=${t}`;
 async function renderUpLinks() {
   const { data } = await sb.from("upload_links").select("*").order("created_at", { ascending: false });
   const list = data || [];
