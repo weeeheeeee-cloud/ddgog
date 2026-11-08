@@ -953,3 +953,20 @@ button.ho-tr:hover { background:#faf8f3; }
 .pk-mi { position: relative; font-style: normal; font-size: 12px; flex: none; padding: 2px; margin: -2px -2px -2px 0; }
 .pk-mi.new::after, .pk-legend-dot { content: ""; display: inline-block; width: 7px; height: 7px; border-radius: 50%; background: #6366f1; }
 .pk-mi.new::after { position: absolute; top: 0; right: -1px; box-shadow: 0 0 0 1.5px #fff; }
+
+/* 픽드랍: 마감 뒤 변경은 색으로 */
+.pk-n.add { background: #22c55e; color: #fff; box-shadow: none; font-weight: 800; }
+.pk-n.x { background: #ef4444; color: #fff; opacity: 1; font-weight: 700; }
+.pk-n.x span { text-decoration: line-through; text-decoration-thickness: 2px; }
+.pk-n.memo { box-shadow: inset 0 0 0 2.5px #8b5cf6; }
+.pk-n.memo:not(.add) { background: #ede9fe; color: #4c1d95; font-weight: 800; }
+.pk-n.add .pk-mi, .pk-n.memo .pk-mi { filter: saturate(1.2); }
+.pk-tag.add { background: #22c55e; color: #fff; }
+.pk-tag.x { background: #ef4444; color: #fff; }
+.pk-tag.memo { background: #8b5cf6; color: #fff; }
+.pk-row.added { background: #dcfce7; box-shadow: inset 4px 0 0 #22c55e; }
+.pk-grid td.add { color: #fff; background: #22c55e; }
+.pk-grid td.x { color: #fff; background: #ef4444; }
+.pk-pick button.on.add { box-shadow: inset 0 -4px 0 #22c55e; }
+.pk-dot { background: #22c55e; }
+.pk-legend { color: var(--ink); margin: 4px 4px 20px; line-height: 2.2; }

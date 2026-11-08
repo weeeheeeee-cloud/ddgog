@@ -101,7 +101,7 @@ function draw() {
       return `<div class="pk-col ${dt === today ? "today" : ""} ${d >= 6 ? "we" : ""}" ${dt === today ? 'id="pk-today"' : ""}>
         <div class="pk-col-h"><b>${DOW[d]}</b><small>${md(dt)}</small><em>${x.on.length}</em></div>
         <div class="pk-col-b">
-          ${x.on.map(({ r, dog, added }) => `<button class="pk-n ${added ? "add" : ""}" data-dog="${dog.id}" title="${added ? `${when(added)} 추가` : ""}">
+          ${x.on.map(({ r, dog, added }) => `<button class="pk-n ${added ? "add" : ""} ${r.memo_changed_at ? "memo" : ""}" data-dog="${dog.id}" title="${added ? `${when(added)} 추가` : ""}">
             <span>${esc(dog.name)}</span>${r.memo ? `<i class="pk-mi ${r.memo_changed_at ? "new" : ""}" data-memo="${dog.id}" aria-label="메모 보기">📝</i>` : ""}</button>`).join("")}
           ${x.cancelled.map(({ dog, at }) => `<button class="pk-n x" data-dog="${dog.id}" title="${when(at)} 취소"><span>${esc(dog.name)}</span></button>`).join("")}
         </div>
@@ -115,7 +115,7 @@ function draw() {
         : missing.length ? `<div class="pk-chips">${missing.map((d) => `<button data-dog="${d.id}">${esc(d.name)}</button>`).join("")}</div>`
         : `<p class="muted small">모두 신청했어요 👍</p>`}
     </section>
-    <p class="muted small pk-legend"><em class="pk-tag add">노란색</em> 주중에 추가 · <em class="pk-tag x">줄 그음</em> 주중에 취소 · 📝 메모 있음(누르면 보여요, <i class="pk-legend-dot"></i> 메모 바뀜)</p>`;
+    <p class="small pk-legend"><b>월요일부터 바뀐 것</b> &nbsp;<em class="pk-tag add">초록 = 추가</em> <em class="pk-tag x">빨강 = 취소</em> <em class="pk-tag memo">보라 = 메모 바뀜</em> &nbsp;· 📝 메모 있음(누르면 보여요)</p>`;
 
   $$("[data-wk]", root).forEach((b) => b.addEventListener("click", async () => { ps.week = addDays(ps.week, +b.dataset.wk); ps.day = ps.week === mondayOf(kstToday()) ? isoDow(kstToday()) : 1; await load(); draw(); }));
   $$("[data-dog]", root).forEach((b) => b.addEventListener("click", () => openDog(b.dataset.dog)));
