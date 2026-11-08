@@ -6,7 +6,10 @@ let C = null; // { sb, toast, signed, esc, dogs }
 const $ = (s, el = document) => el.querySelector(s);
 const $$ = (s, el = document) => [...el.querySelectorAll(s)];
 const hs = {
-  view: "customers",
+  view: "calendar",    // 호텔링 탭은 캘린더부터
+  cal: "month",        // month | week
+  monthMode: "auto",   // auto | bars | sum  (auto: 겹치는 예약이 많으면 요약 칸으로)
+  week: null,          // 주간 보기 시작일(일요일)
   q: "",
   month: null,       // "YYYY-MM"
   highlight: null,   // 강조할 예약 id
@@ -117,8 +120,8 @@ export async function renderHotel(ctx) {
   if (!root.dataset.ready) {
     root.innerHTML = `<div class="ho">
       <nav class="ho-nav">
-        <button data-hv="customers">🐶 호텔링 고객 관리</button>
         <button data-hv="calendar">📅 호텔링 일정 캘린더</button>
+        <button data-hv="customers">🐶 호텔링 고객 관리</button>
       </nav>
       <div class="ho-main" id="ho-main"></div></div>`;
     $$("[data-hv]", root).forEach((b) => b.addEventListener("click", () => { hs.view = b.dataset.hv; draw(); }));
@@ -491,7 +494,7 @@ function todayStats() {
   };
 }
 // 한 주(7일) 줄: 날짜 칸을 바탕으로 깔고, 예약은 입실~퇴실을 하나로 이어진 막대로 그 위에 올림
-function drawWeek(wk, t) {
+function drawWeek(wk, t, cls = "") {
   const ws = wk[0], we = wk[6];
   const list = hs.bookings.filter((b) => active(b) && b.check_in <= we && b.check_out >= ws)
     .sort((a, b) => a.check_in.localeCompare(b.check_in) || b.check_out.localeCompare(a.check_out) || a.label.localeCompare(b.label, "ko"));
@@ -504,7 +507,7 @@ function drawWeek(wk, t) {
     return { b, s0, s1, lane, head: b.check_in >= ws, tail: b.check_out <= we };
   });
   const cells = wk.map((d, i) => `<div class="ho-day ${d.slice(0, 7) !== hs.month ? "other" : ""} ${d === t ? "today" : ""} ${dow(d) === 0 ? "sun" : dow(d) === 6 ? "sat" : ""}" data-day="${d}" style="grid-column:${i + 1}">
-      <span class="ho-dn">${+d.slice(8)}</span><span class="ho-add" title="이 날 입실로 예약 추가">+ 예약</span></div>`).join("");
+      <span class="ho-dn">${cls ? md(d) : +d.slice(8)}</span><span class="ho-add" data-add="${d}" title="이 날 입실로 예약 추가">+ 예약</span></div>`).join("");
   const bars = segs.map(({ b, s0, s1, lane, head, tail }) => {
     const svc = svcText(b);
     return `<button class="ho-chip ho-bar ${b.kind === "K" ? "k" : "h"} ${head ? "head" : ""} ${tail ? "tail" : ""} ${s0 === s1 ? "one" : ""} ${b.id === hs.highlight ? "hl" : ""} ${b.status}" data-bk="${b.id}"
@@ -513,8 +516,63 @@ function drawWeek(wk, t) {
       <span class="ho-cl">${head ? "▸" : "…"}${b.kind} ${esc(b.label)}${svc ? `<i class="ho-bang">!</i>` : ""}</span>
       ${tail ? `<small class="ho-fee-s">${b.prepaid ? `<em class="ho-paid">선결제</em>` : ""}${won(b.total)}◂</small>` : ""}</button>`;
   }).join("");
-  return `<div class="ho-week" style="grid-template-rows:28px ${lanes.length ? `repeat(${lanes.length}, auto) ` : ""}minmax(10px, 1fr)">${cells}${bars}</div>`;
+  return `<div class="ho-week ${cls}" style="grid-template-rows:28px ${lanes.length ? `repeat(${lanes.length}, auto) ` : ""}minmax(10px, 1fr)">${cells}${bars}</div>`;
 }
+// 그날 숫자: 밤 투숙(입실~퇴실 전날) 마릿수 · 입실 · 퇴실
+function dayInfo(d) {
+  const live = hs.bookings.filter((b) => active(b) && b.check_in <= d && d <= b.check_out);
+  const ins = live.filter((b) => b.check_in === d);
+  const outs = live.filter((b) => b.check_out === d && b.check_in !== d);
+  const stays = live.filter((b) => b.check_in < d && d < b.check_out);
+  const night = live.filter((b) => d < b.check_out).reduce((n, b) => n + dogsIn(b.label), 0);
+  return { live, ins, outs, stays, night };
+}
+const maxLanes = (wk) => {
+  const ws = wk[0], we = wk[6];
+  const list = hs.bookings.filter((b) => active(b) && b.check_in <= we && b.check_out >= ws)
+    .sort((a, b) => a.check_in.localeCompare(b.check_in) || b.check_out.localeCompare(a.check_out));
+  const lanes = [];
+  for (const b of list) {
+    const s0 = b.check_in < ws ? 0 : wk.indexOf(b.check_in), s1 = b.check_out > we ? 6 : wk.indexOf(b.check_out);
+    const i = lanes.findIndex((e) => e < s0);
+    if (i < 0) lanes.push(s1); else lanes[i] = s1;
+  }
+  return lanes.length;
+};
+// 요약 칸: 하루에 여러 마리여도 칸 크기가 그대로 — 숫자 + 이름 몇 개 + 더보기
+const SUM_NAMES = 4;
+function drawSumWeek(wk, t) {
+  return `<div class="ho-week sum">${wk.map((d, i) => {
+    const x = dayInfo(d);
+    const order = [...x.ins.map((b) => [b, "in"]), ...x.stays.map((b) => [b, "stay"]), ...x.outs.map((b) => [b, "out"])];
+    const shown = order.slice(0, SUM_NAMES), more = order.length - shown.length;
+    return `<div class="ho-day ${d.slice(0, 7) !== hs.month ? "other" : ""} ${d === t ? "today" : ""} ${dow(d) === 0 ? "sun" : dow(d) === 6 ? "sat" : ""}" data-day="${d}" style="grid-column:${i + 1}">
+      <div class="ho-sum-top"><span class="ho-dn">${+d.slice(8)}</span>${x.night ? `<em class="ho-occ" title="이날 밤 투숙 ${x.night}마리"><i>🏨 </i>${x.night}</em>` : ""}</div>
+      ${x.ins.length || x.outs.length ? `<div class="ho-io">${x.ins.length ? `<span class="in">입실 ${x.ins.length}</span>` : ""}${x.outs.length ? `<span class="out">퇴실 ${x.outs.length}</span>` : ""}</div>` : ""}
+      <div class="ho-names">${shown.map(([b, k]) => `<button class="ho-nm ${b.kind === "K" ? "k" : "h"} ${k} ${b.id === hs.highlight ? "hl" : ""}" data-bk="${b.id}">${k === "in" ? "▸" : k === "out" ? "◂" : ""}${esc(b.label)}${svcText(b) ? `<i class="ho-bang">!</i>` : ""}</button>`).join("")}
+        ${more > 0 ? `<span class="ho-more d">+${more}건 더</span>` : ""}${order.length > 2 ? `<span class="ho-more m">+${order.length - 2}</span>` : ""}</div>
+      <span class="ho-add" data-add="${d}" title="이 날 입실로 예약 추가">+ 예약</span></div>`;
+  }).join("")}</div>`;
+}
+// 날짜를 누르면: 그날 입실·투숙·퇴실 전체 목록
+function openDay(d) {
+  const x = dayInfo(d);
+  const sec = (title, list, cls) => list.length ? `<h3 class="ho-sub">${title} <small class="muted">${list.length}건</small></h3>${list.map((b) => {
+    const c = custById(b.customer_id);
+    return `<button class="ho-bk ${b.status} ${cls}" data-bk="${b.id}">${kindTag(b.kind)}<span class="grow"><b>${esc(b.label)}</b> <small class="muted">${esc(c?.owner_name || "")}</small>
+      <br><small class="muted">${md(b.check_in)}${b.in_time ? " " + b.in_time : ""} → ${md(b.check_out)}${b.out_time ? " " + b.out_time : ""}${svcText(b) ? " · " + esc(svcText(b)) : ""}</small></span></button>`;
+  }).join("")}` : "";
+  const { ov, close } = modal(`
+    <div class="rc-head"><div class="grow"><b>${md(d)} 호텔링</b><small class="muted">이날 밤 투숙 ${x.night}마리</small></div><button class="btn ghost sm" data-close>닫기</button></div>
+    <div class="rc-body">
+      ${sec("▸ 입실", x.ins, "in")}${sec("투숙 중", x.stays, "")}${sec("◂ 퇴실", x.outs, "out")}
+      ${x.live.length ? "" : `<p class="muted">이날 예약이 없어요.</p>`}
+    </div>
+    <div class="rc-foot"><span class="grow"></span><button class="btn primary sm" data-new>+ ${md(d)} 입실 예약</button></div>`);
+  $$("[data-bk]", ov).forEach((b) => b.addEventListener("click", () => { close(); openBooking(hs.bookings.find((k) => k.id === b.dataset.bk)); }));
+  $("[data-new]", ov).addEventListener("click", () => { close(); openBooking(null, { check_in: d, check_out: addDays(d, 1) }); });
+}
+
 function drawCalendar() {
   const main = $("#ho-main");
   const [y, m] = hs.month.split("-").map(Number);
@@ -531,16 +589,35 @@ function drawCalendar() {
       <button data-st="out"><small>오늘 퇴실</small><b>${st.out.length}</b></button>
     </div>
     <div class="ho-head">
-      <div class="ho-month"><button class="btn ghost sm" data-mv="-1">‹</button><h2>${y}년 ${m}월</h2><button class="btn ghost sm" data-mv="1">›</button>
-        <button class="btn ghost sm" data-mv="0">오늘</button></div>
+      <div class="ho-month">${hs.cal === "week"
+        ? `<button class="btn ghost sm" data-wv="-7">‹</button><h2 class="ho-wk-title">${md(hs.week)} ~ ${md(addDays(hs.week, 6))}</h2><button class="btn ghost sm" data-wv="7">›</button><button class="btn ghost sm" data-wv="0">이번 주</button>`
+        : `<button class="btn ghost sm" data-mv="-1">‹</button><h2>${y}년 ${m}월</h2><button class="btn ghost sm" data-mv="1">›</button><button class="btn ghost sm" data-mv="0">오늘</button>`}</div>
+      <div class="ho-seg ho-calmode"><button data-cm="month" class="${hs.cal === "month" ? "on" : ""}">월간</button><button data-cm="week" class="${hs.cal === "week" ? "on" : ""}">주간</button></div>
       <div class="ho-actions"><div class="ho-csearch"><input id="cal-q" type="search" placeholder="강아지 이름으로 예약 찾기" autocomplete="off"><div id="cal-res"></div></div>
 </div>
     </div>
-    <div class="ho-cal">
-      ${DOW.map((d, i) => `<div class="ho-dow ${i === 0 ? "sun" : i === 6 ? "sat" : ""}">${d}</div>`).join("")}
-      ${Array.from({ length: weeks }, (_, w) => drawWeek(days.slice(w * 7, w * 7 + 7), t)).join("")}
-    </div>
-    <p class="small muted"><b>날짜를 누르면 그날 입실로 새 예약</b>을 추가해요 · 막대 하나가 입실(▸)부터 퇴실(◂)까지 · 요금은 퇴실하는 날 끝에 표시 · <i class="ho-bang">!</i> 미용·픽드랍 등 추가 서비스 있음</p>
+    ${(() => {
+      if (hs.cal === "week") {
+        const wk = Array.from({ length: 7 }, (_, i) => addDays(hs.week, i));
+        return `<div class="ho-cal ho-cal-week">
+          ${wk.map((d, i) => { const x = dayInfo(d); return `<div class="ho-dow ${i === 0 ? "sun" : i === 6 ? "sat" : ""} ${d === t ? "today" : ""}">${DOW[i]} <small>${+d.slice(5, 7)}/${+d.slice(8)}</small>${x.night ? `<em class="ho-occ">🏨 ${x.night}</em>` : ""}</div>`; }).join("")}
+          ${drawWeek(wk, t, "big")}
+        </div>
+        <p class="small muted">한 주를 크게 봐요 · 막대 하나가 입실(▸)부터 퇴실(◂)까지 · 🏨 그날 밤 투숙 마릿수 · 날짜 칸을 누르면 그날 목록</p>`;
+      }
+      const wks = Array.from({ length: weeks }, (_, w) => days.slice(w * 7, w * 7 + 7));
+      const dense = Math.max(0, ...wks.map(maxLanes)) > 3;
+      const sum = hs.monthMode === "sum" || (hs.monthMode === "auto" && dense);
+      return `<div class="ho-viewbar"><span class="muted small">${sum ? "하루에 여러 마리라 <b>요약</b>으로 보여요" : "입실~퇴실을 막대로 보여요"}</span>
+          <div class="ho-seg ho-mm"><button data-mm="bars" class="${!sum ? "on" : ""}">막대</button><button data-mm="sum" class="${sum ? "on" : ""}">요약</button></div></div>
+        <div class="ho-cal ${sum ? "ho-cal-sum" : ""}">
+          ${DOW.map((d, i) => `<div class="ho-dow ${i === 0 ? "sun" : i === 6 ? "sat" : ""}">${d}</div>`).join("")}
+          ${wks.map((wk) => (sum ? drawSumWeek(wk, t) : drawWeek(wk, t))).join("")}
+        </div>
+        <p class="small muted">${sum
+          ? "🏨 그날 밤 투숙 마릿수 · ▸입실 ◂퇴실 · <b>날짜를 누르면 그날 전체 목록</b>이 떠요 · 한 주를 크게 보려면 ‘주간’"
+          : "<b>날짜를 누르면 그날 목록</b> · 막대 하나가 입실(▸)부터 퇴실(◂)까지 · 요금은 퇴실하는 날 끝에 표시"} · <i class="ho-bang">!</i> 미용·픽드랍 등 추가 서비스</p>`;
+    })()}
     ${(() => {
       const end = addDays(days[weeks * 7 - 1], 0);
       const list = hs.bookings.filter((b) => b.check_in.slice(0, 7) <= hs.month && b.check_out.slice(0, 7) >= hs.month)
@@ -563,7 +640,20 @@ function drawCalendar() {
   }));
   $$("[data-st]", main).forEach((b) => b.addEventListener("click", () => openStatList(b.dataset.st, st[b.dataset.st])));
   $$("[data-bk]", main).forEach((b) => b.addEventListener("click", (e) => { e.stopPropagation(); openBooking(hs.bookings.find((x) => x.id === b.dataset.bk)); }));
-  $$("[data-day]", main).forEach((c) => c.addEventListener("click", () => openBooking(null, { check_in: c.dataset.day, check_out: addDays(c.dataset.day, 1) })));
+  $$("[data-day]", main).forEach((c) => c.addEventListener("click", () => openDay(c.dataset.day)));
+  $$("[data-add]", main).forEach((c) => c.addEventListener("click", (e) => { e.stopPropagation(); openBooking(null, { check_in: c.dataset.add, check_out: addDays(c.dataset.add, 1) }); }));
+  $$("[data-cm]", main).forEach((b) => b.addEventListener("click", () => {
+    hs.cal = b.dataset.cm;
+    if (hs.cal === "week" && !hs.week) { const tt = today(); hs.week = hs.month === tt.slice(0, 7) ? addDays(tt, -dow(tt)) : addDays(`${hs.month}-01`, -dow(`${hs.month}-01`)); }
+    drawCalendar();
+  }));
+  $$("[data-mm]", main).forEach((b) => b.addEventListener("click", () => { hs.monthMode = b.dataset.mm; drawCalendar(); }));
+  $$("[data-wv]", main).forEach((b) => b.addEventListener("click", () => {
+    const k = +b.dataset.wv, tt = today();
+    hs.week = k ? addDays(hs.week, k) : addDays(tt, -dow(tt));
+    hs.month = addDays(hs.week, 3).slice(0, 7);
+    drawCalendar();
+  }));
   const q = $("#cal-q");
   q.addEventListener("input", () => {
     const s = q.value.trim().toLowerCase();
@@ -574,6 +664,7 @@ function drawCalendar() {
     $$("[data-go]", $("#cal-res")).forEach((x) => x.addEventListener("click", () => {
       const b = hs.bookings.find((k) => k.id === x.dataset.go);
       hs.month = b.check_in.slice(0, 7); hs.highlight = b.id;
+      if (hs.cal === "week") hs.week = addDays(b.check_in, -dow(b.check_in));
       drawCalendar();
       $(`.ho-chip[data-bk="${b.id}"]`)?.scrollIntoView({ block: "center", behavior: "smooth" });
     }));
