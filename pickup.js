@@ -114,6 +114,7 @@ function draw() {
 
     <section class="card pk-miss">
       <h2>${wLabel} 아직 신청 안 한 아이 <small class="muted">${missing.length}마리</small></h2>
+      ${C.owner && missing.length ? `<button class="btn primary sm pk-send-btn" id="pk-send-miss">📨 신청 안 한 ${missing.length}마리에게 링크 보내기</button>` : ""}
       ${!ps.dogs.length ? `<p class="muted small">${C.owner ? "‘아이 관리’에서 픽드랍 이용하는 아이를 먼저 등록해 주세요." : "아직 등록된 아이가 없어요."}</p>`
         : missing.length ? `<div class="pk-chips">${missing.map((d) => `<button data-dog="${d.id}">${esc(d.name)}</button>`).join("")}</div>`
         : `<p class="muted small">모두 신청했어요 👍</p>`}
@@ -126,6 +127,7 @@ function draw() {
   $$("[data-memo]", root).forEach((b) => b.addEventListener("click", (e) => { e.stopPropagation(); openMemo(b.dataset.memo); }));
   $("#pk-grid", root).addEventListener("click", () => { ps.grid = !ps.grid; draw(); });
   $("#pk-manage", root)?.addEventListener("click", openManage);
+  $("#pk-send-miss", root)?.addEventListener("click", () => openSender(missing, `${wLabel} 신청 링크 보내기`));
   drawPushBtn();
 }
 
@@ -200,12 +202,13 @@ function openDog(id) {
       ${r ? `<p class="muted small">${r.by_staff ? "직원이 마지막으로 수정" : "보호자가 신청"} · ${when(r.updated_at)}</p>` : ""}
     </div>
     <div class="rc-foot">
-      ${C.owner ? `<button class="btn ghost sm" data-copy>보호자 링크 복사</button><span class="grow"></span>` : ""}
+      ${C.owner ? `${sendBtns(dog)}<button class="btn ghost mini" data-copy>복사</button><span class="grow"></span>` : ""}
       <button class="btn primary sm" data-save>요일·메모 저장</button>
     </div>`);
   const pick = new Set(days);
   $$("[data-p]", ov).forEach((b) => b.addEventListener("click", () => { const d = +b.dataset.p; pick.has(d) ? pick.delete(d) : pick.add(d); b.classList.toggle("on", pick.has(d)); }));
   $("[data-copy]", ov)?.addEventListener("click", () => copyInvite(dog));
+  bindSend(ov);
   $("[data-save]", ov).addEventListener("click", async (e) => {
     e.target.disabled = true;
     const { data, error } = await C.sb.functions.invoke("pd", { body: { action: "save", dog_id: dog.id, week_start: ps.week, days: [...pick], memo: $("#pk-memo", ov).value } });
@@ -220,10 +223,52 @@ async function copyText(text, msg) {
   try { await navigator.clipboard.writeText(text); toast(msg); }
   catch { prompt("복사해 주세요", text); }
 }
+const inviteText = (dog) => `[댕겨올개] ${dog.name} 픽드랍 신청 링크예요 🚗\n매주 일요일까지 다음 주 필요한 요일을 골라 확정해 주세요. 매주 같은 링크예요!\n(주중에 바꾸시면 카톡으로도 꼭 알려 주세요)\n${linkOf(dog.token)}`;
 function copyInvite(dog) {
-  const name = dog.name.split("/")[0].trim();
-  copyText(`[댕겨올개] ${dog.name} 픽드랍 요일을 알려 주세요 🚗\n필요한 요일을 눌러 주시면 돼요. 매주 같은 링크로 들어오시면 돼요!\n${linkOf(dog.token)}`,
-    `${name} 보호자 안내문과 링크를 복사했어요`);
+  copyText(inviteText(dog), `${dog.name.split("/")[0].trim()} 보호자 안내문과 링크를 복사했어요`);
+}
+const SENT_KEY = () => `pd-sent-${ps.week}`;
+const sentSet = () => { try { return new Set(JSON.parse(localStorage.getItem(SENT_KEY()) || "[]")); } catch { return new Set(); } };
+function markSent(id) { const s = sentSet(); s.add(id); try { localStorage.setItem(SENT_KEY(), JSON.stringify([...s])); } catch { /* 괜찮음 */ } }
+// 카톡 등 앱 고르기 (폰 공유 창) → 안 되면 복사
+async function shareInvite(dog) {
+  if (navigator.share) {
+    try { await navigator.share({ text: inviteText(dog) }); markSent(dog.id); return true; }
+    catch (e) { if (e?.name === "AbortError") return false; }
+  }
+  copyInvite(dog); markSent(dog.id); return true;
+}
+// 문자 앱을 받는 사람·내용 채워서 열기
+function smsInvite(dog) {
+  const num = digits(dog.phone);
+  if (!num) { toast("전화번호가 없어요"); return; }
+  const body = encodeURIComponent(inviteText(dog));
+  markSent(dog.id);
+  location.href = isIOS() ? `sms:${num}&body=${body}` : `sms:${num}?body=${body}`;
+}
+const sendBtns = (d) => `<button class="btn primary mini" data-share="${d.id}">카톡 보내기</button>${digits(d.phone) ? `<button class="btn ghost mini" data-sms="${d.id}">문자</button>` : ""}`;
+function bindSend(ov, after) {
+  $$("[data-share]", ov).forEach((b) => b.addEventListener("click", async () => { if (await shareInvite(dogById(b.dataset.share))) after?.(b.dataset.share); }));
+  $$("[data-sms]", ov).forEach((b) => b.addEventListener("click", () => { smsInvite(dogById(b.dataset.sms)); after?.(b.dataset.sms); }));
+}
+
+// 한 명씩 차례로 보내기 (보낸 아이는 ✓)
+function openSender(list, title) {
+  const draw = (ov) => {
+    const sent = sentSet();
+    $(".pk-send", ov).innerHTML = list.map((d) => `<div class="pk-mrow ${sent.has(d.id) ? "sent" : ""}">
+      <span class="grow"><b>${sent.has(d.id) ? "✓ " : ""}${esc(d.name)}</b><small class="muted">${esc([d.owner_name, d.phone].filter(Boolean).join(" · ")) || "연락처 없음"}</small></span>
+      ${sendBtns(d)}</div>`).join("") || `<p class="muted small">보낼 아이가 없어요.</p>`;
+    $(".pk-send-count", ov).textContent = `${list.filter((d) => sent.has(d.id)).length} / ${list.length} 보냄`;
+    bindSend(ov, () => setTimeout(() => draw(ov), 400));
+  };
+  const { ov } = modal(`
+    <div class="rc-head"><div class="grow"><b>${title}</b><small class="muted pk-send-count"></small></div><button class="btn ghost sm" data-close>닫기</button></div>
+    <div class="rc-body">
+      <p class="muted small">‘카톡 보내기’를 누르면 공유 창이 떠요 → 카카오톡 → 보호자를 골라 보내면 돼요. ‘문자’는 받는 사람과 내용이 채워진 채로 문자 앱이 열려요. 보낸 아이는 ✓ 표시돼요.</p>
+      <div class="pk-send"></div>
+    </div>`, "wide");
+  draw(ov);
 }
 
 /* ================= 아이 관리 (최고 관리자) ================= */
@@ -231,11 +276,11 @@ function openManage() {
   const { ov, close } = modal(`
     <div class="rc-head"><b class="grow">픽드랍 아이 관리</b><button class="btn ghost sm" data-close>닫기</button></div>
     <div class="rc-body">
-      <div class="pk-tools"><button class="btn primary sm" data-new>+ 아이 추가</button><button class="btn ghost sm" data-all>링크 전체 복사</button></div>
-      <p class="muted small">아이마다 보호자 전용 링크가 있어요. ‘안내문 복사’를 눌러 보호자에게 한 번만 보내 주세요. 매주 같은 링크를 써요.</p>
+      <div class="pk-tools"><button class="btn primary sm" data-new>+ 아이 추가</button><button class="btn ghost sm" data-sendall>📨 전체 보내기</button><button class="btn ghost sm" data-all>링크 전체 복사</button></div>
+      <p class="muted small">아이마다 보호자 전용 링크가 있어요. ‘카톡 보내기’나 ‘문자’로 보호자에게 보내 주세요. 매주 같은 링크라 한 번 받은 보호자는 그 링크로 계속 들어오면 돼요.</p>
       <div class="pk-manage">${ps.dogs.map((d) => `<div class="pk-mrow ${d.active ? "" : "off"}">
         <span class="grow"><b>${esc(d.name)}</b>${d.active ? "" : ` <span class="tag off">꺼짐</span>`}<small class="muted">${esc([d.owner_name, d.phone].filter(Boolean).join(" · "))}</small></span>
-        ${d.active ? `<button class="btn primary mini" data-inv="${d.id}">안내문 복사</button>` : ""}
+        ${d.active ? sendBtns(d) : ""}
         <button class="btn ghost mini" data-ed="${d.id}">수정</button>
       </div>`).join("") || `<p class="muted small">아직 없어요.</p>`}</div>
     </div>`, "wide");
@@ -244,7 +289,8 @@ function openManage() {
     const list = ps.dogs.filter((d) => d.active);
     copyText(list.map((d) => `${d.name}\n${linkOf(d.token)}`).join("\n\n"), `${list.length}마리 링크를 복사했어요. 메모장 등에 붙여 두고 쓰세요`);
   });
-  $$("[data-inv]", ov).forEach((b) => b.addEventListener("click", () => copyInvite(dogById(b.dataset.inv))));
+  bindSend(ov);
+  $("[data-sendall]", ov).addEventListener("click", () => { close(); openSender(ps.dogs.filter((d) => d.active), "전체 보호자에게 링크 보내기"); });
   $$("[data-ed]", ov).forEach((b) => b.addEventListener("click", () => { close(); openDogForm(dogById(b.dataset.ed)); }));
 }
 
@@ -274,7 +320,7 @@ function openDogForm(dog) {
     if (error) { toast("저장하지 못했어요"); return; }
     close();
     await load(); draw();
-    if (!dog) { toast("추가했어요. 보호자에게 보낼 안내문을 복사할게요"); setTimeout(() => copyInvite(data), 300); }
+    if (!dog) { toast("추가했어요"); openSender([data], `${data.name} 링크 보내기`); }
     else openManage();
   });
   $("[data-del]", ov)?.addEventListener("click", async () => {

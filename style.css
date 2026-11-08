@@ -920,3 +920,8 @@ button.ho-tr:hover { background:#faf8f3; }
 .pk-mrow { display: flex; align-items: center; gap: 8px; padding: 10px 0; border-bottom: 1px solid var(--line); }
 .pk-mrow small { display: block; }
 .pk-mrow.off { opacity: .55; }
+
+.pk-send-btn { margin-bottom: 10px; }
+.pk-mrow .btn.mini { flex: none; }
+.pk-mrow.sent b { color: var(--ok); }
+.pk-mrow.sent { opacity: .7; }
