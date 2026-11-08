@@ -231,7 +231,7 @@ function openManage() {
   const { ov, close } = modal(`
     <div class="rc-head"><b class="grow">픽드랍 아이 관리</b><button class="btn ghost sm" data-close>닫기</button></div>
     <div class="rc-body">
-      <button class="btn primary sm" data-new>+ 아이 추가</button>
+      <div class="pk-tools"><button class="btn primary sm" data-new>+ 아이 추가</button><button class="btn ghost sm" data-all>링크 전체 복사</button></div>
       <p class="muted small">아이마다 보호자 전용 링크가 있어요. ‘안내문 복사’를 눌러 보호자에게 한 번만 보내 주세요. 매주 같은 링크를 써요.</p>
       <div class="pk-manage">${ps.dogs.map((d) => `<div class="pk-mrow ${d.active ? "" : "off"}">
         <span class="grow"><b>${esc(d.name)}</b>${d.active ? "" : ` <span class="tag off">꺼짐</span>`}<small class="muted">${esc([d.owner_name, d.phone].filter(Boolean).join(" · "))}</small></span>
@@ -240,6 +240,10 @@ function openManage() {
       </div>`).join("") || `<p class="muted small">아직 없어요.</p>`}</div>
     </div>`, "wide");
   $("[data-new]", ov).addEventListener("click", () => { close(); openDogForm(null); });
+  $("[data-all]", ov).addEventListener("click", () => {
+    const list = ps.dogs.filter((d) => d.active);
+    copyText(list.map((d) => `${d.name}\n${linkOf(d.token)}`).join("\n\n"), `${list.length}마리 링크를 복사했어요. 메모장 등에 붙여 두고 쓰세요`);
+  });
   $$("[data-inv]", ov).forEach((b) => b.addEventListener("click", () => copyInvite(dogById(b.dataset.inv))));
   $$("[data-ed]", ov).forEach((b) => b.addEventListener("click", () => { close(); openDogForm(dogById(b.dataset.ed)); }));
 }
