@@ -234,7 +234,7 @@ function renderEdit(w) {
     ${change ? `<button id="cancel" class="link-btn">변경 안 하고 돌아가기</button>` : ""}
     <p class="sel" id="sel"></p>
 
-    <p class="note">🐾 <b>매주 일요일까지</b> 다음 주 요일을 확정해 주세요.<br>확정한 뒤에도 이 링크에서 직접 바꿀 수 있어요. 바꾸시면 <b>카톡으로도 꼭</b> 알려 주세요.</p>`;
+    <p class="note">🐾 <b>매주 일요일 오후 6시까지</b> 다음 주 요일을 확정해 주세요.<br>확정한 뒤에도 이 링크에서 언제든 예약·수정할 수 있어요. 바꾸시면 <b>카톡으로도 꼭</b> 알려 주세요.</p>`;
 
   const pastSet = new Set(dates.map((dt, i) => (isThis && dt < S.today ? i + 1 : 0)).filter(Boolean));
   const updSel = () => { $("#sel").textContent = pick.size ? `고른 요일: ${dayList([...pick].sort())}` : "고른 요일이 없어요 (픽드랍 안 함)"; };
