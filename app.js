@@ -394,6 +394,7 @@ async function applyRole() {
   state.owner = me?.role === "owner";
   $("#tab-admin-btn").classList.toggle("hidden", !state.owner);
   if (!state.owner && state.tab === "admin") { state.tab = "photos"; await render(); }
+  else if (state.tab === "pickup") await render(); // 관리 버튼 보이기
 }
 async function startApp() {
   $("#login").classList.add("hidden");
@@ -402,7 +403,36 @@ async function startApp() {
   if (started) return;
   started = true;
   $("#day").value = state.day;
+  if (location.hash === "#pickup") state.tab = "pickup";
+  setupPickupWatch();
   await render();
+}
+
+/* ================= 픽드랍: 탭 빨간 점·실시간·폰 알림 눌렀을 때 ================= */
+const PICKUP_V = Date.now();
+const pickupMod = () => import(`./pickup.js?v=${PICKUP_V}`);
+async function updatePickupDot() {
+  try {
+    const n = state.tab === "pickup" ? 0 : await (await pickupMod()).pickupUnseen(sb);
+    $("#pk-dot")?.classList.toggle("hidden", !n);
+  } catch { /* 표시만 못 함 */ }
+}
+function setupPickupWatch() {
+  updatePickupDot();
+  let t = null;
+  sb.channel("pd-live")
+    .on("postgres_changes", { event: "*", schema: "public", table: "pd_requests" }, () => {
+      clearTimeout(t);
+      t = setTimeout(() => { if (state.tab === "pickup") render(); else updatePickupDot(); }, 600);
+    })
+    .subscribe();
+  if ("serviceWorker" in navigator) {
+    navigator.serviceWorker.register("sw.js", { type: "module" }).catch(() => {});
+    navigator.serviceWorker.addEventListener("message", (e) => {
+      if (e.data?.type === "open-tab" && e.data.tab) { state.tab = e.data.tab; render(); }
+    });
+  }
+  document.addEventListener("visibilitychange", () => { if (document.visibilityState === "visible") { if (state.tab === "pickup") render(); else updatePickupDot(); } });
 }
 
 /* ================= 데이터 ================= */
@@ -482,13 +512,18 @@ async function render() {
   $$(".tabs button").forEach((b) => b.classList.toggle("on", b.dataset.tab === state.tab));
   document.querySelector(".layout")?.classList.toggle("wide", state.tab === "hotel");
   $("#app")?.classList.toggle("tab-hotel", state.tab === "hotel");
+  $("#app")?.classList.toggle("tab-pickup", state.tab === "pickup");
   $$(".tab").forEach((s) => s.classList.toggle("hidden", s.id !== "tab-" + state.tab));
-  await Promise.all([loadDogs(), loadAttendance(), loadPractice()]);
+  if (state.tab !== "pickup") await Promise.all([loadDogs(), loadAttendance(), loadPractice()]);
   if (state.tab === "photos") { await loadPhotos(); await renderPhotos(); }
   else if (state.tab === "roster") renderRoster();
   else if (state.tab === "hotel") {
     const m = await import(`./hotel.js?v=${HOTEL_V}`);
     await m.renderHotel({ sb, toast, signed, esc, dogs: state.dogs });
+  }
+  else if (state.tab === "pickup") {
+    const m = await pickupMod();
+    await m.renderPickup({ sb, toast, esc, owner: !!state.owner, root: $("#tab-pickup"), onSeen: () => $("#pk-dot")?.classList.add("hidden") });
   }
   else if (state.tab === "admin" && state.owner === false) { state.tab = "photos"; return render(); }
   else if (state.tab === "admin") { renderStaff(); renderUpLinks(); renderDdLinks(); loadPractice(); }

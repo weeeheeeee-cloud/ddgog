@@ -40,10 +40,32 @@ async function notify(r) {
   });
 }
 
+// 폰 알림 (픽드랍 변경 등): 서버(pd 함수)가 보낸 내용을 띄움
+self.addEventListener("push", (e) => {
+  let d = {};
+  try { d = e.data ? e.data.json() : {}; } catch { d = { body: e.data ? e.data.text() : "" }; }
+  e.waitUntil(self.registration.showNotification(d.title || "댕겨올개", {
+    body: d.body || "",
+    icon: "logo-192.png",
+    badge: "logo-192.png",
+    tag: d.tag || undefined,
+    renotify: !!d.tag,
+    data: { url: d.url || "./" },
+  }));
+});
+
 self.addEventListener("notificationclick", (e) => {
   e.notification.close();
+  const url = e.notification.data?.url;
   e.waitUntil((async () => {
     const wins = await self.clients.matchAll({ type: "window", includeUncontrolled: true });
+    if (url) {
+      // 열려 있는 댕겨올개 화면이 있으면 그 화면에서 탭만 바꿈
+      const tab = new URL(url, self.location.href).hash.slice(1);
+      const w = wins.find((x) => !x.url.includes("up.html") && !x.url.includes("pd.html"));
+      if (w) { await w.focus(); if (tab) w.postMessage({ type: "open-tab", tab }); return; }
+      return self.clients.openWindow(url);
+    }
     const w = wins.find((x) => x.url.includes("up.html"));
     if (w) return w.focus();
   })());
