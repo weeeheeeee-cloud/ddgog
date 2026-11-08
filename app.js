@@ -392,8 +392,10 @@ async function applyRole() {
   const { data: { user } } = await sb.auth.getUser();
   const { data: me } = user ? await sb.from("staff_roles").select("role").eq("user_id", user.id).maybeSingle() : { data: null };
   state.owner = me?.role === "owner";
+  // 초대된 선생님은 알림장·호텔링·픽드랍만 (DB·관리자는 최고 관리자만)
   $("#tab-admin-btn").classList.toggle("hidden", !state.owner);
-  if (!state.owner && state.tab === "admin") { state.tab = "photos"; await render(); }
+  $("#tab-roster-btn")?.classList.toggle("hidden", !state.owner);
+  if (!state.owner && (state.tab === "admin" || state.tab === "roster")) { state.tab = "photos"; await render(); }
   else if (state.tab === "pickup") await render(); // 관리 버튼 보이기
 }
 async function startApp() {
