@@ -1059,3 +1059,36 @@ button.ho-tr:hover { background:#faf8f3; }
   .ho-cal-week .ho-dow { font-size: 12px; padding: 6px 0; }
   .ho-cal-week .ho-occ { font-size: 10px; padding: 0 4px; }
 }
+
+/* ================= 오늘 할 일 보드 ================= */
+.tasks { border: 2px solid var(--yellow); }
+.tk-head h2 { margin: 0; }
+.tk-count { font-size: 13px; font-weight: 700; color: var(--muted); }
+.tk-count b { color: var(--navy); font-size: 16px; }
+.tk-count.all { color: #15803d; }
+.tk-list { list-style: none; margin: 10px 0 0; padding: 0; display: flex; flex-direction: column; gap: 6px; }
+.tk-item { display: flex; align-items: center; gap: 10px; background: var(--bg); border-radius: 14px; padding: 10px 12px; }
+.tk-item.out { background: #eef3fc; }
+.tk-item.pay { background: #fff1f1; box-shadow: inset 4px 0 0 #ef4444; }
+.tk-item.care { background: #ecfdf3; box-shadow: inset 4px 0 0 #22c55e; }
+.tk-item.done { background: transparent; box-shadow: none; opacity: .55; }
+.tk-item.done .tk-title { text-decoration: line-through; }
+.tk-check { position: relative; flex: none; width: 28px; height: 28px; cursor: pointer; }
+.tk-check input { position: absolute; inset: 0; opacity: 0; margin: 0; cursor: pointer; }
+.tk-box { display: block; width: 28px; height: 28px; border-radius: 9px; border: 2px solid #c9c3b6; background: #fff; transition: all .12s; }
+.tk-check input:checked + .tk-box { background: var(--navy); border-color: var(--navy); }
+.tk-check input:checked + .tk-box::after { content: "✓"; display: grid; place-items: center; height: 100%; color: var(--yellow); font-weight: 900; font-size: 17px; }
+.tk-check input:focus-visible + .tk-box { outline: 3px solid var(--yellow); }
+.tk-main { flex: 1; min-width: 0; }
+.tk-title { font-size: 15px; font-weight: 700; line-height: 1.4; word-break: keep-all; }
+.tk-ic { margin-right: 5px; }
+.tk-money { color: var(--navy); font-weight: 900; white-space: nowrap; }
+.tk-item.pay .tk-money { color: #b91c1c; }
+.tk-tag { font-style: normal; font-size: 11px; font-weight: 800; border-radius: 999px; padding: 1px 8px; vertical-align: 1px; white-space: nowrap; }
+.tk-tag.paid { background: #dcfce7; color: #166534; }
+.tk-tag.due { background: #fee2e2; color: #b91c1c; }
+.tk-sub { display: block; color: var(--muted); font-size: 12.5px; margin-top: 1px; }
+.tk-del { flex: none; border: 0; background: none; color: #a8a29e; font-size: 22px; line-height: 1; cursor: pointer; padding: 0 4px; }
+.tk-empty { padding: 6px 2px; }
+.tk-add { display: flex; gap: 6px; margin-top: 10px; }
+.tk-add input { flex: 1; min-width: 0; }

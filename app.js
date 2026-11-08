@@ -422,6 +422,11 @@ async function updatePickupDot() {
 function setupPickupWatch() {
   updatePickupDot();
   let t = null;
+  let tt = null;
+  sb.channel("tasks-live")
+    .on("postgres_changes", { event: "*", schema: "public", table: "daily_tasks" }, () => { clearTimeout(tt); tt = setTimeout(() => { if (state.tab === "photos") drawTasks(); }, 300); })
+    .on("postgres_changes", { event: "*", schema: "public", table: "hotel_bookings" }, () => { clearTimeout(tt); tt = setTimeout(() => { if (state.tab === "photos") drawTasks(); }, 300); })
+    .subscribe();
   sb.channel("pd-live")
     .on("postgres_changes", { event: "*", schema: "public", table: "pd_requests" }, () => {
       clearTimeout(t);
@@ -534,7 +539,16 @@ async function render() {
 }
 
 /* ================= 사진 화면 ================= */
+// 오늘 할 일 보드 (알림장 탭 맨 위)
+const TASKS_V = Date.now();
+async function drawTasks() {
+  try {
+    const m = await import(`./tasks.js?v=${TASKS_V}`);
+    await m.renderTasks({ sb, toast, day: state.day, root: $("#tasks") });
+  } catch (e) { console.error(e); }
+}
 async function renderPhotos() {
+  drawTasks();
   renderRoll(); // 왼쪽 오늘 명단(장수)도 함께 갱신
   renderFind();
   const P = state.photos;
