@@ -1,0 +1,17 @@
+{
+  "name": "댕겨올개",
+  "short_name": "댕겨올개",
+  "description": "댕겨올개 알림장·호텔링·DB",
+  "lang": "ko",
+  "id": "./",
+  "start_url": "./",
+  "scope": "./",
+  "display": "standalone",
+  "background_color": "#003B89",
+  "theme_color": "#003B89",
+  "icons": [
+    { "src": "logo-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any" },
+    { "src": "logo-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any" },
+    { "src": "logo-maskable-512.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable" }
+  ]
+}
