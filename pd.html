@@ -81,13 +81,57 @@
   .note b { color:var(--navy); }
   .loading { text-align:center; color:var(--muted); padding:40px 0; font-weight:600; }
   .foot { text-align:center; color:#a29c8f; font-size:11px; letter-spacing:.2em; margin-top:30px; font-weight:700; }
+  .save.ghost { background:#fff; color:var(--navy); box-shadow:0 6px 0 -2px #d6d0c3; }
+  .link-btn { display:block; margin:14px auto 0; border:0; background:none; color:var(--muted); font-weight:700; font-size:14px; text-decoration:underline; cursor:pointer; }
+
+  .conf { margin-top:18px; background:#fff; border-radius:24px; padding:18px; }
+  .conf-top { display:flex; align-items:center; gap:12px; }
+  .conf-top i { width:38px; height:38px; border-radius:50%; background:var(--navy); color:var(--yellow); display:grid; place-items:center; font-style:normal; font-weight:900; font-size:19px; flex:none; }
+  .conf-top span { font-size:19px; font-weight:900; color:var(--navy); }
+  .conf-top small { display:block; font-size:12.5px; font-weight:600; color:var(--muted); }
+  .conf-days { display:grid; grid-template-columns:repeat(7, 1fr); gap:5px; margin-top:16px; }
+  .conf-days span { text-align:center; border-radius:12px; background:var(--cream); padding:8px 0 7px; color:#a29c8f; }
+  .conf-days b { display:block; font-size:16px; font-weight:900; }
+  .conf-days small { display:block; font-size:10.5px; font-weight:600; }
+  .conf-days span.on { background:var(--navy); color:#fff; }
+  .conf-days span.on small { opacity:.8; }
+  .conf-sum { margin:14px 2px 0; font-size:15px; font-weight:600; color:#3b4352; }
+  .conf-sum b { color:var(--navy); font-weight:900; }
+  .conf-memo { margin:8px 0 0; background:var(--cream); border-radius:14px; padding:10px 12px; font-size:14px; white-space:pre-wrap; }
+
+  .kakao { margin-top:18px; background:#fff4c2; border-radius:18px; padding:14px 16px; font-size:14px; line-height:1.55; color:#4a3b00; }
+  .kakao b { display:block; font-size:15px; font-weight:900; color:#3a2e00; margin-bottom:2px; }
+  .kakao.top { margin:16px 0 0; }
+  .kakao.strong { background:var(--yellow); color:#2b2200; }
+
+  .ask { position:fixed; inset:0; z-index:50; background:rgba(0,20,50,.55); display:flex; align-items:flex-end; justify-content:center; animation:fade .15s ease both; }
+  .ask-box { background:var(--cream); width:100%; max-width:520px; border-radius:28px 28px 0 0; padding:24px 20px calc(20px + env(safe-area-inset-bottom)); animation:up .2s ease both; }
+  .ask-box h3 { margin:0; font-size:22px; font-weight:900; color:var(--navy); }
+  .ask-week { margin:6px 0 0; font-size:14px; font-weight:600; color:var(--muted); }
+  .ask-week b { color:var(--navy); font-weight:900; }
+  .ask-days { display:flex; flex-wrap:wrap; gap:6px; margin-top:16px; }
+  .ask-days span { min-width:46px; text-align:center; background:var(--navy); color:#fff; border-radius:14px; padding:10px 8px; font-weight:900; font-size:17px; }
+  .ask-days span.add { box-shadow:inset 0 -4px 0 var(--yellow); }
+  .ask-days em { font-style:normal; font-weight:800; color:var(--muted); background:#fff; border-radius:14px; padding:10px 14px; }
+  .ask-diff { display:flex; gap:8px; flex-wrap:wrap; margin:12px 0 0; font-size:14px; font-weight:800; }
+  .ask-diff .p { color:var(--ok); } .ask-diff .m { color:var(--bad); }
+  .ask-memo { margin:12px 0 0; font-size:14px; color:#3b4352; white-space:pre-wrap; }
+  .ask-btns { display:grid; grid-template-columns:1fr 1.4fr; gap:8px; margin-top:22px; }
+  .ask-btns button { border:0; border-radius:999px; padding:15px; font-size:16px; font-weight:900; cursor:pointer; }
+  .ask-btns .no { background:#fff; color:#4b5260; }
+  .ask-btns .yes { background:var(--yellow); color:var(--navy); box-shadow:0 5px 0 -1px #d8ae00; }
+  .ask-btns .yes:disabled { opacity:.6; }
+  .done-box .ask-btns { grid-template-columns:1fr; }
+  .done-ic { width:52px; height:52px; border-radius:50%; background:var(--navy); color:var(--yellow); display:grid; place-items:center; font-size:26px; font-weight:900; margin-bottom:12px; }
+  @keyframes fade { from { opacity:0; } }
+  @keyframes up { from { transform:translateY(30px); opacity:.6; } }
 </style>
 </head>
 <body>
 <header class="hero">
   <img class="logo" src="logo.png" alt="댕겨올개">
   <h1 id="title"><em>픽드랍</em> 신청</h1>
-  <p>픽드랍이 필요한 요일을 모두 눌러 주세요.<br>바뀌면 언제든 다시 들어와서 고치면 돼요.</p>
+  <p>픽드랍이 필요한 요일을 모두 눌러 주세요.<br>고른 뒤 확정하면 끝! 같은 링크에서 직접 고칠 수도 있어요.</p>
 </header>
 
 <main class="sheet">
@@ -115,19 +159,49 @@ async function call(body) {
 }
 function showErr(m) { const e = $("#err"); e.textContent = m; e.classList.add("on"); }
 
-let S = null; // { dog, today, weeks }
-let wi = 0;   // 고른 주
+let S = null;     // { dog, today, weeks }
+let wi = 0;       // 고른 주
 let pick = new Set();
+let editing = false; // 확정된 주를 고치는 중
+
+const datesOf = (w) => [1, 2, 3, 4, 5, 6, 7].map((d) => addDays(w.start, d - 1));
+const stamp = (ts) => { if (!ts) return ""; const k = new Date(Date.parse(ts) + 9 * 3600e3).toISOString(); const d = k.slice(0, 10); return `${md(d)}(${DOW[((new Date(d + "T00:00:00Z").getUTCDay() + 6) % 7) + 1]}) ${k.slice(11, 16)}`; };
+const KAKAO = "변경하신 뒤에는 꼭 댕겨올개 카톡으로 메시지를 남겨 주세요.";
+
+function weekTabs() {
+  return `<div class="weeks">${S.weeks.map((x, i) => `<button data-w="${i}" class="${i === wi ? "on" : ""}">${i === 0 ? "이번 주" : "다음 주"}
+    <span class="st ${x.saved ? "ok" : "no"}">${x.saved ? "확정" : "아직"}</span><small>${md(x.start)} ~ ${md(addDays(x.start, 6))}</small></button>`).join("")}</div>`;
+}
 
 function render() {
   const w = S.weeks[wi];
-  const isThis = wi === 0;
-  const dates = [1, 2, 3, 4, 5, 6, 7].map((d) => addDays(w.start, d - 1));
   $("#body").className = "";
-  $("#body").innerHTML = `
-    <div class="weeks">${S.weeks.map((x, i) => `<button data-w="${i}" class="${i === wi ? "on" : ""}">${i === 0 ? "이번 주" : "다음 주"}
-      <span class="st ${x.saved ? "ok" : "no"}">${x.saved ? "신청함" : "아직"}</span><small>${md(x.start)} ~ ${md(addDays(x.start, 6))}</small></button>`).join("")}</div>
+  if (w.saved && !editing) renderConfirmed(w); else renderEdit(w);
+  document.querySelectorAll("[data-w]").forEach((b) => b.onclick = () => { wi = +b.dataset.w; editing = false; pick = new Set(S.weeks[wi].days); $("#err").classList.remove("on"); render(); });
+}
 
+// 확정된 주: 읽기 화면 + 변경 버튼
+function renderConfirmed(w) {
+  const dates = datesOf(w);
+  $("#body").innerHTML = `${weekTabs()}
+    <div class="conf">
+      <div class="conf-top"><i>✓</i><span>픽드랍 확정<small>${stamp(w.updated_at)} 확정</small></span></div>
+      <div class="conf-days">${dates.map((dt, i) => `<span class="${w.days.includes(i + 1) ? "on" : ""} ${i >= 5 ? "we" : ""}"><b>${DOW[i + 1]}</b><small>${md(dt)}</small></span>`).join("")}</div>
+      <p class="conf-sum">${w.days.length ? `<b>${dayList(w.days)}</b> 픽드랍해요` : "이 주는 픽드랍이 <b>없어요</b>"}</p>
+      ${w.memo ? `<p class="conf-memo">📝 ${esc(w.memo)}</p>` : ""}
+    </div>
+    <button id="edit" class="save ghost">요일 변경하기</button>
+    <div class="kakao"><b>💬 변경이 생기면</b>이 링크에서 직접 바꾸실 수 있어요.<br>${KAKAO}</div>`;
+  $("#edit").onclick = () => { editing = true; pick = new Set(w.days); render(); };
+}
+
+// 고르기 화면 (처음 신청 / 변경)
+function renderEdit(w) {
+  const isThis = wi === 0;
+  const dates = datesOf(w);
+  const change = w.saved;
+  $("#body").innerHTML = `${weekTabs()}
+    ${change ? `<div class="kakao top"><b>💬 꼭 알려 주세요</b>${KAKAO}</div>` : ""}
     <h2>요일 고르기 <small>여러 개 고를 수 있어요</small></h2>
     <div class="days">${dates.map((dt, i) => {
       const d = i + 1;
@@ -140,55 +214,91 @@ function render() {
     </div>
 
     <h2>메모 <small>필요할 때만</small></h2>
-    <textarea id="memo" maxlength="300" placeholder="예) 수요일은 9시 전에 와 주세요 / 금요일은 드랍만 해 주세요">${esc(w.memo)}</textarea>
+    <textarea id="memo" maxlength="300" placeholder="예) 수요일은 9시 전에 와 주세요 / 금요일은 드랍만 해 주세요">${esc(change ? w.memo : (w.draftMemo ?? w.memo))}</textarea>
 
-    <button id="save" class="save">${w.saved ? "고친 내용 저장하기" : "신청하기"}</button>
+    <button id="save" class="save">${change ? "변경 확정하기" : "확정하기"}</button>
+    ${change ? `<button id="cancel" class="link-btn">변경 안 하고 돌아가기</button>` : ""}
     <p class="sel" id="sel"></p>
-    <div id="done" class="done"></div>
 
-    <p class="note">🐾 <b>매주 일요일까지</b> 다음 주 요일을 알려 주세요.<br>주중에 바꾸셔도 선생님들께 바로 알림이 가요.</p>`;
+    <p class="note">🐾 <b>매주 일요일까지</b> 다음 주 요일을 확정해 주세요.<br>확정한 뒤에도 이 링크에서 직접 바꿀 수 있어요. 바꾸시면 <b>카톡으로도 꼭</b> 알려 주세요.</p>`;
 
+  const pastSet = new Set(dates.map((dt, i) => (isThis && dt < S.today ? i + 1 : 0)).filter(Boolean));
   const updSel = () => { $("#sel").textContent = pick.size ? `고른 요일: ${dayList([...pick].sort())}` : "고른 요일이 없어요 (픽드랍 안 함)"; };
+  const keepMemo = () => { w.draftMemo = $("#memo").value; };
   updSel();
-  document.querySelectorAll("[data-w]").forEach((b) => b.onclick = () => { wi = +b.dataset.w; pick = new Set(S.weeks[wi].days); render(); });
   document.querySelectorAll(".d").forEach((b) => b.onclick = () => {
     const d = +b.dataset.d;
     pick.has(d) ? pick.delete(d) : pick.add(d);
     b.classList.toggle("on", pick.has(d));
-    $("#done").classList.remove("on");
     updSel();
   });
-  const pastSet = new Set(dates.map((dt, i) => (isThis && dt < S.today ? i + 1 : 0)).filter(Boolean));
-  document.querySelector('[data-q="wk"]').onclick = () => {
-    [1, 2, 3, 4, 5].forEach((d) => !pastSet.has(d) && pick.add(d));
-    render();
-  };
-  document.querySelector('[data-q="none"]').onclick = () => {
-    [...pick].forEach((d) => !pastSet.has(d) && pick.delete(d));
-    render();
-  };
-  $("#save").onclick = save;
+  document.querySelector('[data-q="wk"]').onclick = () => { keepMemo(); [1, 2, 3, 4, 5].forEach((d) => !pastSet.has(d) && pick.add(d)); renderEdit(w); };
+  document.querySelector('[data-q="none"]').onclick = () => { keepMemo(); [...pick].forEach((d) => !pastSet.has(d) && pick.delete(d)); renderEdit(w); };
+  $("#save").onclick = () => askConfirm(w, $("#memo").value);
+  $("#cancel")?.addEventListener("click", () => { editing = false; delete w.draftMemo; pick = new Set(w.days); render(); });
 }
 
-async function save() {
-  const w = S.weeks[wi];
-  const btn = $("#save");
-  btn.disabled = true; btn.textContent = "저장하는 중…";
+// 확정 전 한 번 더 확인
+function askConfirm(w, memo) {
+  const days = [...pick].sort((a, b) => a - b);
+  const change = w.saved;
+  const added = days.filter((d) => !w.days.includes(d));
+  const removed = w.days.filter((d) => !days.includes(d));
+  const memoChanged = (w.memo || "") !== memo.trim();
+  if (change && !added.length && !removed.length && !memoChanged) { editing = false; render(); return; }
+  const ov = document.createElement("div");
+  ov.className = "ask";
+  ov.innerHTML = `<div class="ask-box">
+    <h3>${change ? "이대로 변경할까요?" : "이대로 확정할까요?"}</h3>
+    <p class="ask-week">${wi === 0 ? "이번 주" : "다음 주"} · ${md(w.start)} ~ ${md(addDays(w.start, 6))}</p>
+    <div class="ask-days">${days.length ? days.map((d) => `<span class="${added.includes(d) && change ? "add" : ""}">${DOW[d]}</span>`).join("") : `<em>픽드랍 없음</em>`}</div>
+    ${change && (added.length || removed.length) ? `<p class="ask-diff">${added.length ? `<span class="p">+ ${dayList(added)} 추가</span>` : ""}${removed.length ? `<span class="m">− ${dayList(removed)} 빠짐</span>` : ""}</p>` : ""}
+    ${memo.trim() ? `<p class="ask-memo">📝 ${esc(memo.trim())}</p>` : ""}
+    ${change ? `<div class="kakao"><b>💬 잊지 마세요</b>${KAKAO}</div>` : ""}
+    <div class="ask-btns"><button class="no">다시 고르기</button><button class="yes">${change ? "변경 확정" : "확정"}</button></div>
+  </div>`;
+  document.body.appendChild(ov);
+  const close = () => ov.remove();
+  ov.addEventListener("click", (e) => { if (e.target === ov) close(); });
+  ov.querySelector(".no").onclick = close;
+  ov.querySelector(".yes").onclick = async (e) => {
+    e.target.disabled = true; e.target.textContent = "저장하는 중…";
+    const ok = await save(w, days, memo, change);
+    close();
+    if (ok) showDone(w, change);
+  };
+}
+
+async function save(w, days, memo, change) {
   $("#err").classList.remove("on");
   try {
-    const memo = $("#memo").value;
-    const r = await call({ action: "save", week_start: w.start, days: [...pick], memo });
-    Object.assign(w, { saved: true, days: r.days, memo: r.memo || "" });
+    const r = await call({ action: "save", week_start: w.start, days, memo });
+    Object.assign(w, { saved: true, days: r.days, memo: r.memo || "", updated_at: new Date().toISOString() });
+    delete w.draftMemo;
     pick = new Set(r.days);
+    editing = false;
     render();
-    const done = $("#done");
-    done.innerHTML = `<b><i>✓</i>저장했어요</b><span>${wi === 0 ? "이번 주" : "다음 주"} (${md(w.start)}~${md(addDays(w.start, 6))}) 픽드랍: <b style="display:inline;color:var(--yellow);font-size:inherit">${dayList(r.days)}</b>${r.memo ? `<br>메모: ${esc(r.memo)}` : ""}</span>`;
-    done.classList.add("on");
-    done.scrollIntoView({ behavior: "smooth", block: "nearest" });
+    return true;
   } catch (e) {
     showErr(e.message);
-    btn.disabled = false; btn.textContent = "다시 저장하기";
+    return false;
   }
+}
+
+function showDone(w, change) {
+  const ov = document.createElement("div");
+  ov.className = "ask";
+  ov.innerHTML = `<div class="ask-box done-box">
+    <div class="done-ic">✓</div>
+    <h3>${change ? "변경했어요" : "확정했어요"}</h3>
+    <p class="ask-week">${wi === 0 ? "이번 주" : "다음 주"} 픽드랍: <b>${dayList(w.days)}</b></p>
+    ${change ? `<div class="kakao strong"><b>💬 지금 카톡으로 알려 주세요</b>바뀐 내용을 댕겨올개 카톡으로 꼭 메시지 남겨 주세요.<br>(예: “${esc(S.dog.name)} ${dayList(w.days)}로 변경했어요”)</div>`
+      : `<p class="ask-memo">바뀌면 이 링크에서 다시 고치시고, 카톡으로도 알려 주세요.</p>`}
+    <div class="ask-btns"><button class="yes">알겠어요</button></div>
+  </div>`;
+  document.body.appendChild(ov);
+  ov.querySelector(".yes").onclick = () => ov.remove();
+  ov.addEventListener("click", (e) => { if (e.target === ov) ov.remove(); });
 }
 
 (async () => {
