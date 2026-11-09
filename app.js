@@ -439,7 +439,7 @@ function setupPickupWatch() {
       if (e.data?.type === "open-tab" && e.data.tab) { state.tab = e.data.tab; render(); }
     });
   }
-  document.addEventListener("visibilitychange", () => { if (document.visibilityState === "visible") { if (state.tab === "pickup") render(); else updatePickupDot(); } });
+  document.addEventListener("visibilitychange", () => { if (document.visibilityState === "visible") { if (state.tab === "pickup") render(); else updatePickupDot(); if (state.tab === "board") drawTasks(); } });
 }
 
 /* ================= 데이터 ================= */
@@ -521,6 +521,7 @@ async function render() {
   $("#app")?.classList.toggle("tab-admin", state.tab === "admin");
   $("#app")?.classList.toggle("tab-hotel", state.tab === "hotel");
   $("#app")?.classList.toggle("tab-pickup", state.tab === "pickup");
+  $("#app")?.classList.toggle("tab-board", state.tab === "board");
   $$(".tab").forEach((s) => s.classList.toggle("hidden", s.id !== "tab-" + state.tab));
   if (state.tab === "board") {
     Promise.all([loadDogs(), loadAttendance(), loadPractice()]).catch(() => {}); // 사진 자동 분류는 보드에 있어도 계속 돌도록
@@ -550,7 +551,7 @@ const TASKS_V = Date.now();
 async function drawTasks() {
   try {
     const m = await import(`./tasks.js?v=${TASKS_V}`);
-    await m.renderTasks({ sb, toast, day: state.day, root: $("#tasks") });
+    await m.renderTasks({ sb, toast, root: $("#tasks") });
   } catch (e) { console.error(e); }
 }
 async function renderPhotos() {

@@ -3,7 +3,9 @@
 //  · 직접 넣는 할 일: 누구나 추가 / 체크 / 삭제 → 다른 직원 화면에도 바로 반영
 // 체크 상태는 daily_tasks 에 저장 (자동 할 일은 ref 로, 직접 넣은 할 일은 행 하나씩)
 
-let C = null; // { sb, toast, day, root }
+let C = null; // { sb, toast, root }
+let boardDay = null;   // 보드에서 보고 있는 날 (앱을 열면 항상 오늘)
+let openedOn = null;   // 이 날짜에 앱을 열었음 → 날이 바뀌면 다시 오늘로
 let myName = null;
 const $ = (s, el = document) => el.querySelector(s);
 const $$ = (s, el = document) => [...el.querySelectorAll(s)];
@@ -11,6 +13,7 @@ const esc = (s) => String(s ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "
 const won = (n) => `${Math.round(Number(n) || 0).toLocaleString("ko-KR")}원`;
 const DOW = ["일", "월", "화", "수", "목", "금", "토"];
 const kstToday = () => new Date(Date.now() + 9 * 3600e3).toISOString().slice(0, 10);
+const addDays = (d, n) => { const t = new Date(d + "T00:00:00Z"); t.setUTCDate(t.getUTCDate() + n); return t.toISOString().slice(0, 10); };
 const md = (d) => `${+d.slice(5, 7)}/${+d.slice(8, 10)}(${DOW[new Date(d + "T00:00:00Z").getUTCDay()]})`;
 const hm = (ts) => new Date(Date.parse(ts) + 9 * 3600e3).toISOString().slice(11, 16);
 const CARE = [["bath", "🛁", "목욕"], ["hygiene", "🧼", "위생미용"], ["grooming", "✂️", "미용"]];
@@ -47,11 +50,28 @@ export async function renderTasks(ctx) {
   C = ctx;
   const root = C.root;
   if (!root) return;
-  const day = C.day;
-  const [{ data: rows }, { data: bks }] = await Promise.all([
+  const t0 = kstToday();
+  if (!boardDay || openedOn !== t0) { boardDay = t0; openedOn = t0; } // 날이 바뀌면 그날 보드가 메인으로
+  const day = boardDay;
+  C.day = day;
+  const ws = addDays(day, -3), we = addDays(day, 3);
+  const [{ data: rows }, { data: bks }, { data: wRows }, { data: wBks }] = await Promise.all([
     C.sb.from("daily_tasks").select("*").eq("day", day).order("created_at"),
     C.sb.from("hotel_bookings").select("id, label, kind, check_out, out_time, total, prepaid, status, services").eq("check_out", day),
+    C.sb.from("daily_tasks").select("day, ref, done").gte("day", ws).lte("day", we),
+    C.sb.from("hotel_bookings").select("id, check_out, prepaid, status, services").gte("check_out", ws).lte("check_out", we),
   ]);
+  // 날짜 줄: 그날 남은 할 일 수 (미리 써 둔 것 포함)
+  const leftOn = (d) => {
+    const doneRefs = new Set((wRows || []).filter((r) => r.day === d && r.ref && r.done).map((r) => r.ref));
+    let n = (wRows || []).filter((r) => r.day === d && !r.ref && !r.done).length;
+    for (const b of (wBks || []).filter((b) => b.check_out === d && b.status !== "cancelled")) {
+      const refs = [`out:${b.id}`, ...(b.prepaid ? [] : [`pay:${b.id}`]), ...CARE.filter(([k]) => (b.services || {})[k]).map(([k]) => `${k}:${b.id}`)];
+      n += refs.filter((r) => !doneRefs.has(r)).length;
+    }
+    return n;
+  };
+  const strip = Array.from({ length: 7 }, (_, i) => addDays(ws, i));
   const byRef = new Map((rows || []).filter((r) => r.ref).map((r) => [r.ref, r]));
   const items = [
     ...autoItems(bks || []).map((a) => ({ ...a, auto: true, row: byRef.get(a.ref) })),
@@ -71,7 +91,16 @@ export async function renderTasks(ctx) {
   try { openDone = sessionStorage.getItem("tk-done-open") === "1"; } catch { /* 괜찮음 */ }
   const doneList = items.filter(isDone);
 
+  const isPast = day < t0;
   root.innerHTML = `
+    <div class="tk-nav">
+      <button class="icon" data-mv="-7" aria-label="일주일 전">«</button>
+      <div class="tk-strip">${strip.map((d) => { const n = leftOn(d); return `<button data-go="${d}" class="${d === day ? "on" : ""} ${d === t0 ? "today" : ""} ${d < t0 ? "past" : ""}">
+        <small>${d === t0 ? "오늘" : DOW[new Date(d + "T00:00:00Z").getUTCDay()]}</small><b>${+d.slice(8)}</b>${n ? `<i>${n}</i>` : `<i class="z"></i>`}</button>`; }).join("")}</div>
+      <button class="icon" data-mv="7" aria-label="일주일 뒤">»</button>
+      <label class="icon tk-pick" aria-label="날짜 고르기">📅<input type="date" id="tk-date" value="${day}"></label>
+    </div>
+    ${!isToday ? `<div class="tk-note ${isPast ? "past" : "future"}"><span>${isPast ? `지난 날 보드예요. 빠진 기록을 적거나 체크할 수 있어요.` : `미리 써 두는 보드예요. <b>${md(day)}</b>이 되면 첫 화면에 떠요.`}</span><button data-go="${t0}">오늘로 ›</button></div>` : ""}
     <div class="tk-top">
       <div><h2>${isToday ? "오늘 할 일" : `${md(day)} 할 일`}</h2><small class="muted">${md(day)}${isToday ? " · 오늘" : ""}</small></div>
       <div class="tk-ring ${items.length && !left ? "all" : ""}">${items.length ? (left ? `<b>${left}</b><small>남음</small>` : `<b>🎉</b><small>모두 끝</small>`) : `<b>0</b><small>할 일</small>`}</div>
@@ -82,7 +111,7 @@ export async function renderTasks(ctx) {
       return `<section class="tk-group ${g.key}">
         <h3><span>${g.icon} ${g.title}</span>${g.list.length ? `<em>${sum(g.list)}</em>` : ""}</h3>
         <ul class="tk-list">${open.map(itemHtml).join("") || (g.add ? "" : "")}</ul>
-        ${g.add ? `<form class="tk-add" autocomplete="off"><input id="tk-new" maxlength="120" placeholder="+ 할 일 추가 (예: 콩이 약 먹이기)"><button class="btn primary sm">추가</button></form>` : ""}
+        ${g.add ? `<form class="tk-add" autocomplete="off"><input id="tk-new" maxlength="120" placeholder="${isToday ? "+ 할 일 추가 (예: 콩이 약 먹이기)" : `+ ${md(day)} 할 일 추가`}"><button class="btn primary sm">추가</button></form>` : ""}
       </section>`;
     }).join("")}
     ${doneList.length ? `<section class="tk-group done-g">
@@ -90,6 +119,9 @@ export async function renderTasks(ctx) {
       ${openDone ? `<ul class="tk-list">${doneList.map(itemHtml).join("")}</ul>` : ""}
     </section>` : ""}`;
 
+  $$("[data-go]", root).forEach((b) => b.addEventListener("click", () => { boardDay = b.dataset.go; renderTasks(C); }));
+  $$("[data-mv]", root).forEach((b) => b.addEventListener("click", () => { boardDay = addDays(boardDay, +b.dataset.mv); renderTasks(C); }));
+  $("#tk-date", root)?.addEventListener("change", (e) => { if (e.target.value) { boardDay = e.target.value; renderTasks(C); } });
   $("#tk-fold", root)?.addEventListener("click", () => { try { sessionStorage.setItem("tk-done-open", openDone ? "0" : "1"); } catch { /* 괜찮음 */ } renderTasks(C); });
   $$("[data-tk]", root).forEach((el) => el.addEventListener("change", () => toggle(items[+el.dataset.tk], el.checked)));
   $$("[data-del]", root).forEach((el) => el.addEventListener("click", async () => {
