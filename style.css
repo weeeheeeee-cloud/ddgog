@@ -1151,3 +1151,4 @@ small.breed { font-size: 11.5px; font-weight: 700; color: var(--muted); backgrou
 .dd-note-box{width:min(560px,100%)}
 .dd-note-box textarea{width:100%;min-height:200px;border:1px solid var(--line);border-radius:12px;padding:12px;font:inherit;font-size:15px;line-height:1.5;resize:vertical;background:#fff;box-sizing:border-box}
 .dd-note-meta{display:flex;justify-content:space-between;gap:8px;margin-top:6px}
+.dd-note-meta small:last-child{white-space:nowrap}
