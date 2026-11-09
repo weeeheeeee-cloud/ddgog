@@ -77,6 +77,22 @@ Deno.serve(async (req) => {
     if (body.action === "mark") {
       const items = (Array.isArray(body.items) ? body.items : []).slice(0, 2000) as { photo_id: string; pet_id: string }[];
       if (items.length) await admin.from("dd_pushed").upsert(items.map((x) => ({ photo_id: x.photo_id, pet_id: String(x.pet_id) })), { ignoreDuplicates: true });
+      // 임시저장까지 끝난 아이 = 검수 끝 → 그 아이들 학습 (기다리지 않고 뒤에서)
+      if (items.length) {
+        const pets = [...new Set(items.map((x) => String(x.pet_id)))];
+        const { data: ds } = await admin.from("dogs").select("id").in("dd_pet_id", pets);
+        const { data: ph } = await admin.from("photos").select("day").eq("id", items[0].photo_id).maybeSingle();
+        const { data: k } = await admin.from("internal_keys").select("key").eq("name", "worker").single();
+        if (ds?.length && ph?.day && k?.key) {
+          const learn = fetch(`${Deno.env.get("SUPABASE_URL")}/functions/v1/learn-verified`, {
+            method: "POST",
+            headers: { "content-type": "application/json", "x-worker-key": k.key, apikey: Deno.env.get("SUPABASE_ANON_KEY") ?? "" },
+            body: JSON.stringify({ day: ph.day, dog_ids: ds.map((d) => d.id) }),
+          }).catch(() => {});
+          // @ts-ignore EdgeRuntime 은 Supabase 런타임에 있음
+          if (typeof EdgeRuntime !== "undefined") EdgeRuntime.waitUntil(learn); else await learn;
+        }
+      }
       return json({ ok: true });
     }
   } catch (e) {

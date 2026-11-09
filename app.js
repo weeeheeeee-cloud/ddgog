@@ -2619,6 +2619,14 @@ function doneBanner(msg) {
   setTimeout(() => $("#progress").classList.add("hidden"), 10000);
 }
 
+// 다운로드·다이얼독 임시저장이 끝난 사진 = 검수 끝 → 그 아이들 새로 학습 (서버에서, 하루 아이당 한 번)
+function learnVerified(dogIds) {
+  const ids = [...new Set(dogIds)].filter((id) => { const d = dogById(id); return d && !d.auto; });
+  if (!ids.length || state.practice) return;
+  sb.functions.invoke("learn-verified", { body: { day: state.day, dog_ids: ids } })
+    .then(({ data }) => { if (data?.refs_added) toast(`검수 끝난 사진으로 ${ids.length}마리 학습했어요 (새 모습 ${data.refs_added}장)`); })
+    .catch(() => {});
+}
 async function saveDogPhotos(dog, photos, btn, mode) {
   const label = btn.textContent;
   btn.disabled = true;
@@ -2630,6 +2638,7 @@ async function saveDogPhotos(dog, photos, btn, mode) {
       let n = 0;
       const r = await syncFolder(dir, dog, photos, () => { btn.textContent = `${++n}/${photos.length}`; });
       doneBanner(`'${state.day}/${dog.name}' 폴더 · 새로 받은 사진 ${r.added}장${r.kept ? ` (이미 받은 ${r.kept}장은 건너뜀)` : ""}`);
+      learnVerified([dog.id]);
       btn.disabled = false;
       btn.textContent = label;
       return;
@@ -2644,6 +2653,7 @@ async function saveDogPhotos(dog, photos, btn, mode) {
       downloadBlob(await zip.generateAsync({ type: "blob" }), `${safeName(fileLabel(dog))}_${state.day}.zip`);
       doneBanner(`${dog.name} ${files.length}장 ZIP 다운로드 완료`);
     }
+    learnVerified([dog.id]);
   } catch (err) {
     if (err?.name !== "AbortError") toast("저장하지 못했어요. 다시 시도해 주세요.");
   }
@@ -2729,8 +2739,10 @@ async function saveAll(btn, onlyUnsorted = false) {
     }
     if (zip) {
       downloadBlob(await zip.generateAsync({ type: "blob" }), `${state.day}.zip`);
+      learnVerified([...groups.keys()].filter((id) => id !== UNSORTED_DIR.id));
       doneBanner(`${state.day}.zip · ${onlyUnsorted ? "분류 안 된 사진" : `강아지 ${groups.size - (loose.length ? 1 : 0)}마리`}, ${total}장${loose.length && !onlyUnsorted ? ` (분류 안 됨 ${loose.length}장 포함)` : ""}`);
     } else {
+      learnVerified([...groups.keys()].filter((id) => id !== UNSORTED_DIR.id));
       doneBanner(`'${window.__saveDirName || "다운로드"}/${state.day}' 폴더 · ${onlyUnsorted ? "'분류 안 됨' 폴더" : `강아지 ${groups.size - (loose.length ? 1 : 0)}마리${loose.length ? ` + '분류 안 됨' ${loose.length}장` : ""}`} · 새로 받은 사진 ${added}장${kept ? ` (이미 받은 ${kept}장은 건너뜀)` : ""}`);
     }
   } catch (err) {
