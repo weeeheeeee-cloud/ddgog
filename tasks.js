@@ -29,21 +29,10 @@ async function whoAmI() {
 
 // 그날 자동 할 일
 function autoItems(bookings) {
-  const out = [];
-  const list = bookings.filter((b) => b.status !== "cancelled").sort((a, b) => (a.out_time || "99").localeCompare(b.out_time || "99") || a.label.localeCompare(b.label, "ko"));
-  for (const b of list) {
-    const time = b.out_time ? `${b.out_time} ` : "";
-    for (const [k, ic, n] of CARE) {
-      if ((b.services || {})[k]) out.push({ ref: `${k}:${b.id}`, icon: ic, title: `${n} · ${b.label}`, sub: `${time ? `${time}퇴실 전` : "퇴실 전"}`, cls: "care" });
-    }
-    out.push({
-      ref: `out:${b.id}`, icon: "🏨", title: `퇴실 · ${b.label}`,
-      sub: b.out_time ? `${b.out_time} 퇴실` : "",
-      money: won(b.total), paid: !!b.prepaid, cls: "out",
-    });
-    if (!b.prepaid) out.push({ ref: `pay:${b.id}`, icon: "💳", title: `결제 받기 · ${b.label}`, sub: "", money: won(b.total), cls: "pay" });
-  }
-  return out;
+  // 호텔링: 퇴실하는 날, 아이 이름 + 결제 금액만
+  return bookings.filter((b) => b.status !== "cancelled")
+    .sort((a, b) => a.label.localeCompare(b.label, "ko"))
+    .map((b) => ({ ref: `out:${b.id}`, icon: "🏨", title: `퇴실 · ${b.label}`, sub: "", money: won(b.total), cls: "out" }));
 }
 
 export async function renderTasks(ctx) {
@@ -66,7 +55,7 @@ export async function renderTasks(ctx) {
     const doneRefs = new Set((wRows || []).filter((r) => r.day === d && r.ref && r.done).map((r) => r.ref));
     let n = (wRows || []).filter((r) => r.day === d && !r.ref && !r.done).length;
     for (const b of (wBks || []).filter((b) => b.check_out === d && b.status !== "cancelled")) {
-      const refs = [`out:${b.id}`, ...(b.prepaid ? [] : [`pay:${b.id}`]), ...CARE.filter(([k]) => (b.services || {})[k]).map(([k]) => `${k}:${b.id}`)];
+      const refs = [`out:${b.id}`];
       n += refs.filter((r) => !doneRefs.has(r)).length;
     }
     return n;
@@ -81,7 +70,7 @@ export async function renderTasks(ctx) {
   const isToday = day === kstToday();
   const left = items.filter((it) => !isDone(it)).length;
   const groups = [
-    { key: "out", title: "퇴실", icon: "🏨", list: items.filter((it) => it.cls === "out") },
+    { key: "out", title: "호텔링 퇴실 · 결제", icon: "🏨", list: items.filter((it) => it.cls === "out") },
     { key: "pay", title: "결제 받기", icon: "💳", list: items.filter((it) => it.cls === "pay") },
     { key: "care", title: "목욕 · 미용", icon: "🛁", list: items.filter((it) => it.cls === "care") },
     { key: "manual", title: "할 일", icon: "📌", list: items.filter((it) => it.cls === "manual"), add: true },
@@ -149,7 +138,7 @@ export async function renderTasks(ctx) {
     return `<li class="tk-item ${it.cls} ${d ? "done" : ""}">
       <label class="tk-check"><input type="checkbox" data-tk="${i}" ${d ? "checked" : ""}><span class="tk-box"></span></label>
       <div class="tk-main"><b class="tk-name">${esc(name)}</b>${meta ? `<small class="tk-sub">${esc(meta)}</small>` : ""}</div>
-      ${it.money ? `<div class="tk-right"><b class="tk-money">${it.money}</b>${it.cls === "out" ? (it.paid ? `<em class="tk-tag paid">선결제</em>` : `<em class="tk-tag due">결제 필요</em>`) : ""}</div>` : ""}
+      ${it.money ? `<div class="tk-right"><b class="tk-money">${it.money}</b></div>` : ""}
       ${it.cls === "manual" ? `<button class="tk-del" data-del="${i}" aria-label="지우기">×</button>` : ""}
     </li>`;
   }
