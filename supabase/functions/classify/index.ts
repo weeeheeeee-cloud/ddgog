@@ -153,8 +153,12 @@ Deno.serve(async (req) => {
   }
 
   const { data: photo, error: pErr } = await supa
-    .from("photos").select("id, day, thumb_path, vec, practice, dog_ids, find_dogs, not_dogs").eq("id", photoId).single();
+    .from("photos").select("id, day, thumb_path, vec, practice, dog_ids, find_dogs, not_dogs, confidence, rotation_checked").eq("id", photoId).single();
   if (pErr || !photo) return json({ error: "사진을 찾을 수 없어요" }, 404);
+  // 직원이 직접 확인·수정한 사진은 AI가 다시 건드리지 않음 (미리보기만 허용)
+  if (photo.confidence === "manual" && !preview) return json({ unchanged: true, manual: true });
+  // 방향은 여기서 정하지 않음: 분류가 끝나면 서버 작업자(auto-classify)가 4방향 비교로 따로 확인
+  //  (분류하면서 대충 정한 각도는 자주 틀리고, 직원이 돌린 사진을 덮어쓸 수 있음)
 
   // 특정 아이만 찾기: 올릴 때 고른 아이(들)만 후보. 그 아이가 없으면 'skip'
   const find: string[] = Array.isArray(photo.find_dogs) && photo.find_dogs.length && !only && !preview ? photo.find_dogs : [];
@@ -223,7 +227,7 @@ Deno.serve(async (req) => {
       const named = refs.filter((d) => !d.auto);
       const finish = async (ids: string[], note: string) => {
         if (preview) return json({ preview: true, dog_ids: ids, sure: ids, note, rotation: null, by: "fingerprint" });
-        await supa.from("photos").update({ dog_ids: ids, status: "done", confidence: "high", ai_note: note, claimed_at: null }).eq("id", photoId);
+        await supa.from("photos").update({ dog_ids: ids, status: "done", confidence: "high", ai_note: note, claimed_at: null }).eq("id", photoId).or("confidence.is.null,confidence.neq.manual");
         return json({ status: "done", dog_ids: ids, by: "fingerprint" });
       };
       // 1) 오늘 이미 분류된 거의 같은 장면 사진
@@ -391,12 +395,11 @@ Deno.serve(async (req) => {
     }
     if (recheck && !ids.length) return json({ unchanged: true });
     if (find.length) {
-      const rotation = [0, 90, 180, 270].includes(Number(parsed.rotate)) ? Number(parsed.rotate) : 0;
       await supa.from("photos").update({
-        rotation, dog_ids: ids, status: ids.length ? "done" : "skip",
+        dog_ids: ids, status: ids.length ? "done" : "skip",
         confidence: ids.length ? (allSure ? "high" : "low") : "high",
         ai_note: ids.length ? note : `찾는 아이 아님${note ? `: ${note}` : ""}`.slice(0, 200), claimed_at: null,
-      }).eq("id", photoId);
+      }).eq("id", photoId).or("confidence.is.null,confidence.neq.manual");
       return json({ status: ids.length ? "done" : "skip", dog_ids: ids });
     }
     if (only) {
@@ -407,22 +410,20 @@ Deno.serve(async (req) => {
       await supa.from("photos").update({
         dog_ids: finalIds, status: "done", confidence: allSure ? "high" : "low",
         ai_note: `직원 수정 후 다시 확인: ${note ?? ""}`.slice(0, 200), claimed_at: null,
-      }).eq("id", photoId);
+      }).eq("id", photoId).or("confidence.is.null,confidence.neq.manual");
       return json({ status: "done", dog_ids: finalIds, changed: finalIds.join() !== (photo.dog_ids ?? []).join() });
     }
 
     // 처음 보는 강아지: 새 그룹을 만들지 않고 '모르는 아이' 사진으로 둠 (화면에서 비슷한 사진끼리 묶어 보여줌)
     const isNew = !recheck && !ids.length && parsed.new_dog === true;
 
-    const rotation = [0, 90, 180, 270].includes(Number(parsed.rotate)) ? Number(parsed.rotate) : 0;
     await supa.from("photos").update({
-      rotation,
       dog_ids: ids,
       confidence: allSure ? "high" : "low",
       ai_note: isNew ? `처음 보는 아이${note ? `: ${note}` : ""}`.slice(0, 200) : note,
       status,
       claimed_at: null,
-    }).eq("id", photoId);
+    }).eq("id", photoId).or("confidence.is.null,confidence.neq.manual");
 
     return json({ status, dog_ids: ids });
   } catch (e) {

@@ -4,14 +4,57 @@
 
 import { createClient } from "jsr:@supabase/supabase-js@2";
 import { encodeBase64 } from "jsr:@std/encoding@1/base64";
+import { Image } from "https://deno.land/x/imagescript@1.3.0/mod.ts";
 
 const ANTHROPIC_KEY = Deno.env.get("ANTHROPIC_API_KEY") ?? "";
-const ROT_MODEL = Deno.env.get("ROTATE_MODEL") ?? "claude-haiku-5-5";
-const ROT_SYSTEM = `You check whether a photo from a dog daycare is upright. Phone photos are often saved sideways or upside down.
-Decide how many degrees the photo must be turned CLOCKWISE so it looks natural: floor/grass/ground at the bottom,
-walls and furniture vertical, people standing upright, dogs' legs pointing down to the floor, any text readable.
-Dogs lying on their side or photographed from directly above can look odd: rely on the floor, furniture and people.
-Reply with JSON only: {"rotate":0|90|180|270,"sure":true|false}`;
+// 방향 확인은 정확한 모델로: 같은 사진을 4방향으로 돌려 보여 주고 '바로 선 것'을 고르게 함 (각도를 맞히라는 것보다 훨씬 정확)
+const ROT_MODEL = Deno.env.get("ROTATE_MODEL") ?? "claude-sonnet-5-5";
+const ROT_SYSTEM = `You see the SAME photo from a dog daycare shown in 4 orientations, labeled A, B, C, D.
+Pick the one that is upright, the way the photographer saw the scene: floor/grass/ground at the bottom,
+sky or ceiling at the top, walls, doors and furniture vertical, people standing or sitting upright, any text readable.
+Dogs can lie on their side, roll on their back or be shot from above, so judge mainly by the floor, furniture,
+people, light from windows and gravity (leashes, hanging things, water). Phone photos are usually already upright.
+If the scene gives no clear clue (e.g. a close-up of fur, a dog on a rug from straight above), set "sure": false.
+Reply with JSON only: {"pick":"A"|"B"|"C"|"D","sure":true|false}`;
+
+// 정확히 90도 단위로 시계 방향 회전 (보간 없이 픽셀 그대로)
+function rotCW(img: Image, deg: number) {
+  let cur = img;
+  for (let k = 0; k < ((deg / 90) | 0) % 4; k++) {
+    const W = cur.width, H = cur.height, out = new Image(H, W), s = cur.bitmap, d = out.bitmap;
+    for (let y = 0; y < H; y++) for (let x = 0; x < W; x++) {
+      const si = (y * W + x) * 4, di = (x * H + (H - 1 - y)) * 4;
+      d[di] = s[si]; d[di + 1] = s[si + 1]; d[di + 2] = s[si + 2]; d[di + 3] = s[si + 3];
+    }
+    cur = out;
+  }
+  return cur;
+}
+
+// 4방향 중 바로 선 것 고르기 → 돌려야 할 각도(시계 방향) 또는 null(모름)
+async function pickUpright(views: Map<number, string>, order: number[]): Promise<number | null> {
+  const L = ["A", "B", "C", "D"];
+  const content: unknown[] = [];
+  order.forEach((deg, i) => {
+    content.push({ type: "text", text: `${L[i]}:` });
+    content.push({ type: "image", source: { type: "base64", media_type: "image/jpeg", data: views.get(deg)! } });
+  });
+  content.push({ type: "text", text: "Which one is upright?" });
+  const res = await fetch("https://api.anthropic.com/v1/messages", {
+    method: "POST",
+    headers: { "x-api-key": ANTHROPIC_KEY, "anthropic-version": "2023-06-01", "content-type": "application/json" },
+    body: JSON.stringify({ model: ROT_MODEL, max_tokens: 1500, system: ROT_SYSTEM, messages: [{ role: "user", content }] }),
+  });
+  if (!res.ok) throw new Error(`rot ${res.status}`);
+  const out = await res.json();
+  const text: string = (out.content ?? []).map((c: { text?: string }) => c.text ?? "").join("");
+  const m = text.match(/\{[\s\S]*\}/);
+  const j = m ? JSON.parse(m[0]) : {};
+  const i = L.indexOf(String(j.pick ?? "").toUpperCase());
+  if (i < 0 || j.sure === false) return null;
+  return order[i];
+}
+const shuffle = <T>(a: T[]) => { const b = [...a]; for (let i = b.length - 1; i > 0; i--) { const j = Math.floor(Math.random() * (i + 1)); [b[i], b[j]] = [b[j], b[i]]; } return b; };
 
 const URL = Deno.env.get("SUPABASE_URL")!;
 const json = (b: unknown, s = 200) => new Response(JSON.stringify(b), { status: s, headers: { "Content-Type": "application/json" } });
@@ -68,9 +111,10 @@ Deno.serve(async (req) => {
       const sibs = g.filter((x) => x.id !== rep.id).map((x) => x.id);
       if (!sibs.length) return;
       if (ok) {
-        const { data: r } = await admin.from("photos").select("dog_ids, status, confidence, rotation").eq("id", rep.id).single();
+        // 방향은 사진마다 따로 확인하므로 분류만 복사. 직원이 고친 사진은 건드리지 않음
+        const { data: r } = await admin.from("photos").select("dog_ids, status, confidence").eq("id", rep.id).single();
         if (r) {
-          await admin.from("photos").update({ ...r, ai_note: "연속 사진: 바로 앞 사진과 같은 분류", claimed_at: null }).in("id", sibs);
+          await admin.from("photos").update({ ...r, ai_note: "연속 사진: 바로 앞 사진과 같은 분류", claimed_at: null }).in("id", sibs).or("confidence.is.null,confidence.neq.manual");
           copied += sibs.length;
           return;
         }
@@ -78,39 +122,40 @@ Deno.serve(async (req) => {
       await admin.from("photos").update({ status: "pending", claimed_at: null }).in("id", sibs);
     }));
   }
-  // 회전 전용 확인: 분류된 사진 중 아직 회전을 따로 확인하지 않은 것 (직원이 돌린 사진은 제외)
+  // 방향 확인: 최근 3일 분류된 사진 중 아직 방향을 확인하지 않은 것 (직원이 직접 돌린 사진은 rotation_checked=true 라 제외)
+  //  · 4방향을 보여 주고 바로 선 것을 고름 → 돌려야 한다고 나오면 순서를 섞어 한 번 더 물어 둘 다 같을 때만 돌림
+  //  · 확실하지 않으면 지금 방향을 그대로 둠
   let rotated = 0, checked = 0;
   if (ANTHROPIC_KEY && Date.now() - started < 100_000) {
+    const since = new Date(Date.now() + 9 * 3600e3 - 2 * 86400e3).toISOString().slice(0, 10);
     const { data: rot } = await admin.from("photos").select("id, thumb_path, rotation")
-      .eq("day", day).eq("status", "done").eq("rotation_checked", false).limit(30);
+      .gte("day", since).lte("day", day).eq("status", "done").eq("rotation_checked", false)
+      .order("day", { ascending: false }).limit(60);
     const list = rot ?? [];
     let i = 0;
-    await Promise.all(Array.from({ length: Math.min(6, list.length) }, async () => {
+    await Promise.all(Array.from({ length: Math.min(8, list.length) }, async () => {
       while (i < list.length && Date.now() - started < 130_000) {
         const p = list[i++];
         try {
           const { data: b } = await admin.storage.from("photos").download(p.thumb_path);
           if (!b) continue;
-          const res = await fetch("https://api.anthropic.com/v1/messages", {
-            method: "POST",
-            headers: { "x-api-key": ANTHROPIC_KEY, "anthropic-version": "2023-06-01", "content-type": "application/json" },
-            body: JSON.stringify({ model: ROT_MODEL, max_tokens: 1500, system: ROT_SYSTEM, messages: [{ role: "user", content: [
-              { type: "image", source: { type: "base64", media_type: "image/jpeg", data: encodeBase64(new Uint8Array(await b.arrayBuffer())) } },
-              { type: "text", text: "How many degrees clockwise to make it upright?" },
-            ] }] }),
-          });
-          if (!res.ok) continue;
-          const out = await res.json();
-          const text: string = (out.content ?? []).map((c: { text?: string }) => c.text ?? "").join("");
-          const m = text.match(/\{[\s\S]*\}/);
-          const j = m ? JSON.parse(m[0]) : {};
-          const r = [0, 90, 180, 270].includes(Number(j.rotate)) ? Number(j.rotate) : null;
+          const img = await Image.decode(new Uint8Array(await b.arrayBuffer()));
+          const views = new Map<number, string>();
+          for (const deg of [0, 90, 180, 270]) views.set(deg, encodeBase64(await rotCW(img, deg).encodeJPEG(80)));
+          const first = await pickUpright(views, shuffle([0, 90, 180, 270]));
+          let r: number | null = first;
+          if (first !== null && first !== 0) {
+            const second = await pickUpright(views, shuffle([0, 90, 180, 270]));
+            r = second === first ? first : null;
+          }
+          // 확실하지 않거나 두 번 답이 다르면 지금 방향 그대로 둠
+          const finalRot = r ?? (p.rotation ?? 0);
           const upd: Record<string, unknown> = { rotation_checked: true };
-          if (r !== null && j.sure !== false && r !== (p.rotation ?? 0)) { upd.rotation = r; rotated++; }
-          // 다시 확인한 사이 직원이 돌렸으면 덮어쓰지 않음
+          if (finalRot !== (p.rotation ?? 0)) { upd.rotation = finalRot; rotated++; }
+          // 확인하는 사이 직원이 돌렸으면 덮어쓰지 않음
           await admin.from("photos").update(upd).eq("id", p.id).eq("rotation_checked", false);
           checked++;
-        } catch { /* 다음 번에 다시 */ }
+        } catch (e) { console.error("rot", p.id, String(e)); }
       }
     }));
   }

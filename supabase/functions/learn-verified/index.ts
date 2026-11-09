@@ -33,9 +33,17 @@ const cos = (a: number[], b: number[]) => {
 
 async function rotatedJpeg(bytes: Uint8Array, rot: number) {
   if (!rot) return bytes;
-  const img = await Image.decode(bytes);
-  img.rotate(rot); // 시계 방향
-  return await img.encodeJPEG(85);
+  // 정확히 90도 단위로 시계 방향 회전 (보간 없이 픽셀 그대로)
+  let cur = await Image.decode(bytes);
+  for (let k = 0; k < ((rot / 90) | 0) % 4; k++) {
+    const W = cur.width, H = cur.height, out = new Image(H, W), s = cur.bitmap, d = out.bitmap;
+    for (let y = 0; y < H; y++) for (let x = 0; x < W; x++) {
+      const si = (y * W + x) * 4, di = (x * H + (H - 1 - y)) * 4;
+      d[di] = s[si]; d[di + 1] = s[si + 1]; d[di + 2] = s[si + 2]; d[di + 3] = s[si + 3];
+    }
+    cur = out;
+  }
+  return await cur.encodeJPEG(85);
 }
 
 Deno.serve(async (req) => {

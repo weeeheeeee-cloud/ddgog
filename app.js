@@ -1002,7 +1002,7 @@ async function verifyFolder(dog, anchors) {
   state.busy = true;
   const batches = [];
   for (let i = 0; i < list.length; i += 6) batches.push(list.slice(i, i + 6));
-  let done = 0, out = 0, rotated = 0, fail = 0;
+  let done = 0, out = 0, fail = 0;
   const title = `${dog.name} 폴더 다시 검수 중… 창을 닫지 마세요`;
   progress(title, 0, list.length, anchors.length ? `기준 사진 ${anchors.length}장과 비교해요` : "대표 사진과 비교해요");
   await pool(batches, 3, async (batch) => {
@@ -1013,14 +1013,14 @@ async function verifyFolder(dog, anchors) {
         const p = state.photos.find((x) => x.id === r.id);
         if (!p) continue;
         const upd = {};
-        if (!r.same) {
+        if (!r.same && p.confidence !== "manual") { // 직원이 확인·수정한 사진은 빼지 않음
           const rest = p.dog_ids.filter((d) => d !== dog.id);
           Object.assign(upd, { dog_ids: rest, not_dogs: [...new Set([...(p.not_dogs || []), dog.id])],
             status: rest.length ? "done" : "review", ai_note: `${dog.name} 검수에서 뺌${r.note ? `: ${r.note}` : ""}`.slice(0, 200) });
           if (!rest.length) upd.confidence = null;
           out++;
         }
-        if (!p.rotation_checked && (r.rotate || 0) !== (p.rotation || 0)) { upd.rotation = r.rotate || 0; rotated++; }
+        // 방향은 서버가 4방향 비교로 따로 확인 (여기서 대충 정한 각도로 덮어쓰지 않음)
         if (Object.keys(upd).length) {
           await sb.from("photos").update(upd).eq("id", p.id);
           Object.assign(p, upd);
@@ -1028,10 +1028,10 @@ async function verifyFolder(dog, anchors) {
       }
     } catch (e) { console.warn(e); fail += batch.length; }
     done += batch.length;
-    progress(title, done, list.length, `뺀 사진 ${out}장 · 돌린 사진 ${rotated}장${fail ? ` · 확인 못 함 ${fail}장` : ""}`);
+    progress(title, done, list.length, `뺀 사진 ${out}장${fail ? ` · 확인 못 함 ${fail}장` : ""}`);
   });
   state.busy = false;
-  progress(`${dog.name} 검수 끝`, list.length, list.length, `${list.length}장 중 ${out}장을 맨 아래 '모르는 아이' 칸으로 뺐고, ${rotated}장을 바로 세웠어요${fail ? ` · ${fail}장은 확인하지 못했어요(다시 누르면 이어서)` : ""}`);
+  progress(`${dog.name} 검수 끝`, list.length, list.length, `${list.length}장 중 ${out}장을 맨 아래 '모르는 아이' 칸으로 뺐어요${fail ? ` · ${fail}장은 확인하지 못했어요(다시 누르면 이어서)` : ""}`);
   toast(out ? `${dog.name} 폴더에서 다른 아이로 보이는 사진 ${out}장을 뺐어요` : `${dog.name} 폴더는 모두 같은 아이로 보여요`);
   urlCache?.clear?.();
   await renderPhotos();
@@ -2042,8 +2042,9 @@ async function classifyPending() {
       if (await classifyOne(rep.id)) {
         ok++;
         if (sibs.length) {
-          const { data: r } = await sb.from("photos").select("dog_ids, status, confidence, rotation").eq("id", rep.id).single();
-          if (r) { await sb.from("photos").update({ ...r, ai_note: "연속 사진: 바로 앞 사진과 같은 분류", claimed_at: null }).in("id", sibs); ok += sibs.length; saved += sibs.length; }
+          // 분류만 복사 (방향은 사진마다 서버가 따로 확인). 직원이 고친 사진은 건드리지 않음
+          const { data: r } = await sb.from("photos").select("dog_ids, status, confidence").eq("id", rep.id).single();
+          if (r) { await sb.from("photos").update({ ...r, ai_note: "연속 사진: 바로 앞 사진과 같은 분류", claimed_at: null }).in("id", sibs).or("confidence.is.null,confidence.neq.manual"); ok += sibs.length; saved += sibs.length; }
         }
       } else {
         await sb.from("photos").update({ status: "pending", claimed_at: null }).in("id", g.map((x) => x.id)).eq("status", "working");
@@ -2192,11 +2193,11 @@ async function applyReclassify(chosen, ov, rejected = []) {
     if (mistakeN < 8 && r.aiIds.length === 1 && named(r.aiIds[0])) { learnMistake(r.rep.id, r.aiIds[0], null); mistakeN++; }
   }
   for (const r of chosen) {
-    const conf = r.manual ? "manual" : r.ids.every((id) => r.sure.has(id)) ? "high" : "low";
     for (const p of r.members) {
+      // 직원이 이 화면에서 직접 고른 것·원래 직원이 확인했던 사진은 '직원 확인'으로 유지
+      const conf = r.manual || p.confidence === "manual" ? "manual" : r.ids.every((id) => r.sure.has(id)) ? "high" : "low";
       const before = { status: p.status, ids: [...p.dog_ids], conf: p.confidence };
       const upd = { dog_ids: r.ids, status: "done", confidence: conf, ai_note: r.manual ? "직원이 확인 후 넣음" : `확인 후 넣음: ${r.note}`.slice(0, 200), find_dogs: [], claimed_at: null };
-      if (!p.rotation_checked && r.rotation != null && p.id === r.rep.id) upd.rotation = r.rotation;
       await sb.from("photos").update(upd).eq("id", p.id);
       Object.assign(p, upd);
       // 직원이 확인한 사진은 학습: 직접 고른 아이 + AI가 확신 못 했는데 맞힌 아이 (확신해서 맞힌 건 이미 아는 것)
