@@ -160,7 +160,7 @@
   function drawList() {
     const ready = rows.filter((r) => r.on);
     $bd.innerHTML = `<p class="msg">${+mine.day.slice(5, 7)}월 ${+mine.day.slice(8, 10)}일 출석부 ${rows.length}마리 · 분류된 사진과 아래 글을 아이별 알림장으로 <b>임시저장</b>해요. 보호자에게 바로 가지 않아요.</p>`
-      + `<div class="note"><b>✍️ 알림장 글 (모든 아이 똑같이 들어가요)</b><textarea id="ddg-note" maxlength="1000" placeholder="여기에 붙여 넣으면 다음에도 그대로 기억해요">${esc(noteText)}</textarea><small>비워 두면 사진만 넣어요 · 최대 1000자</small></div>`
+      + `<div class="note"><b>✍️ 알림장 글 (모든 아이 똑같이 들어가요)</b><textarea id="ddg-note" maxlength="1000" placeholder="글 없음 — 사진만 넣어요">${esc(noteText)}</textarea><small>댕겨올개 사이트의 📮 다이얼독 알림장 버튼에서 붙여 넣은 글이에요 · 여기서 고쳐도 돼요</small></div>`
       + missHtml()
       + `<div class="sec">출석부 아이</div>`
       + (rows.length ? rows.map((r, i) => `<label class="row ${r.state === "ready" ? "" : "off"}">

@@ -3459,9 +3459,40 @@ $("#dd-new")?.addEventListener("click", async () => {
   toast("노란 버튼을 북마크바로 끌어다 놓아 주세요");
 });
 // 사진 탭의 '다이얼독 알림장' 버튼: 다이얼독을 열고 북마크를 누르라고 안내
-function openDialdogPush() {
-  window.open("https://dialodog.com/partners/#reports/drafts", "dialodog");
-  toast("다이얼독에서 북마크 ‘댕겨올개 알림장’을 눌러 주세요. 아직 없으면 관리자 탭에서 만들어요.", 6000);
+// 다이얼독 알림장 버튼: 모든 아이 알림장에 똑같이 붙일 글을 먼저 붙여 넣고 → 다이얼독 열기
+async function openDialdogPush() {
+  document.querySelector(".dd-note-ov")?.remove();
+  const ov = document.createElement("div");
+  ov.className = "rc-overlay dd-note-ov";
+  ov.innerHTML = `<div class="rc-box dd-note-box">
+    <div class="rc-head"><div style="flex:1"><b>📮 다이얼독 알림장 임시저장</b><small class="muted">아래 글이 오늘 출석부 아이들 알림장에 똑같이 들어가요 (H 호텔링 제외)</small></div><button class="icon" data-x aria-label="닫기">×</button></div>
+    <div class="rc-body">
+      <textarea id="dd-note-text" maxlength="1000" rows="9" placeholder="여기에 알림장 글을 붙여 넣어 주세요"></textarea>
+      <div class="dd-note-meta"><small class="muted">비워 두면 사진만 넣어요 · 다음에도 이 글이 그대로 남아 있어요</small><small id="dd-note-n" class="muted">0 / 1000</small></div>
+    </div>
+    <div class="rc-foot"><button class="btn" data-x>취소</button><button class="btn primary" id="dd-note-go">저장하고 다이얼독 열기</button></div>
+  </div>`;
+  document.body.appendChild(ov);
+  const ta = $("#dd-note-text", ov), n = $("#dd-note-n", ov);
+  const count = () => { n.textContent = `${ta.value.length} / 1000`; };
+  ta.addEventListener("input", count);
+  const close = () => ov.remove();
+  ov.querySelectorAll("[data-x]").forEach((b) => b.addEventListener("click", close));
+  ov.addEventListener("click", (e) => { if (e.target === ov) close(); });
+  const { data } = await sb.from("app_settings").select("value").eq("name", "dd_note").maybeSingle();
+  if (!ta.value) ta.value = data?.value?.text || "";
+  count();
+  ta.focus();
+  $("#dd-note-go", ov).addEventListener("click", async (e) => {
+    const btn = e.currentTarget;
+    const w = window.open("https://dialodog.com/partners/#reports/drafts", "dialodog"); // 팝업 막힘 방지: 먼저 열기
+    btn.disabled = true; btn.textContent = "저장 중…";
+    const { error } = await sb.from("app_settings").update({ value: { text: ta.value.trim().slice(0, 1000) } }).eq("name", "dd_note");
+    if (error) { btn.disabled = false; btn.textContent = "저장하고 다이얼독 열기"; toast("글을 저장하지 못했어요. 다시 눌러 주세요."); return; }
+    close();
+    if (!w) toast("팝업이 막혔어요. 다이얼독을 직접 열어 주세요.", 6000);
+    toast("다이얼독에서 북마크 ‘댕겨올개 알림장’을 눌러 주세요. 아직 없으면 관리자 탭에서 만들어요.", 6000);
+  });
 }
 
 // 새로 추가되는 사진 알림: 다른 사람(선생님 링크·다른 직원 계정)이 올린 오늘 사진을 세어서,
