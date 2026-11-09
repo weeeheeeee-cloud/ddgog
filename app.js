@@ -126,9 +126,10 @@ async function exifTime(file) {
   return null;
 }
 // 한 아이의 사진들을 비슷한 장면끼리 묶어, 묶음마다 가장 선명한 3장만 보여줌
-function splitSimilar(list) {
+function splitSimilar(list, dogId) {
   const t = (p) => new Date(p.taken_at || p.created_at).getTime();
   const sorted = [...list].sort((a, b) => t(a) - t(b));
+  const custom = dogId && state.order?.get(dogId)?.length;
   const clusters = [];
   for (const p of sorted) {
     let home = null;
@@ -141,7 +142,11 @@ function splitSimilar(list) {
   for (const c of clusters) {
     [...c].sort((a, b) => (b.sharp || 0) - (a.sharp || 0)).slice(0, SIM_KEEP).forEach((p) => keep.add(p.id));
   }
-  return { shown: sorted.filter((p) => keep.has(p.id)), extra: sorted.filter((p) => !keep.has(p.id)) };
+  if (!custom) return { shown: sorted.filter((p) => keep.has(p.id)), extra: sorted.filter((p) => !keep.has(p.id)) };
+  // 순서를 정했으면: 그 순서대로, 순서에 넣은 사진은 비슷해도 숨기지 않음
+  const ids = new Set(state.order.get(dogId));
+  const ord = sortForDog(dogId, list);
+  return { shown: ord.filter((p) => keep.has(p.id) || ids.has(p.id)), extra: ord.filter((p) => !keep.has(p.id) && !ids.has(p.id)) };
 }
 
 async function resize(file, maxSide, quality) {
@@ -478,8 +483,75 @@ async function loadPhotos() {
     if (!data || data.length < 1000) break;
   }
   state.photos = all;
+  await loadOrder();
   backfillStats();
 }
+
+/* ---------- 순서·대표 정하기 창 ---------- */
+async function openOrder(dogId, list, thumb) {
+  const dog = dogById(dogId);
+  if (!dog) return;
+  let ids = sortForDog(dogId, list).map((p) => p.id);
+  const byId = new Map(list.map((p) => [p.id, p]));
+  document.querySelector(".rc-overlay")?.remove();
+  const ov = document.createElement("div");
+  ov.className = "rc-overlay";
+  ov.innerHTML = `<div class="rc-box po-box">
+    <div class="rc-head"><div class="grow"><b>${esc(dog.name)} 사진 순서</b><small class="muted">끌어서 순서를 바꾸고, ⭐를 누르면 대표 사진(맨 앞)이 돼요</small></div><button class="btn ghost sm" data-close>닫기</button></div>
+    <div class="rc-body"><div class="po-grid" id="po-grid"></div></div>
+    <div class="rc-foot"><button class="btn ghost sm" data-reset>찍은 순서로 되돌리기</button><span class="grow"></span><button class="btn primary sm" data-save>순서 저장</button></div>
+  </div>`;
+  document.body.appendChild(ov);
+  const close = () => ov.remove();
+  ov.addEventListener("click", (e) => { if (e.target === ov) close(); });
+  $("[data-close]", ov).addEventListener("click", close);
+  const grid = $("#po-grid", ov);
+  const draw = () => {
+    grid.innerHTML = ids.map((id, i) => { const p = byId.get(id); return `<div class="po-it ${i === 0 ? "cover" : ""}" data-id="${id}">
+      <img src="${thumb(p.thumb_path)}" class="rot${p.rotation || 0}" alt="" draggable="false">
+      <span class="po-n">${i === 0 ? "대표" : i + 1}</span>
+      <button class="po-star" data-star="${id}" aria-label="대표 사진으로">${i === 0 ? "⭐" : "☆"}</button>
+      <span class="po-mv"><button data-up="${id}" aria-label="앞으로">‹</button><button data-down="${id}" aria-label="뒤로">›</button></span>
+    </div>`; }).join("");
+    $$("[data-star]", grid).forEach((b) => b.addEventListener("click", () => { ids = [b.dataset.star, ...ids.filter((x) => x !== b.dataset.star)]; draw(); }));
+    $$("[data-up]", grid).forEach((b) => b.addEventListener("click", () => { const i = ids.indexOf(b.dataset.up); if (i > 0) { [ids[i - 1], ids[i]] = [ids[i], ids[i - 1]]; draw(); } }));
+    $$("[data-down]", grid).forEach((b) => b.addEventListener("click", () => { const i = ids.indexOf(b.dataset.down); if (i < ids.length - 1) { [ids[i + 1], ids[i]] = [ids[i], ids[i + 1]]; draw(); } }));
+  };
+  draw();
+  try {
+    const { default: Sortable } = await import("https://cdn.jsdelivr.net/npm/sortablejs@1.15.2/modular/sortable.esm.js");
+    Sortable.create(grid, { animation: 150, delay: 120, delayOnTouchOnly: true, filter: "button", preventOnFilter: false,
+      onEnd: () => { ids = $$(".po-it", grid).map((el) => el.dataset.id); draw(); } });
+  } catch { /* 끌기가 안 되면 ‹ › 버튼으로 */ }
+  $("[data-reset]", ov).addEventListener("click", async () => {
+    await sb.from("photo_order").delete().eq("day", state.day).eq("dog_id", dogId);
+    state.order.delete(dogId);
+    toast("찍은 순서로 되돌렸어요");
+    close(); renderPhotos();
+  });
+  $("[data-save]", ov).addEventListener("click", async () => {
+    const { error } = await sb.from("photo_order").upsert({ day: state.day, dog_id: dogId, ids, updated_at: new Date().toISOString() }, { onConflict: "day,dog_id" });
+    if (error) { toast("저장하지 못했어요"); return; }
+    state.order.set(dogId, ids);
+    toast("순서를 저장했어요. 다운로드·다이얼독도 이 순서예요");
+    close(); renderPhotos();
+  });
+}
+
+/* ---------- 사진 순서·대표 사진 (아이별·날짜별, 맨 앞 = 대표) ---------- */
+state.order = new Map(); // 아이 id → [사진 id 순서]
+async function loadOrder() {
+  const { data } = await sb.from("photo_order").select("dog_id, ids").eq("day", state.day);
+  state.order = new Map((data || []).map((r) => [r.dog_id, r.ids || []]));
+}
+// 정한 순서가 있으면 그 순서대로, 새로 들어온 사진은 뒤에 찍은 시간 순
+function sortForDog(dogId, list) {
+  const t = (p) => new Date(p.taken_at || p.created_at).getTime();
+  const ids = state.order.get(dogId) || [];
+  const rank = new Map(ids.map((id, i) => [id, i]));
+  return [...list].sort((a, b) => (rank.has(a.id) ? rank.get(a.id) : 1e9) - (rank.has(b.id) ? rank.get(b.id) : 1e9) || t(a) - t(b));
+}
+const coverOf = (dogId) => (state.order.get(dogId) || [])[0] || null;
 
 // 지문이 없는 예전 사진은 썸네일로 계산해서 채워 둠 (한 번만)
 let backfilling = false;
@@ -589,7 +661,7 @@ async function renderPhotos() {
   }));
   const dogIds = [...groups.keys()].sort((a, b) => dogOrder(dogById(a), dogById(b)));
   // 비슷한 사진은 3장까지만 보이고 저장 (펼치면 전부)
-  const sets = new Map(dogIds.map((id) => [id, splitSimilar(groups.get(id))]));
+  const sets = new Map(dogIds.map((id) => [id, splitSimilar(groups.get(id), id)]));
   const visible = (id) => (state.expanded.has(id) ? [...sets.get(id).shown, ...sets.get(id).extra] : sets.get(id).shown);
 
   const box = $("#groups");
@@ -601,7 +673,8 @@ async function renderPhotos() {
   await loadClusters(unsorted);
   const thumb = await signed("photos", P.map((p) => p.thumb_path));
   const ref = await signed("refs", dogIds.map((id) => dogById(id)?.ref_path));
-  const img = (p) => `<img loading="lazy" src="${thumb(p.thumb_path)}" data-photo="${p.id}" class="rot${p.rotation || 0}${p.status === "done" && p.confidence === "low" ? " unsure" : ""}${state.sel?.ids.has(p.id) ? " picked" : ""}" alt=""${p.status === "done" && p.confidence === "low" ? ' title="AI가 확신하지 못한 사진 — 확인해 주세요"' : ""}>`;
+  const covers = new Set(dogIds.map(coverOf).filter(Boolean));
+  const img = (p) => `<img loading="lazy" src="${thumb(p.thumb_path)}" data-photo="${p.id}" class="${covers.has(p.id) ? "cover " : ""}rot${p.rotation || 0}${p.status === "done" && p.confidence === "low" ? " unsure" : ""}${state.sel?.ids.has(p.id) ? " picked" : ""}" alt=""${p.status === "done" && p.confidence === "low" ? ' title="AI가 확신하지 못한 사진 — 확인해 주세요"' : ""}>`;
 
   box.innerHTML = dogIds.map((id) => {
     const dog = dogById(id);
@@ -614,7 +687,7 @@ async function renderPhotos() {
           <button class="dog-name ${dog.auto ? "unnamed" : ""}" data-rename="${id}">${esc(dog.name)} <span>✎</span></button>
           <small class="muted">${shown.length}장${extra.length ? ` · 비슷한 사진 ${extra.length}장 ${open ? "펼침" : "접힘"}` : ""}</small>
         </div>
-        <div class="save-btns">${state.busy ? "" : `<button class="btn ghost sm" data-verify="${id}">🔍 다시 검수</button>`}${selBtn(id)}${saveButtons(id)}</div>
+        <div class="save-btns">${state.busy ? "" : `<button class="btn ghost sm" data-order="${id}">↕ 순서·대표</button><button class="btn ghost sm" data-verify="${id}">🔍 다시 검수</button>`}${selBtn(id)}${saveButtons(id)}</div>
       </div>
       <div class="grid">${shown.map(img).join("")}</div>
       ${extra.length ? `<button class="more-sim" data-expand="${id}">${open ? "비슷한 사진 접기 ▲" : `비슷한 사진 ${extra.length}장 더 보기 ▼`}</button>
@@ -682,6 +755,7 @@ async function renderPhotos() {
     state.sel = { key: "unsorted", ids: new Set(b.dataset.pickCluster.split(",")), all: lists.get("unsorted") || [] };
     renderPhotos();
   }));
+  $$("[data-order]", box).forEach((b) => b.addEventListener("click", () => openOrder(b.dataset.order, [...groups.get(b.dataset.order)], thumb)));
   $$("[data-verify]", box).forEach((b) => b.addEventListener("click", () => {
     const key = b.dataset.verify;
     state.sel = { key, ids: new Set(), all: lists.get(key) || [], mode: "verify" };
@@ -2368,18 +2442,20 @@ async function rotated(blob, deg) {
 }
 
 // 파일 이름은 사진마다 고정(찍은 시각 + 사진 id) → 다시 받아도 같은 사진이 두 번 생기지 않음
-function photoFileName(dog, p) {
+// 순서를 정한 아이는 파일 이름 앞에 번호(01, 02…)를 붙여서 폴더에서도 그 순서로 보이게 (01 = 대표 사진)
+function photoFileName(dog, p, i) {
   const tm = new Date(p.taken_at || p.created_at);
   const t = isNaN(tm) ? "" : `${String(tm.getHours()).padStart(2, "0")}${String(tm.getMinutes()).padStart(2, "0")}${String(tm.getSeconds()).padStart(2, "0")}_`;
-  return `${safeName(dog.name)}_${state.day}_${t}${p.id.slice(0, 6)}.jpg`;
+  const n = i != null && state.order.get(dog.id)?.length ? `${String(i + 1).padStart(2, "0")}_` : "";
+  return `${safeName(dog.name)}_${state.day}_${n}${t}${p.id.slice(0, 6)}.jpg`;
 }
+const namedFor = (dog, photos) => sortForDog(dog.id, photos).map((p, i) => ({ p, name: photoFileName(dog, p, i) }));
 async function photoFiles(dog, photos, onEach, skip = new Set()) {
   const out = [];
-  const sorted = [...photos].sort((a, b) => String(a.taken_at || a.created_at).localeCompare(String(b.taken_at || b.created_at)))
-    .filter((p) => !skip.has(photoFileName(dog, p)));
-  await pool(sorted, 4, async (p, i) => {
+  const list = namedFor(dog, photos).filter((x) => !skip.has(x.name));
+  await pool(list, 4, async ({ p, name }, i) => {
     const { data } = await sb.storage.from("photos").download(p.path);
-    out[i] = new File([await rotated(data, p.rotation || 0)], photoFileName(dog, p), { type: "image/jpeg" });
+    out[i] = new File([await rotated(data, p.rotation || 0)], name, { type: "image/jpeg" });
     onEach?.();
   });
   return out.filter(Boolean);
@@ -2387,16 +2463,21 @@ async function photoFiles(dog, photos, onEach, skip = new Set()) {
 // 폴더 맞추기: 이미 받은 사진은 건너뛰고 새 사진만 받아서 넣음.
 // 이 아이에게서 빠진 사진(다른 아이로 옮겨짐 등)의 파일만 정리
 async function syncFolder(dir, dog, photos, onEach) {
-  const want = new Set(photos.map((p) => photoFileName(dog, p)));
+  const named = namedFor(dog, photos);
+  const want = new Set(named.map((x) => x.name));
+  const byId = new Map(named.map((x) => [x.p.id.slice(0, 6), x.name])); // 순서만 바뀐 파일은 이름만 바꿈
   const have = new Set();
   let removed = 0;
   const mine = `${safeName(dog.name)}_${state.day}_`;
   for await (const [name, h] of dir.entries()) {
     if (h.kind !== "file") continue;
-    if (want.has(name)) have.add(name);
-    else if (name.startsWith(mine) && /\.jpe?g$/i.test(name)) { try { await dir.removeEntry(name); removed++; } catch { /* 무시 */ } }
+    if (want.has(name)) { have.add(name); continue; }
+    if (!name.startsWith(mine) || !/\.jpe?g$/i.test(name)) continue;
+    const to = byId.get(name.replace(/\.jpe?g$/i, "").slice(-6));
+    if (to && !have.has(to) && h.move) { try { await h.move(to); have.add(to); continue; } catch { /* 새로 받음 */ } }
+    try { await dir.removeEntry(name); removed++; } catch { /* 무시 */ }
   }
-  photos.filter((p) => have.has(photoFileName(dog, p))).forEach(() => onEach?.(true));
+  named.filter((x) => have.has(x.name)).forEach(() => onEach?.(true));
   const files = await photoFiles(dog, photos, () => onEach?.(false), have);
   for (const f of files) {
     const fh = await dir.getFileHandle(f.name, { create: true });
@@ -2496,7 +2577,7 @@ async function saveAll(btn, onlyUnsorted = false) {
     groups.get(d).push(p);
   }));
   for (const [id, list] of groups) {
-    const { shown, extra } = splitSimilar(list);
+    const { shown, extra } = splitSimilar(list, id);
     groups.set(id, state.expanded.has(id) ? [...shown, ...extra] : shown);
   }
   // 분류 안 된 사진은 '분류 안 됨' 폴더로

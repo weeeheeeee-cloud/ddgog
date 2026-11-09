@@ -42,16 +42,19 @@ Deno.serve(async (req) => {
       }
       const { data: done } = await admin.from("dd_pushed").select("photo_id, pet_id").in("photo_id", photos.map((p) => p.id).slice(0, 5000));
       const pushed = new Set((done ?? []).map((x) => `${x.photo_id}|${x.pet_id}`));
-      const out = new Map<string, { petId: string; name: string; photos: { id: string; path: string; rotation: number; pushed: boolean; t: string }[] }>();
+      // 사진함에서 정한 순서(맨 앞 = 대표 사진)
+      const { data: orders } = await admin.from("photo_order").select("dog_id, ids").eq("day", day);
+      const orderOf = new Map((orders ?? []).map((o: { dog_id: string; ids: string[] }) => [o.dog_id, new Map((o.ids ?? []).map((id, i) => [id, i]))]));
+      const out = new Map<string, { petId: string; name: string; dogId: string; photos: { id: string; path: string; rotation: number; pushed: boolean; t: string }[] }>();
       for (const p of photos) {
         for (const id of p.dog_ids ?? []) {
           const d = byDog.get(id);
           if (!d) continue;
-          if (!out.has(d.dd_pet_id)) out.set(d.dd_pet_id, { petId: d.dd_pet_id, name: d.name, photos: [] });
+          if (!out.has(d.dd_pet_id)) out.set(d.dd_pet_id, { petId: d.dd_pet_id, name: d.name, dogId: d.id, photos: [] });
           out.get(d.dd_pet_id)!.photos.push({ id: p.id, path: p.path, rotation: p.rotation ?? 0, pushed: pushed.has(`${p.id}|${d.dd_pet_id}`), t: p.taken_at ?? p.created_at });
         }
       }
-      // 찍은 순서대로, 주소는 1시간짜리
+      // 정한 순서(없으면 찍은 순서)대로, 주소는 1시간짜리
       const all = [...out.values()];
       const paths = [...new Set(all.flatMap((d) => d.photos.map((p) => p.path)))];
       const urls = new Map<string, string>();
@@ -63,7 +66,11 @@ Deno.serve(async (req) => {
         day,
         dogs: all.map((d) => ({
           petId: d.petId, name: d.name,
-          photos: d.photos.sort((a, b) => a.t.localeCompare(b.t)).map((p) => ({ id: p.id, url: urls.get(p.path), rotation: p.rotation, pushed: p.pushed })).filter((p) => p.url),
+          photos: d.photos.sort((a, b) => {
+            const r = orderOf.get(d.dogId);
+            const ra = r?.get(a.id) ?? 1e9, rb = r?.get(b.id) ?? 1e9;
+            return ra - rb || a.t.localeCompare(b.t);
+          }).map((p) => ({ id: p.id, url: urls.get(p.path), rotation: p.rotation, pushed: p.pushed })).filter((p) => p.url),
         })),
       });
     }

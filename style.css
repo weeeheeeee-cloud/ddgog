@@ -1123,3 +1123,18 @@ button.ho-tr:hover { background:#faf8f3; }
 .tk-note.past { background: #efece4; color: #57534e; }
 .tk-note button { flex: none; border: 0; background: #fff; border-radius: 999px; padding: 5px 12px; font: inherit; font-weight: 800; color: var(--navy); cursor: pointer; }
 @media (max-width: 760px) { .tk-nav .icon[data-mv] { display: none; } .tk-strip button b { font-size: 15px; } }
+
+/* ================= 사진 순서·대표 ================= */
+.grid img.cover { outline: 4px solid var(--yellow); outline-offset: -4px; }
+.po-box { width: min(760px, 100%); }
+.po-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(118px, 1fr)); gap: 8px; }
+.po-it { position: relative; border-radius: 12px; overflow: hidden; background: var(--bg); aspect-ratio: 1; cursor: grab; touch-action: manipulation; user-select: none; }
+.po-it img { width: 100%; height: 100%; object-fit: cover; display: block; pointer-events: none; }
+.po-it.cover { box-shadow: 0 0 0 4px var(--yellow); }
+.po-it.sortable-ghost { opacity: .35; }
+.po-n { position: absolute; top: 6px; left: 6px; background: rgba(0,0,0,.65); color: #fff; font-size: 12px; font-weight: 800; border-radius: 999px; padding: 1px 8px; }
+.po-it.cover .po-n { background: var(--yellow); color: var(--navy); }
+.po-star { position: absolute; top: 4px; right: 4px; border: 0; background: rgba(255,255,255,.9); border-radius: 50%; width: 32px; height: 32px; font-size: 17px; cursor: pointer; line-height: 1; }
+.po-mv { position: absolute; bottom: 4px; left: 4px; right: 4px; display: flex; justify-content: space-between; }
+.po-mv button { border: 0; background: rgba(255,255,255,.88); border-radius: 8px; width: 30px; height: 28px; font-size: 18px; font-weight: 900; color: var(--navy); cursor: pointer; }
+@media (max-width: 760px) { .po-grid { grid-template-columns: repeat(3, 1fr); gap: 6px; } }

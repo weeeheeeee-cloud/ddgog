@@ -51,3 +51,15 @@ create policy "own push_subs insert" on public.push_subs for insert to authentic
 create policy "own push_subs update" on public.push_subs for update to authenticated using (user_id = (select auth.uid())) with check (user_id = (select auth.uid()));
 create policy "own push_subs delete" on public.push_subs for delete to authenticated using (user_id = (select auth.uid()));
 alter publication supabase_realtime add table public.pd_requests;
+
+-- 사진 순서·대표 사진 (이미 적용됨)
+create table public.photo_order (
+  day date not null,
+  dog_id uuid not null references public.dogs(id) on delete cascade,
+  ids uuid[] not null default '{}',
+  updated_at timestamptz not null default now(),
+  primary key (day, dog_id)
+);
+create index photo_order_dog_idx on public.photo_order (dog_id);
+alter table public.photo_order enable row level security;
+create policy "staff all photo_order" on public.photo_order for all to authenticated using (true) with check (true);
