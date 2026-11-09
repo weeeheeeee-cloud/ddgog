@@ -148,13 +148,17 @@ Treat each of them as a subject: pick good photos of EACH sibling (balanced), in
       const petId = String(body.petId ?? "") || null;
       const norm = (s: string) => s.replace(/\s+/g, "").toLowerCase();
       const { data: all } = await admin.from("dogs").select("id, name, note, ref_path, auto, dd_pet_id");
+      // (같은 이름이어도 다이얼독 번호가 다르면 다른 아이)
       const named = (all ?? []).filter((d) => !d.auto);
-      const wanted = String(body.dbName ?? name);
+      // 이름은 짧게(괄호 없이), 견종은 따로. 같은 이름 아이는 다이얼독 번호(petId)로 구분하고 화면에서 고르게 함
+      const rawName = String(body.dbName ?? name);
+      const wanted = rawName.replace(/\s*\([^)]*\)\s*$/, "").trim() || rawName;
+      const breedOf = breed || (rawName.match(/\(([^)]*)\)\s*$/)?.[1] ?? "") || null;
       let dog = (petId && named.find((d) => d.dd_pet_id === petId)) ||
-        named.find((d) => norm(d.name) === norm(wanted)) || null;
+        named.find((d) => (!petId || !d.dd_pet_id) && norm(d.name) === norm(wanted)) || null;
       let created = false;
       if (!dog) {
-        const { data, error } = await admin.from("dogs").insert({ name: wanted, auto: false, active: true, dd_pet_id: petId })
+        const { data, error } = await admin.from("dogs").insert({ name: wanted, breed: breedOf, auto: false, active: true, dd_pet_id: petId })
           .select("id, name, note, ref_path, auto, dd_pet_id").single();
         if (error || !data) return json({ error: "dog insert failed" }, 500);
         dog = data;

@@ -684,7 +684,7 @@ async function renderPhotos() {
       <div class="dog-head">
         ${dog.ref_path ? `<img class="avatar" src="${ref(dog.ref_path)}" alt="">` : `<span class="avatar"></span>`}
         <div class="grow">
-          <button class="dog-name ${dog.auto ? "unnamed" : ""}" data-rename="${id}">${esc(dog.name)} <span>✎</span></button>
+          <button class="dog-name ${dog.auto ? "unnamed" : ""}" data-rename="${id}">${esc(dog.name)}${breedTag(dog)} <span>✎</span></button>
           <small class="muted">${shown.length}장${extra.length ? ` · 비슷한 사진 ${extra.length}장 ${open ? "펼침" : "접힘"}` : ""}</small>
         </div>
         <div class="save-btns">${state.busy ? "" : `<button class="btn ghost sm" data-order="${id}">↕ 순서·대표</button><button class="btn ghost sm" data-verify="${id}">🔍 다시 검수</button>`}${selBtn(id)}${saveButtons(id)}</div>
@@ -1085,7 +1085,7 @@ function renderFind() {
   box.classList.toggle("on", chips.length > 0);
   box.innerHTML = chips.length
     ? `<b>🔎 이번에 올리는 사진에서 이 아이만 찾아요:</b>
-       ${chips.map((d) => `<span class="find-chip">${esc(d.name)} <small>${refCount(d) ? `대표 ${refCount(d)}장` : "대표 사진 없음"}</small>
+       ${chips.map((d) => `<span class="find-chip">${esc(d.name)}${breedTag(d)} <small>${refCount(d) ? `대표 ${refCount(d)}장` : "대표 사진 없음"}</small>
          <button class="find-ref" data-find-ref="${d.id}" title="${esc(d.name)} 대표 사진 추가">📷 추가</button><b class="x" data-unfind="${d.id}">×</b></span>`).join("")}
        <input id="find-input" list="find-list" placeholder="아이 더 추가">
        <button class="btn ghost mini find-photo">🏨 사진으로 아이 추가</button>
@@ -1279,6 +1279,11 @@ const baseName = (s) => norm(String(s || "").replace(/\s*\(.*\)\s*$/, ""));
 // 이름 가족: 괄호·띄어쓰기 앞 첫 이름 ("토리 비숑", "토리(푸들)" → "토리")
 const famKey = (s) => norm(String(s || "").replace(/\s*\(.*$/, "").trim().split(/\s+/)[0]);
 const familyOf = (n) => { const k = famKey(n); return k ? state.dogs.filter((d) => !d.auto && famKey(d.name) === k) : []; };
+// 같은 이름 아이: 이름은 짧게 두고 견종(breed)으로 구분 → 화면에 견종을 작게, 파일·폴더 이름에는 견종을 붙임
+const dupName = (d) => !!d && !d.auto && state.dogs.some((x) => x.id !== d.id && !x.auto && x.active !== false && norm(x.name) === norm(d.name));
+const breedTag = (d, always = false) => (d?.breed && (always || dupName(d)) ? ` <small class="breed">${esc(d.breed)}</small>` : "");
+const breedText = (d) => (d?.breed && dupName(d) ? ` (${d.breed})` : "");
+const fileLabel = (d) => (d?.breed && dupName(d) ? `${d.name}_${d.breed}` : d.name);
 function matchDog(n, draft = state.draft, usePick = true) {
   const pick = usePick && draft?.pick?.[norm(n)];
   if (pick === NEW_DOG) return { isNew: true };
@@ -1289,6 +1294,13 @@ function matchDog(n, draft = state.draft, usePick = true) {
   if (fam.length > 1) {
     const exactOne = fam.filter((d) => norm(d.name) === norm(n));
     if (exactOne.length === 1 && norm(n) !== famKey(n)) return { dog: exactOne[0] };
+    // 보드에 "구름 포메"처럼 견종까지 썼으면 그 아이로
+    const raw = String(n || "");
+    const rest = norm(raw.replace(/\s*\(.*$/, "").trim().split(/\s+/).slice(1).join("") + (raw.match(/\(([^)]*)\)/)?.[1] || ""));
+    if (rest) {
+      const byBreed = fam.filter((d) => d.breed && (norm(d.breed).includes(rest) || rest.includes(norm(d.breed))));
+      if (byBreed.length === 1) return { dog: byBreed[0] };
+    }
     return { choices: [...fam].sort((a, b) => refCount(b) - refCount(a) || a.name.localeCompare(b.name, "ko")) };
   }
   const exact = named.filter((d) => norm(d.name) === norm(n));
@@ -1348,7 +1360,7 @@ const unresolved = (n, d) => { const m = matchDog(n, d); return !!(m.choices || 
 // 프롬프트로 고르기: 비슷한 이름이 있으면 번호, 0이면 새 아이
 function askSimilar(name, list) {
   const v = prompt(`'${name}'와(과) 이름이 비슷한 아이가 있어요. 같은 아이면 번호를, 다른 아이면 0을 눌러 주세요\n` +
-    list.map((c, i) => `${i + 1}. ${c.name}${c.dd_pet_id ? "" : " (다이얼독 없음)"}`).join("\n") + "\n0. 다른 아이 (새로 등록)", "1");
+    list.map((c, i) => `${i + 1}. ${c.name}${c.breed ? ` (${c.breed})` : ""}${c.dd_pet_id ? "" : " (다이얼독 없음)"}`).join("\n") + "\n0. 다른 아이 (새로 등록)", "1");
   if (v === null) return undefined;
   return list[+v - 1] || null;
 }
@@ -1374,14 +1386,14 @@ async function renderRoll() {
         <b>이름이 같은 아이가 있어요 — 오늘 온 아이를 눌러 주세요</b>
         ${amb.map(({ n, i, c }) => `<div class="same-row"><span class="same-label">${esc(n)}${d.guessed?.has(norm(n)) && d.pick?.[norm(n)] ? ` <small class="muted">(최근 자주 온 아이로 골라 둠)</small>` : ""}</span>
           <div class="same-opts">${c.map((x) => `<button class="same-opt ${d.pick?.[norm(n)] === x.id ? "on" : ""}" data-same="${i}" data-id="${x.id}">
-            ${x.ref_path ? `<img src="${ambRef(x.ref_path)}" alt="">` : ""}<span>${esc(x.name)}</span></button>`).join("")}</div></div>`).join("")}
+            ${x.ref_path ? `<img src="${ambRef(x.ref_path)}" alt="">` : ""}<span>${esc(x.name)}${breedTag(x, true)}</span></button>`).join("")}</div></div>`).join("")}
       </div>` : ""}
       ${sims.length ? `<div class="same-name similar">
         <b>비슷한 이름이 이미 있어요 — 같은 아이인지 골라 주세요</b>
         <small class="muted">보드에 쓴 이름이 명단(다이얼독) 이름과 조금 달라요. 같은 아이를 누르면 그 이름으로 묶이고, 정말 다른 아이면 '다른 아이'를 눌러 주세요.</small>
         ${sims.map(({ n, i, c }) => `<div class="same-row"><span class="same-label">${esc(n)}${isHotelName(d, n) ? ` <i class="tag-h">H</i>` : ""}</span>
           <div class="same-opts">${c.map((x) => `<button class="same-opt ${d.pick?.[norm(n)] === x.id ? "on" : ""}" data-same="${i}" data-id="${x.id}">
-            ${x.ref_path ? `<img src="${ambRef(x.ref_path)}" alt="">` : ""}<span>${esc(x.name)}${x.dd_pet_id ? "" : ` <small class="muted">(카톡)</small>`}</span></button>`).join("")}
+            ${x.ref_path ? `<img src="${ambRef(x.ref_path)}" alt="">` : ""}<span>${esc(x.name)}${breedTag(x)}${x.dd_pet_id ? "" : ` <small class="muted">(카톡)</small>`}</span></button>`).join("")}
             <button class="same-opt new ${d.pick?.[norm(n)] === NEW_DOG ? "on" : ""}" data-same="${i}" data-id="${NEW_DOG}"><span>다른 아이 (새로 등록)</span></button></div></div>`).join("")}
       </div>` : ""}
       ${d.img ? `<img class="board-preview" src="${d.img}" alt="출석 보드">${d.more ? `<p class="muted small" style="margin:-4px 0 8px">외 ${d.more}장 함께 읽음</p>` : ""}` : ""}
@@ -1394,8 +1406,8 @@ async function renderRoll() {
           const m = matchDog(n, d);
           if (m.isNew) return "";
           if (m.similar) return `<small class="ask"> 비슷한 이름 확인 ↑</small>`;
-          if (m.choices) return `<select data-pick="${i}" class="pick-dog"><option value="">어느 아이?</option>${m.choices.map((c) => `<option value="${c.id}">${esc(c.name)}</option>`).join("")}</select>`;
-          if (m.dog && norm(m.dog.name) !== norm(n)) return `<small class="muted"> → ${esc(m.dog.name)}</small>`;
+          if (m.choices) return `<select data-pick="${i}" class="pick-dog"><option value="">어느 아이?</option>${m.choices.map((c) => `<option value="${c.id}">${esc(c.name)}${c.breed ? ` (${esc(c.breed)})` : ""}</option>`).join("")}</select>`;
+          if (m.dog && (norm(m.dog.name) !== norm(n) || dupName(m.dog))) return `<small class="muted"> → ${esc(m.dog.name)}${esc(breedText(m.dog))}</small>`;
           return "";
         })()}<b class="x" data-del="${i}">×</b></span>`).join("")
         || `<span class="muted small">아직 이름이 없어요</span>`}</div>
@@ -1599,7 +1611,7 @@ async function openSwap(from) {
   const cands = [...fam, ...sim];
   const ref = await signed("refs", [from, ...cands].map((d) => d.ref_path));
   const nPhotos = state.photos.filter((p) => p.dog_ids.includes(from.id)).length;
-  const opt = (d) => `<button class="same-opt" data-to="${d.id}">${d.ref_path ? `<img src="${ref(d.ref_path)}" alt="">` : `<span class="avatar"></span>`}<span>${esc(d.name)}${state.attendance.has(d.id) ? ` <small class="muted">(이미 명단)</small>` : ""}</span></button>`;
+  const opt = (d) => `<button class="same-opt" data-to="${d.id}">${d.ref_path ? `<img src="${ref(d.ref_path)}" alt="">` : `<span class="avatar"></span>`}<span>${esc(d.name)}${breedTag(d)}${state.attendance.has(d.id) ? ` <small class="muted">(이미 명단)</small>` : ""}</span></button>`;
   ov.innerHTML = `<div class="rc-box swap-box">
     <div class="rc-head"><div class="grow"><b>'${esc(from.name)}'을(를) 다른 아이로 바꾸기</b>
       <small class="muted">오늘 ${esc(from.name)}(으)로 분류된 사진 ${nPhotos}장도 바꾼 아이로 함께 옮겨요.</small></div>
@@ -2123,7 +2135,7 @@ async function openSheet(photoId, list = sheetList, key = sheetKey) {
   const chipDogs = state.dogs.filter((d) => d.active)
     .sort((a, b) => (state.attendance.has(b.id) - state.attendance.has(a.id)) || dogOrder(a, b));
   $("#sheet-chips").innerHTML = chipDogs.map((d) =>
-    `<button data-dog="${d.id}" data-name="${esc(norm(d.name))}" class="${p.dog_ids.includes(d.id) ? "on" : ""}">${esc(d.name)}</button>`).join("")
+    `<button data-dog="${d.id}" data-name="${esc(norm(d.name))}" class="${p.dog_ids.includes(d.id) ? "on" : ""}">${esc(d.name)}${breedTag(d)}</button>`).join("")
     || `<span class="muted small">아직 등록된 아이가 없어요. '이 사진으로 아이 등록'을 눌러 주세요.</span>`;
   $$("#sheet-chips button").forEach((b) => b.addEventListener("click", () => { b.classList.toggle("on"); renderPicked(); }));
   $("#sheet-search").value = "";
@@ -2447,7 +2459,7 @@ function photoFileName(dog, p, i) {
   const tm = new Date(p.taken_at || p.created_at);
   const t = isNaN(tm) ? "" : `${String(tm.getHours()).padStart(2, "0")}${String(tm.getMinutes()).padStart(2, "0")}${String(tm.getSeconds()).padStart(2, "0")}_`;
   const n = i != null && state.order.get(dog.id)?.length ? `${String(i + 1).padStart(2, "0")}_` : "";
-  return `${safeName(dog.name)}_${state.day}_${n}${t}${p.id.slice(0, 6)}.jpg`;
+  return `${safeName(fileLabel(dog))}_${state.day}_${n}${t}${p.id.slice(0, 6)}.jpg`;
 }
 const namedFor = (dog, photos) => sortForDog(dog.id, photos).map((p, i) => ({ p, name: photoFileName(dog, p, i) }));
 async function photoFiles(dog, photos, onEach, skip = new Set()) {
@@ -2468,7 +2480,7 @@ async function syncFolder(dir, dog, photos, onEach) {
   const byId = new Map(named.map((x) => [x.p.id.slice(0, 6), x.name])); // 순서만 바뀐 파일은 이름만 바꿈
   const have = new Set();
   let removed = 0;
-  const mine = `${safeName(dog.name)}_${state.day}_`;
+  const mine = `${safeName(fileLabel(dog))}_${state.day}_`;
   for await (const [name, h] of dir.entries()) {
     if (h.kind !== "file") continue;
     if (want.has(name)) { have.add(name); continue; }
@@ -2508,7 +2520,7 @@ async function saveDogPhotos(dog, photos, btn, mode) {
     let root = null;
     if (mode === "folder") {
       root = await (await saveFolder()).getDirectoryHandle(state.day, { create: true });
-      const dir = await root.getDirectoryHandle(safeName(dog.name), { create: true });
+      const dir = await root.getDirectoryHandle(safeName(fileLabel(dog)), { create: true });
       let n = 0;
       const r = await syncFolder(dir, dog, photos, () => { btn.textContent = `${++n}/${photos.length}`; });
       doneBanner(`'${state.day}/${dog.name}' 폴더 · 새로 받은 사진 ${r.added}장${r.kept ? ` (이미 받은 ${r.kept}장은 건너뜀)` : ""}`);
@@ -2523,7 +2535,7 @@ async function saveDogPhotos(dog, photos, btn, mode) {
     } else {
       const zip = new JSZip();
       files.forEach((f) => zip.file(f.name, f));
-      downloadBlob(await zip.generateAsync({ type: "blob" }), `${safeName(dog.name)}_${state.day}.zip`);
+      downloadBlob(await zip.generateAsync({ type: "blob" }), `${safeName(fileLabel(dog))}_${state.day}.zip`);
       doneBanner(`${dog.name} ${files.length}장 ZIP 다운로드 완료`);
     }
   } catch (err) {
@@ -2602,11 +2614,11 @@ async function saveAll(btn, onlyUnsorted = false) {
     for (const [id, photos] of groups) {
       const dog = dogOf(id);
       if (root) {
-        const r = await syncFolder(await root.getDirectoryHandle(safeName(dog.name), { create: true }), dog, photos,
+        const r = await syncFolder(await root.getDirectoryHandle(safeName(fileLabel(dog)), { create: true }), dog, photos,
           (skipped) => { skipped ? kept++ : added++; tick(); });
       } else {
         const files = await photoFiles(dog, photos, () => { added++; tick(); });
-        files.forEach((f) => zip.file(`${state.day}/${safeName(dog.name)}/${f.name}`, f));
+        files.forEach((f) => zip.file(`${state.day}/${safeName(fileLabel(dog))}/${f.name}`, f));
       }
     }
     if (zip) {
@@ -2712,7 +2724,7 @@ async function renderSide() {
       const up = prev !== undefined && n > prev ? n - prev : 0;
       return `<div class="side-item"><button class="side-row ${n ? "" : "zero"}" data-side="${d.id}" title="${esc(d.name)}">
         ${d.ref_path ? `<img src="${ref(d.ref_path)}" alt="">` : `<span class="noimg">?</span>`}
-        <span class="nm">${state.hotel.has(d.id) ? `<b class="tag-h">H</b>` : ""}${esc(d.name)}</span>
+        <span class="nm">${state.hotel.has(d.id) ? `<b class="tag-h">H</b>` : ""}${esc(d.name)}${breedTag(d)}</span>
         <b class="cnt ${up ? "bump" : ""}">${n}<small>장</small>${up ? `<i class="plus">+${up}</i>` : ""}</b>
       </button>${inToday ? `<button class="side-x" data-unroll="${d.id}" title="오늘 명단에서 빼기">×</button>` : ""}</div>`;
     };
@@ -2754,7 +2766,7 @@ async function renderSide() {
   $("#side-sub").textContent = `대표 사진 ${refs}장${state.attendance.size ? ` · 오늘 ${state.attendance.size}마리` : ""}`;
   const row = (d) => `<button class="side-row ${d.active ? "" : "off"}" data-side="${d.id}" title="${esc(d.name)}">
       ${d.ref_path ? `<img src="${ref(d.ref_path)}" alt="">` : `<span class="noimg">?</span>`}
-      <span class="nm">${esc(d.name)}</span>
+      <span class="nm">${esc(d.name)}${breedTag(d)}</span>
       ${state.attendance.has(d.id) ? `<i class="dot" title="오늘 출석"></i>` : ""}
       <small>${refCount(d)}</small>
     </button>`;
@@ -2838,7 +2850,7 @@ async function renderRoster() {
       <div class="dog-card-head">
         ${d.ref_path ? `<img class="avatar" src="${ref(d.ref_path)}" alt="">` : `<span class="avatar"></span>`}
         <div class="grow">
-          <b class="nm">${esc(d.name)}</b>
+          <b class="nm">${esc(d.name)}${breedTag(d, true)}</b>
           ${d.auto ? `<span class="tag">이름 필요</span>` : ""}
           ${!d.auto && !d.dd_pet_id ? `<span class="tag kakao">카톡</span>` : ""}
           ${today ? `<span class="tag today">오늘 출석</span>` : ""}

@@ -61,11 +61,14 @@ In the reply, "MAIN dogs" means exactly these dogs that are properly shown.
 Reply with JSON only, no other text:
 {"dogs":[<reference numbers of MAIN dogs>],"sure":[<numbers from "dogs" you are confident about>],"new_dog":true|false,"unknown_main":<number>,"confidence":"high"|"low","rotate":0|90|180|270,"note":"<한국어 30자 이내: 판단 근거>"}
 Keep "note" very short (under 30 Korean characters).
-- "dogs": ALL known dogs properly shown in the new photo (one or several; [] if none). ALWAYS give your best
-  guess for each properly shown dog, even when unsure: only today's attendees are listed, so pick the best fit
-  among them using reference photos, body-part features and today's look. Leave a dog out of "dogs" only when it
-  clearly matches NONE of them (different breed type, coat colour or size). List in "sure" only the ones you are
-  confident about. Judge each dog separately: an unclear second dog does NOT make you unsure about a dog you recognize.
+- "dogs": the known dogs properly shown in the new photo (one or several; [] if none). When a dog plausibly fits
+  one or more known dogs (same breed type, coat colour, size and build), give your best guess among them using
+  reference photos, body-part features and today's look, and mark it low confidence if unsure.
+  But NEVER force a dog onto a known dog that clearly does not match: if the breed type, coat colour or pattern,
+  size, build, ear or tail shape, or today's clothes clearly differ from every candidate, leave it OUT of "dogs"
+  (count it in "unknown_main", or set "new_dog"). A wrong owner getting the photo is worse than an unsorted photo.
+  List in "sure" only the ones you are confident about. Judge each dog separately: an unclear second dog does NOT
+  make you unsure about a dog you recognize.
 - "unknown_main": how many properly shown dogs match none of the known dogs.
 - "new_dog": true if the photo has exactly one MAIN dog and you are fairly sure it is none of the
   known dogs (e.g. clearly different coat color, size or breed type), even if its face is hidden.
@@ -300,7 +303,7 @@ Deno.serve(async (req) => {
     if (find.length) {
       content.push({ type: "text", text: `Note: staff only want photos of ${refs.map((d) => d.name).join(", ")} from this batch. ` +
         "Answer only whether these dog(s) are properly shown in the new photo. Most photos will show other dogs: then reply \"dogs\": []. " +
-        "Here, IGNORE the rule to always give a best guess: list a dog only when its coat, body and distinguishing points really fit; " +
+        "Here, be stricter than usual: list a dog only when its coat, body and distinguishing points really fit; " +
         "if unsure, leave it out. Do not use new_dog." });
     } else if (only) {
       content.push({ type: "text", text: "Note: staff just found that one photo filed under one of these two dogs was actually the other. " +
@@ -379,7 +382,7 @@ Deno.serve(async (req) => {
     // 아이별로 판단: 확신한 아이가 다 맞으면 끝. 다른 아이가 애매해도 확신한 아이 사진은 보냄
     const sureNums: number[] = Array.isArray(parsed.sure) ? parsed.sure.map(Number) : (parsed.confidence === "high" ? nums : []);
     const sureIds = new Set(sureNums.filter((n) => n >= 1 && n <= refs.length).map((n) => refs[n - 1].id));
-    // 애매해도 가장 닮은 아이에게 우선 넣음 (확신 못 한 사진은 confidence low → 화면에 '확인' 표시)
+    // 닮은 후보가 있으면 가장 닮은 아이에게 넣고(확신 못 하면 confidence low → '확인' 표시), 명확히 아닌 아이에게는 넣지 않음
     const status = ids.length ? "done" : "review";
     const allSure = ids.length > 0 && ids.every((id) => sureIds.has(id));
     if (preview) {

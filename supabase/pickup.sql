@@ -63,3 +63,6 @@ create table public.photo_order (
 create index photo_order_dog_idx on public.photo_order (dog_id);
 alter table public.photo_order enable row level security;
 create policy "staff all photo_order" on public.photo_order for all to authenticated using (true) with check (true);
+
+-- 견종은 이름 괄호 대신 따로 (이미 적용됨)
+alter table public.dogs add column if not exists breed text;
