@@ -1822,7 +1822,10 @@ async function classifyPending() {
   lastError = "";
   // 서버 작업자와 나눠서 처리: 12장씩 '가져가서' 처리하므로 같은 사진을 두 번 분류하지 않음
   let total = waiting, ok = 0, fail = 0, done = 0, stop = false, saved = 0, first = true;
-  const tick = () => progress("AI가 강아지별로 묶는 중… 창을 닫지 마세요", Math.min(done, total), total,
+  // 폰: 업로드가 끝나면 분류는 서버 작업자가 이어서 하므로 화면을 내려도 됨
+  const phone = matchMedia("(max-width: 760px), (pointer: coarse)").matches;
+  const tick = () => progress(phone ? "AI가 강아지별로 묶는 중… 화면을 내려도 계속 분류돼요" : "AI가 강아지별로 묶는 중… 창을 닫지 마세요", Math.min(done, total), total,
+    phone ? "올리기는 끝났어요. 폰 화면을 꺼도 분류는 자동으로 이어져요." :
     state.find.length ? `${state.find.map((id) => dogById(id)?.name).filter(Boolean).join(", ")}만 찾는 중이에요. 없는 사진은 아래 '찾는 아이가 아닌 사진'에 모여요.`
     : noRoll ? "학습 모드(명단 없음): 사진 지문으로 닮은 아이 10마리를 추려서 비교해요. 틀린 건 고쳐 주면 그대로 학습해요."
            : `아래 목록이 조금씩 채워져요${saved ? ` · 연속 사진 ${saved}장은 같은 장면이라 함께 처리` : ""}`);
