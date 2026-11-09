@@ -1764,6 +1764,10 @@ async function confirmRoll() {
       let dog = matchDog(name).dog;
       if (!dog) {
         let nm = name;
+        // 오늘 이미 '처음 오는 아이'로 등록한 같은 이름 아이가 있으면 또 만들지 않고 그 아이로 (다시 확정해도 두 번 생기지 않게)
+        const todayNew = state.dogs.find((x) => !x.auto && !x.dd_pet_id && norm(x.name) === norm(nm) &&
+          x.created_at && new Date(Date.parse(x.created_at) + 9 * 3600e3).toISOString().slice(0, 10) === kstToday());
+        if (todayNew) { dog = todayNew; ids.push(dog.id); if (isHotelName(state.draft, name)) hotelIds.add(dog.id); continue; }
         if (state.dogs.some((x) => !x.auto && norm(x.name) === norm(nm))) {
           const v = prompt(`'${name}' 이름의 아이가 이미 명단에 있어요.\n처음 오는 아이를 구분할 이름을 적어 주세요 (예: ${name} 푸들)`, `${name} `);
           if (v === null || !v.trim()) throw new Error("cancel");
