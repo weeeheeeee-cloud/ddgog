@@ -290,7 +290,7 @@ async function findOrCreateDog(name) {
   const m = matchDog(name, null);
   if (m.dog) return m.dog;
   if (m.choices) {
-    const v = prompt(`'${name}' 이름의 아이가 여럿이에요. 번호를 골라 주세요\n` + m.choices.map((c, i) => `${i + 1}. ${tellApart(c) || c.name}`).join("\n"), "1");
+    const v = prompt(`'${name}' 이름의 아이가 여럿이에요. 번호를 골라 주세요\n` + m.choices.map((c, i) => `${i + 1}. ${tellApart(c, name) || c.name}`).join("\n"), "1");
     return v === null ? null : m.choices[+v - 1] || null;
   }
   if (m.similar) {
@@ -1723,7 +1723,14 @@ function splitBoth(d, n, list) {
   if (hotel) d.hotel = [...(d.hotel || []).filter((h) => norm(h) !== norm(n)), ...labels];
 }
 // 같은 이름 아이 고르기 창에 쓰는 구분 (견종, 없으면 생김새 메모)
-const tellApart = (c) => c.breed || (c.note ? String(c.note).slice(0, 24) : "") || (c.dd_pet_id ? "" : "카톡 아이");
+// 이름이 다르면 이름도 함께 (뽀송 / 뽀송 비숑), 다이얼독에 없는 아이는 '다이얼독 없음'
+const tellApart = (c, asked) => {
+  const bits = [];
+  if (asked && norm(c.name) !== norm(asked)) bits.push(c.name);
+  if (c.breed) bits.push(c.breed); else if (c.note) bits.push(String(c.note).slice(0, 24));
+  if (!c.dd_pet_id) bits.push("다이얼독 없음");
+  return bits.join(" · ");
+};
 // 이름이 같은 아이가 여럿이면: 하나씩 번호로 물어봄 ("1. 페키니즈 2. 포메라니안"). 최근 자주 온 아이를 1번(기본값)으로
 async function suggestPicks(d) {
   const amb = d.names.map((n) => [n, matchDog(n, d, false).choices]).filter(([, c]) => c);
@@ -1739,7 +1746,7 @@ async function suggestPicks(d) {
     const list = [...c].sort((a, b) => (score.get(b.id) || 0) - (score.get(a.id) || 0));
     const all = list.length + 1;
     const v = prompt(`'${n}' 이름의 아이가 ${list.length}마리예요. 오늘 온 아이 번호를 눌러 주세요\n` +
-      list.map((x, i) => `${i + 1}. ${tellApart(x) || x.name}${score.get(x.id) ? ` (최근 ${score.get(x.id)}번 옴)` : ""}`).join("\n") +
+      list.map((x, i) => `${i + 1}. ${tellApart(x, n) || x.name}${score.get(x.id) ? ` (최근 ${score.get(x.id)}번 옴)` : ""}`).join("\n") +
       `\n${all}. ${list.length === 2 ? "둘 다" : "모두"} 왔어요` +
       `\n0. ${list.length === 2 ? "둘 다" : "모두"} 아님 (처음 오는 아이)`, "1");
     if (v === null) continue; // 취소하면 아래 명단에서 직접 고르게
