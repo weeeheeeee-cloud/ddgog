@@ -1,5 +1,5 @@
 // 출석 보드 사진에서 강아지 이름 읽기
-// body: { images: base64 JPEG[] (또는 image 하나), known: string[] }  →  { names: string[], unsure: string[] }
+// body: { images: base64 JPEG[] (또는 image 하나), known: string[] }  →  { names, unsure, hotel(H 표시), kinder(K 표시 = 유치원생) }
 // 출석 보드 사진뿐 아니라 다이얼독 등 앱의 알림장·예약 목록 캡처도 읽음
 
 import { createClient } from "jsr:@supabase/supabase-js@2";
@@ -31,8 +31,11 @@ Extract ONLY the dogs' names.
   (new or one-off guests are common).
 - Hotel guests (호텔링) are marked with an "H" (e.g. "H 콩이", "콩이(H)", "콩이 h", a circled H, or listed
   under an H / 호텔 section). Do NOT include the H in the name; list those names in "hotel" as well.
+- Daycare (유치원) dogs are marked with a "K" (e.g. "K 콩이", "콩이(K)", "콩이 k", a circled K, or listed
+  under a K / 유치원 section). Do NOT include the K in the name; list those names in "kinder" as well.
+  A dog can have both K and H (a daycare dog staying at the hotel): then list it in both.
 Reply with JSON only:
-{"names":["<이름>", ...],"unsure":["<읽기 애매한 이름>", ...],"hotel":["<H 표시된 이름>", ...]}
+{"names":["<이름>", ...],"unsure":["<읽기 애매한 이름>", ...],"hotel":["<H 표시된 이름>", ...],"kinder":["<K 표시된 이름>", ...]}
 "unsure" lists names (already included in "names") whose handwriting you were not sure about.`;
 
 Deno.serve(async (req) => {
@@ -80,11 +83,14 @@ Deno.serve(async (req) => {
   const out = await res.json();
   const text: string = (out.content ?? []).map((c: { text?: string }) => c.text ?? "").join("");
   const m = text.match(/\{[\s\S]*\}/);
-  let parsed: { names?: unknown; unsure?: unknown; hotel?: unknown } = {};
+  let parsed: { names?: unknown; unsure?: unknown; hotel?: unknown; kinder?: unknown } = {};
   try { parsed = m ? JSON.parse(m[0]) : {}; } catch { /* 아래에서 빈 값 */ }
   const clean = (a: unknown) =>
     [...new Set((Array.isArray(a) ? a : []).map((x) => String(x).trim()).filter(Boolean))];
-  const names = clean(parsed.names).map((n) => n.replace(/\s*\(?\s*[Hh]\s*\)?\s*$|^\s*[Hh]\s+/g, "").trim()).filter(Boolean);
-  const hotel = clean(parsed.hotel).map((n) => n.replace(/\s*\(?\s*[Hh]\s*\)?\s*$|^\s*[Hh]\s+/g, "").trim()).filter(Boolean);
-  return json({ names: [...new Set([...names, ...hotel])], unsure: clean(parsed.unsure), hotel: [...new Set(hotel)] });
+  // 이름 앞뒤에 붙은 H·K 표시 떼기 ("H 콩이", "콩이(K)", "K H 콩이")
+  const strip = (n: string) => { let x = n; for (let i = 0; i < 3; i++) x = x.replace(/\s*\(?\s*[HhKk]\s*\)?\s*$|^\s*\(?[HhKk]\)?\s+/g, "").trim(); return x; };
+  const names = clean(parsed.names).map(strip).filter(Boolean);
+  const hotel = clean(parsed.hotel).map(strip).filter(Boolean);
+  const kinder = clean(parsed.kinder).map(strip).filter(Boolean);
+  return json({ names: [...new Set([...names, ...hotel, ...kinder])], unsure: clean(parsed.unsure), hotel: [...new Set(hotel)], kinder: [...new Set(kinder)] });
 });

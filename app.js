@@ -1284,7 +1284,37 @@ const dupName = (d) => !!d && !d.auto && state.dogs.some((x) => x.id !== d.id &&
 const breedTag = (d, always = false) => (d?.breed && (always || dupName(d)) ? ` <small class="breed">${esc(d.breed)}</small>` : "");
 const breedText = (d) => (d?.breed && dupName(d) ? ` (${d.breed})` : "");
 const fileLabel = (d) => (d?.breed && dupName(d) ? `${d.name}_${d.breed}` : d.name);
+// 보드 표시: K = 유치원생(다이얼독 아이), H = 호텔링.
+//  K → 다이얼독에 있는 아이 중에서만 찾음
+//  H만 있고 다이얼독에 같은 이름 아이가 있음 → 유치원생이 호텔링 중인지, 다른 호텔 손님인지 물어봄 (hotelAsk)
+//  H만 있고 다이얼독에 없음 → 호텔 손님 (다이얼독 아이와 연결하지 않음)
+const isKinderName = (draft, n) => (draft?.kinder || []).some((k) => norm(k) === norm(n));
+const sameFamDd = (n) => { const k = famKey(n); return state.dogs.filter((d) => !d.auto && d.dd_pet_id && famKey(d.name) === k); };
 function matchDog(n, draft = state.draft, usePick = true) {
+  const pick = usePick && draft?.pick?.[norm(n)];
+  if (pick === NEW_DOG) return { isNew: true };
+  if (pick && dogById(pick)) return { dog: dogById(pick) };
+  const r = matchDog0(n, draft, usePick);
+  if (!draft) return r;
+  const K = isKinderName(draft, n), H = isHotelName(draft, n);
+  if (K) {
+    const dd = (x) => x.filter((d) => d.dd_pet_id);
+    if (r.choices) { const c = dd(r.choices); return c.length === 1 ? { dog: c[0] } : c.length ? { choices: c } : r; }
+    if (r.similar) { const c = dd(r.similar); return c.length ? { similar: c } : r; }
+    if (r.dog && !r.dog.dd_pet_id) { const c = sameFamDd(n); return c.length === 1 ? { dog: c[0] } : c.length ? { choices: c } : r; }
+    return r;
+  }
+  if (H) {
+    const ddFam = sameFamDd(n);
+    if (ddFam.length && !draft.split?.has(norm(n))) return { hotelAsk: ddFam };
+    // 다이얼독에 없는 호텔 손님: 다이얼독 아이와는 연결하지 않음
+    const nonDd = (x) => x.filter((d) => !d.dd_pet_id);
+    if (r.choices) { const c = nonDd(r.choices); return c.length === 1 ? { dog: c[0] } : c.length ? { choices: c } : {}; }
+    if (r.dog?.dd_pet_id) return {};
+  }
+  return r;
+}
+function matchDog0(n, draft = state.draft, usePick = true) {
   const pick = usePick && draft?.pick?.[norm(n)];
   if (pick === NEW_DOG) return { isNew: true };
   if (pick && dogById(pick)) return { dog: dogById(pick) };
@@ -1356,7 +1386,7 @@ function similarDogs(n, excludeId = null) {
     .sort((p, q) => p[1] - q[1] || (q[0].dd_pet_id ? 1 : 0) - (p[0].dd_pet_id ? 1 : 0) || refCount(q[0]) - refCount(p[0]))
     .slice(0, 4).map(([d]) => d);
 }
-const unresolved = (n, d) => { const m = matchDog(n, d); return !!(m.choices || m.similar); };
+const unresolved = (n, d) => { const m = matchDog(n, d); return !!(m.choices || m.similar || m.hotelAsk); };
 // 프롬프트로 고르기: 비슷한 이름이 있으면 번호, 0이면 새 아이
 function askSimilar(name, list) {
   const v = prompt(`'${name}'와(과) 이름이 비슷한 아이가 있어요. 같은 아이면 번호를, 다른 아이면 0을 눌러 주세요\n` +
@@ -1364,7 +1394,7 @@ function askSimilar(name, list) {
   if (v === null) return undefined;
   return list[+v - 1] || null;
 }
-const isNewName = (n) => { const m = matchDog(n); return !m.dog && !m.choices && !m.similar; };
+const isNewName = (n) => { const m = matchDog(n); return !m.dog && !m.choices && !m.similar && !m.hotelAsk; };
 const isHotelName = (draft, n) => (draft.hotel || []).some((h) => norm(h) === norm(n));
 
 async function renderRoll() {
@@ -1400,12 +1430,14 @@ async function renderRoll() {
       ${d.img ? `<img class="board-preview" src="${d.img}" alt="출석 보드">${d.more ? `<p class="muted small" style="margin:-4px 0 8px">외 ${d.more}장 함께 읽음</p>` : ""}` : ""}
       <p class="small">읽은 이름이 맞는지 확인해 주세요. <b>이름을 누르면 고칠 수 있고</b>, ×로 뺄 수 있어요.
         <span class="tag-n">N</span>은 <b>처음 오는 아이</b>예요. 명단에 있는 아이와 이름이 같거나 비슷해도 N을 켜면 새 아이로 등록하고, 확정 후 대표 사진을 고를 수 있어요. 명단에 없는 이름은 자동으로 N이 켜져요.
-        <span class="tag-h">H</span> 표시는 호텔링이에요. 둘 다 눌러서 켜고 끌 수 있어요. 호텔링 아이는 대표 사진 없이 분류하고, AI가 모르는 아이는 '모르는 아이' 칸에 비슷한 사진끼리 모아 둬요.
+        <span class="tag-k">K</span>는 <b>유치원생</b>(다이얼독 아이)이에요.
+        <span class="tag-h">H</span> 표시는 호텔링이에요. H만 있는데 다이얼독에 같은 이름 유치원생이 있으면 <b>유치원생이 호텔링 중인지</b> 물어봐요. 둘 다 눌러서 켜고 끌 수 있어요. 호텔링 아이는 대표 사진 없이 분류하고, AI가 모르는 아이는 '모르는 아이' 칸에 비슷한 사진끼리 모아 둬요.
         ${d.unsure.length ? `<span class="q-legend">?</span> 표시는 글씨가 애매했던 이름이에요.` : ""}</p>
       <div class="chips roll-chips">${d.names.map((n, i) => `
-        <span class="${d.unsure.includes(n) ? "unsure" : ""} ${isNewName(n) ? "new" : ""} ${isHotelName(d, n) ? "hotel" : ""}"><b data-h="${i}" class="h-toggle" title="호텔링 켜기/끄기">H</b><b data-n="${i}" class="n-toggle" title="처음 오는 아이 켜기/끄기">N</b><b data-edit="${i}">${esc(n)}</b>${(() => {
+        <span class="${d.unsure.includes(n) ? "unsure" : ""} ${isNewName(n) ? "new" : ""} ${isHotelName(d, n) ? "hotel" : ""}"><b data-k="${i}" class="k-toggle ${isKinderName(d, n) ? "on" : ""}" title="유치원생 켜기/끄기">K</b><b data-h="${i}" class="h-toggle" title="호텔링 켜기/끄기">H</b><b data-n="${i}" class="n-toggle" title="처음 오는 아이 켜기/끄기">N</b><b data-edit="${i}">${esc(n)}</b>${(() => {
           const m = matchDog(n, d);
           if (m.isNew) return "";
+          if (m.hotelAsk) return `<select data-hpick="${i}" class="pick-dog ask-h"><option value="">유치원생 호텔링? 확인</option>${m.hotelAsk.map((c) => `<option value="${c.id}">유치원생 ${esc(c.name)}${c.breed ? ` (${esc(c.breed)})` : ""}가 호텔링 중</option>`).join("")}<option value="${NEW_DOG}">유치원생 아님 (호텔 손님)</option></select>`;
           if (m.similar) return `<small class="ask"> 비슷한 이름 확인 ↑</small>`;
           if (m.choices) return `<select data-pick="${i}" class="pick-dog"><option value="">어느 아이?</option>${m.choices.map((c) => `<option value="${c.id}">${esc(c.name)}${c.breed ? ` (${esc(c.breed)})` : ""}</option>`).join("")}</select>`;
           if (m.dog && (norm(m.dog.name) !== norm(n) || dupName(m.dog))) return `<small class="muted"> → ${esc(m.dog.name)}${esc(breedText(m.dog))}</small>`;
@@ -1439,6 +1471,17 @@ async function renderRoll() {
     $$("[data-pick]", body).forEach((el) => el.addEventListener("change", () => {
       if (!el.value) return;
       d.pick = { ...(d.pick || {}), [norm(d.names[+el.dataset.pick])]: el.value };
+      renderRoll();
+    }));
+    $$("[data-k]", body).forEach((el) => el.addEventListener("click", () => {
+      const n = d.names[+el.dataset.k];
+      d.kinder = isKinderName(d, n) ? (d.kinder || []).filter((k) => norm(k) !== norm(n)) : [...(d.kinder || []), n];
+      renderRoll();
+    }));
+    $$("[data-hpick]", body).forEach((el) => el.addEventListener("change", () => {
+      if (!el.value) return;
+      const n = d.names[+el.dataset.hpick];
+      d.pick = { ...(d.pick || {}), [norm(n)]: el.value === NEW_DOG ? hotelGuestFor(n) : el.value };
       renderRoll();
     }));
     $$("[data-both]", body).forEach((el) => el.addEventListener("click", () => {
@@ -1699,8 +1742,9 @@ $("#board-file").addEventListener("change", async (e) => {
       try { msg = (await error.context.json()).error || ""; } catch { /* 무시 */ }
       throw new Error(msg || (error.context?.status === 404 ? "이름 읽기 기능을 찾을 수 없어요" : "읽지 못했어요"));
     }
-    state.draft = { names: data.names || [], unsure: data.unsure || [], hotel: data.hotel || [], img: URL.createObjectURL(blobs[0]), more: blobs.length - 1 };
+    state.draft = { names: data.names || [], unsure: data.unsure || [], hotel: data.hotel || [], kinder: data.kinder || [], img: URL.createObjectURL(blobs[0]), more: blobs.length - 1 };
     if (!state.draft.names.length) toast("이름을 찾지 못했어요. 직접 추가해 주세요.");
+    askHotelKids(state.draft);
     await suggestPicks(state.draft);
   } catch (err) {
     toast(err.message || "읽지 못했어요. 다시 시도해 주세요.");
@@ -1709,6 +1753,28 @@ $("#board-file").addEventListener("change", async (e) => {
   renderRoll();
 });
 
+// '유치원생 아님 (호텔 손님)': 다이얼독에 없는 같은 이름 아이(예전 호텔 손님)가 하나면 그 아이로, 아니면 새로 등록
+function hotelGuestFor(n) {
+  const k = famKey(n);
+  const old = state.dogs.filter((d) => !d.auto && !d.dd_pet_id && famKey(d.name) === k);
+  return old.length === 1 ? old[0].id : NEW_DOG;
+}
+// 보드를 읽은 뒤: H만 있고 다이얼독에 같은 이름 유치원생이 있으면 번호로 물어봄
+function askHotelKids(d) {
+  d.pick = d.pick || {};
+  for (const n of d.names) {
+    if (d.pick[norm(n)]) continue;
+    const m = matchDog(n, d);
+    if (!m.hotelAsk) continue;
+    const list = m.hotelAsk;
+    const v = prompt(`'${n}'은(는) H(호텔링)로 적혀 있는데, 다이얼독에 같은 이름 유치원생이 있어요\n` +
+      list.map((c, i) => `${i + 1}. 유치원생 ${c.name}${c.breed ? ` (${c.breed})` : ""}가 호텔링 중`).join("\n") +
+      `\n0. 유치원생 아님 (호텔 손님)`, "0");
+    if (v === null) continue;
+    d.pick[norm(n)] = String(v).trim() === "0" ? hotelGuestFor(n) : (list[+v - 1]?.id || d.pick[norm(n)]);
+    if (!d.pick[norm(n)]) delete d.pick[norm(n)];
+  }
+}
 // 같은 이름 아이가 둘 다(모두) 온 날: 명단의 그 이름을 아이마다 한 칸씩으로 나눔 ("여름" → "여름 페키니즈", "여름 포메라니안")
 function splitBoth(d, n, list) {
   const i = d.names.findIndex((x) => norm(x) === norm(n));
@@ -1775,12 +1841,13 @@ async function confirmRoll() {
         const todayNew = state.dogs.find((x) => !x.auto && !x.dd_pet_id && norm(x.name) === norm(nm) &&
           x.created_at && new Date(Date.parse(x.created_at) + 9 * 3600e3).toISOString().slice(0, 10) === kstToday());
         if (todayNew) { dog = todayNew; ids.push(dog.id); if (isHotelName(state.draft, name)) hotelIds.add(dog.id); continue; }
-        if (state.dogs.some((x) => !x.auto && norm(x.name) === norm(nm))) {
+        const guest = isHotelName(state.draft, name) && !isKinderName(state.draft, name);
+        if (!guest && state.dogs.some((x) => !x.auto && norm(x.name) === norm(nm))) {
           const v = prompt(`'${name}' 이름의 아이가 이미 명단에 있어요.\n처음 오는 아이를 구분할 이름을 적어 주세요 (예: ${name} 푸들)`, `${name} `);
           if (v === null || !v.trim()) throw new Error("cancel");
           nm = v.trim();
         }
-        const { data, error } = await sb.from("dogs").insert({ name: nm, auto: false, active: true }).select().single();
+        const { data, error } = await sb.from("dogs").insert({ name: nm, auto: false, active: true, ...(guest ? { breed: "호텔 손님" } : {}) }).select().single();
         if (error) throw error;
         dog = data;
         state.dogs.push(dog);
