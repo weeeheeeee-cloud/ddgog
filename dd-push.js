@@ -1,6 +1,7 @@
 // 댕겨올개 사진함 → 다이얼독 알림장 임시저장
 // 다이얼독 파트너 화면(dialodog.com/partners)에서 북마크를 누르면 실행돼요.
-// 오늘 유치원으로 온 아이만, 사진함에서 분류된 사진을 아이별 알림장으로 '임시저장'해요. 보호자에게 바로 전송하지 않아요.
+// 다이얼독 오늘 출석부(유치원 예약)에 있는 아이만, 사진함에서 분류된 사진 + 정해 둔 글을 아이별 알림장으로 '임시저장'해요.
+// 보호자에게 바로 전송하지 않아요. H(호텔링) 아이는 넣지 않고, 출석부에 없어서 못 넣은 아이는 따로 알려 줘요.
 (async () => {
   const FN = "https://urvtilhpvzcczcxedeim.supabase.co/functions/v1/dd-push";
   const TOKEN = window.__DDG_TOKEN || "";
@@ -36,11 +37,18 @@
   #ddg-panel .bar{height:10px;background:#fff;border-radius:99px;overflow:hidden;margin:6px 0 12px}
   #ddg-panel .bar i{display:block;height:100%;width:0;background:#FCCC00;transition:width .2s}
   #ddg-panel .err{color:#b91c1c;font-weight:700}
-  #ddg-panel .ok{color:#15803d;font-weight:700}`;
+  #ddg-panel .ok{color:#15803d;font-weight:700}
+  #ddg-panel .note{background:#fff;border-radius:14px;padding:10px 12px;margin-bottom:10px}
+  #ddg-panel .note b{display:block;font-size:13px;margin-bottom:6px}
+  #ddg-panel .note textarea{width:100%;min-height:96px;border:1px solid #e4dfd4;border-radius:10px;padding:8px 10px;font:inherit;resize:vertical;background:#fbfaf7;color:#0f1b2d}
+  #ddg-panel .note small{display:block;color:#6c7280;font-size:12px;margin-top:4px}
+  #ddg-panel .miss{background:#fff4e5;border:1px solid #f5c58a;border-radius:14px;padding:10px 12px;margin-bottom:10px;color:#8a4b00}
+  #ddg-panel .miss b{display:block;margin-bottom:2px}
+  #ddg-panel .sec{font-size:12px;font-weight:800;color:#6c7280;margin:12px 2px 6px}`;
   const panel = document.createElement("div");
   panel.id = "ddg-panel";
   panel.innerHTML = `<style>${css}</style>
-    <div class="hd"><b>댕겨올개 → 알림장<small>오늘 유치원 아이만 임시저장해요</small></b><button class="x" title="닫기">×</button></div>
+    <div class="hd"><b>댕겨올개 → 알림장<small>다이얼독 오늘 출석부 아이만 · 호텔링(H) 제외</small></b><button class="x" title="닫기">×</button></div>
     <div class="bd"><p class="msg">불러오는 중…</p></div>
     <div class="ft"></div>`;
   document.body.appendChild(panel);
@@ -99,13 +107,13 @@
     return a.id;
   }
   const appP = new Promise((res) => window.require(["app"], res));
-  async function saveDraft(petId, attachmentIds) {
+  async function saveDraft(petId, attachmentIds, content) {
     const app = await appP;
     const now = new Date().toISOString();
     const model = new app.report.ReportModel();
     model.set("draft", now);
     await new Promise((res, rej) => model.save(
-      { reportingDate: now, content: "", recipients: [petId], attachments: attachmentIds },
+      { reportingDate: now, content: content || "", recipients: [petId], attachments: attachmentIds },
       { success: res, error: (m, r) => rej(new Error(`임시저장 실패 (${r?.status})`)) },
     ));
   }
@@ -128,20 +136,33 @@
   const unsentIds = new Set((unsent || []).map((p) => String(p.id)));
   const draftText = JSON.stringify(drafts || []);
   const photosOf = new Map((mine.dogs || []).map((d) => [String(d.petId), d]));
+  let noteText = mine.note || "";
+  const rollIds = new Set((daycare || []).map((p) => String(p.id)));
+  // 사진은 분류됐는데 다이얼독 오늘 출석부에 없는 아이 (H 호텔링은 원래 안 넣으니 빼고)
+  const missing = [
+    ...(mine.dogs || []).filter((d) => !rollIds.has(String(d.petId)) && !d.hotel && d.photos.some((x) => !x.pushed)).map((d) => d.name),
+    ...(mine.others || []).filter((o) => !o.hotel).map((o) => o.name),
+  ].sort((a, b) => a.localeCompare(b, "ko"));
   const rows = (daycare || []).map((p) => {
     const d = photosOf.get(String(p.id));
     const fresh = (d?.photos || []).filter((x) => !x.pushed);
     let state = "ready", note = "";
-    if (!unsentIds.has(String(p.id))) { state = "sent"; note = "오늘 알림장 이미 보냄"; }
+    if (d?.hotel) { state = "hotel"; note = "호텔링(H)이라 넣지 않아요"; }
+    else if (!unsentIds.has(String(p.id))) { state = "sent"; note = "오늘 알림장 이미 보냄"; }
     else if (draftText.includes(String(p.id))) { state = "draft"; note = "임시저장 알림장이 이미 있어요"; }
     else if (!fresh.length) { state = "none"; note = d?.photos?.length ? "사진을 이미 넣었어요" : "댕겨올개에 분류된 사진이 없어요"; }
     else if (fresh.length > MAX) note = `${fresh.length}장 중 ${MAX}장만 (다이얼독 최대)`;
     return { pet: p, photos: fresh.slice(0, MAX), state, note, on: state === "ready" };
   }).sort((a, b) => (a.state === "ready" ? 0 : 1) - (b.state === "ready" ? 0 : 1) || a.pet.name.localeCompare(b.pet.name, "ko"));
 
+  const missHtml = () => missing.length
+    ? `<div class="miss"><b>⚠️ 출석부에 없어서 못 넣는 아이 ${missing.length}마리</b>${missing.map(esc).join(", ")}<br><small>다이얼독 오늘 출석부에 없어요. 예약을 넣거나 직접 알림장을 써 주세요.</small></div>` : "";
   function drawList() {
     const ready = rows.filter((r) => r.on);
-    $bd.innerHTML = `<p class="msg">${+mine.day.slice(5, 7)}월 ${+mine.day.slice(8, 10)}일 유치원 ${rows.length}마리 · 댕겨올개에서 분류된 사진을 아이별 알림장으로 <b>임시저장</b>해요. 보호자에게 바로 가지 않아요.</p>`
+    $bd.innerHTML = `<p class="msg">${+mine.day.slice(5, 7)}월 ${+mine.day.slice(8, 10)}일 출석부 ${rows.length}마리 · 분류된 사진과 아래 글을 아이별 알림장으로 <b>임시저장</b>해요. 보호자에게 바로 가지 않아요.</p>`
+      + `<div class="note"><b>✍️ 알림장 글 (모든 아이 똑같이 들어가요)</b><textarea id="ddg-note" maxlength="1000" placeholder="여기에 붙여 넣으면 다음에도 그대로 기억해요">${esc(noteText)}</textarea><small>비워 두면 사진만 넣어요 · 최대 1000자</small></div>`
+      + missHtml()
+      + `<div class="sec">출석부 아이</div>`
       + (rows.length ? rows.map((r, i) => `<label class="row ${r.state === "ready" ? "" : "off"}">
           <input type="checkbox" data-i="${i}" ${r.on ? "checked" : ""} ${r.state === "ready" ? "" : "disabled"}>
           <span class="nm">${esc(r.pet.name)}${r.note ? `<small>${esc(r.note)}</small>` : ""}</span>
@@ -150,6 +171,7 @@
     $ft.innerHTML = `<button class="sub">닫기</button><button class="go" ${ready.length ? "" : "disabled"}>${ready.length ? `${ready.length}마리 임시저장` : "넣을 아이가 없어요"}</button>`;
     $ft.querySelector(".sub").onclick = () => panel.remove();
     $ft.querySelector(".go").onclick = run;
+    $bd.querySelector("#ddg-note").oninput = (e) => { noteText = e.target.value; };
     $bd.querySelectorAll("input[data-i]").forEach((el) => (el.onchange = () => { rows[+el.dataset.i].on = el.checked; drawList(); }));
   }
   drawList();
@@ -157,6 +179,8 @@
   /* ---------- 임시저장 ---------- */
   async function run() {
     const todo = rows.filter((r) => r.on);
+    const content = noteText.trim();
+    if (content !== (mine.note || "").trim()) await fn({ action: "note", text: content }).catch(() => {}); // 다음에도 같은 글
     const total = todo.reduce((n, r) => n + r.photos.length, 0);
     let sent = 0, okDogs = 0;
     const errs = [];
@@ -175,7 +199,7 @@
           sent++; draw(`${r.pet.name} 사진 올리는 중…`);
         });
         draw(`${r.pet.name} 알림장 임시저장 중…`);
-        await saveDraft(r.pet.id, ids);
+        await saveDraft(r.pet.id, ids, content);
         okDogs++;
         await fn({ action: "mark", items: r.photos.map((p) => ({ photo_id: p.id, pet_id: String(r.pet.id) })) }).catch(() => {});
       } catch (e) {
@@ -184,6 +208,7 @@
     }
     $bd.innerHTML = `<p class="${errs.length ? "err" : "ok"}">${okDogs}건을 임시보관함에 넣었어요${errs.length ? ` · ${errs.length}건 실패` : ""}</p>`
       + (errs.length ? `<p class="msg">${errs.map(esc).join("<br>")}</p>` : "")
+      + missHtml()
       + `<p class="msg">임시보관함에서 내용을 확인하고 보내 주세요.</p>`;
     $ft.innerHTML = `<button class="sub">닫기</button><button class="go">임시보관함 보기</button>`;
     $ft.querySelector(".sub").onclick = () => panel.remove();

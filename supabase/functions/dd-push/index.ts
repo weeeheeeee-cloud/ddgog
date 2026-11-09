@@ -1,6 +1,8 @@
 // 다이얼독 알림장 임시저장: 다이얼독 화면에서 실행되는 스크립트(dd-push.js)가 호출
 //  action "list": { token, day? } → 그날 분류된 사진을 다이얼독 반려견(petId)별로 { day, dogs: [{ petId, name, photos: [{ id, url, rotation, pushed }] }] }
 //  action "mark": { token, items: [{ photo_id, pet_id }] } → 다이얼독에 넣은 사진 기록 (다음에 같은 사진을 또 넣지 않게)
+//  action "note": { token, text } → 알림장에 모든 아이 똑같이 붙일 글 저장
+//  list 응답에는 note(저장된 글), 아이별 hotel(그날 H 표시), others(다이얼독에 연결 안 된 아이)도 들어 있음
 // 관리 탭에서 만든 dd_push_links 열쇠가 켜져 있어야만 동작
 
 import { createClient } from "jsr:@supabase/supabase-js@2";
@@ -31,8 +33,13 @@ Deno.serve(async (req) => {
   try {
     if (body.action === "list") {
       const day = typeof body.day === "string" && /^\d{4}-\d{2}-\d{2}$/.test(body.day) ? body.day : kstToday();
-      const { data: dogs } = await admin.from("dogs").select("id, name, dd_pet_id").not("dd_pet_id", "is", null);
-      const byDog = new Map((dogs ?? []).map((d) => [d.id, d]));
+      const { data: dogs } = await admin.from("dogs").select("id, name, dd_pet_id, auto").eq("auto", false);
+      const byDog = new Map((dogs ?? []).filter((d) => d.dd_pet_id).map((d) => [d.id, d]));
+      const nameOf = new Map((dogs ?? []).map((d) => [d.id, d.name]));
+      // 그날 H(호텔링) 표시된 아이
+      const { data: asg } = await admin.from("assignments").select("dog_id, hotel").eq("day", day);
+      const hotelIds = new Set((asg ?? []).filter((a) => a.hotel).map((a) => a.dog_id));
+      const { data: noteRow } = await admin.from("app_settings").select("value").eq("name", "dd_note").maybeSingle();
       const photos: { id: string; path: string; rotation: number | null; dog_ids: string[]; taken_at: string | null; created_at: string }[] = [];
       for (let from = 0; ; from += 1000) {
         const { data } = await admin.from("photos").select("id, path, rotation, dog_ids, taken_at, created_at")
@@ -46,10 +53,16 @@ Deno.serve(async (req) => {
       const { data: orders } = await admin.from("photo_order").select("dog_id, ids").eq("day", day);
       const orderOf = new Map((orders ?? []).map((o: { dog_id: string; ids: string[] }) => [o.dog_id, new Map((o.ids ?? []).map((id, i) => [id, i]))]));
       const out = new Map<string, { petId: string; name: string; dogId: string; photos: { id: string; path: string; rotation: number; pushed: boolean; t: string }[] }>();
+      const others = new Map<string, { name: string; hotel: boolean; n: number }>(); // 사진은 있는데 다이얼독에 연결 안 된 아이
       for (const p of photos) {
         for (const id of p.dog_ids ?? []) {
           const d = byDog.get(id);
-          if (!d) continue;
+          if (!d) {
+            if (!nameOf.has(id)) continue;
+            const o = others.get(id) ?? { name: nameOf.get(id)!, hotel: hotelIds.has(id), n: 0 };
+            o.n++; others.set(id, o);
+            continue;
+          }
           if (!out.has(d.dd_pet_id)) out.set(d.dd_pet_id, { petId: d.dd_pet_id, name: d.name, dogId: d.id, photos: [] });
           out.get(d.dd_pet_id)!.photos.push({ id: p.id, path: p.path, rotation: p.rotation ?? 0, pushed: pushed.has(`${p.id}|${d.dd_pet_id}`), t: p.taken_at ?? p.created_at });
         }
@@ -64,8 +77,10 @@ Deno.serve(async (req) => {
       }
       return json({
         day,
+        note: String((noteRow?.value as { text?: string } | null)?.text ?? ""),
+        others: [...others.values()],
         dogs: all.map((d) => ({
-          petId: d.petId, name: d.name,
+          petId: d.petId, name: d.name, hotel: hotelIds.has(d.dogId),
           photos: d.photos.sort((a, b) => {
             const r = orderOf.get(d.dogId);
             const ra = r?.get(a.id) ?? 1e9, rb = r?.get(b.id) ?? 1e9;
@@ -73,6 +88,11 @@ Deno.serve(async (req) => {
           }).map((p) => ({ id: p.id, url: urls.get(p.path), rotation: p.rotation, pushed: p.pushed })).filter((p) => p.url),
         })),
       });
+    }
+    if (body.action === "note") {
+      const text = String(body.text ?? "").slice(0, 1000);
+      await admin.from("app_settings").upsert({ name: "dd_note", value: { text } }, { onConflict: "name" });
+      return json({ ok: true });
     }
     if (body.action === "mark") {
       const items = (Array.isArray(body.items) ? body.items : []).slice(0, 2000) as { photo_id: string; pet_id: string }[];
