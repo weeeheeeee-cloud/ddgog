@@ -1,7 +1,7 @@
-// 댕겨올개 사진함 → 다이얼독 알림장 임시저장
+// 댕겨올개 사진함 → 다이얼독 알림장 바로 전송
 // 다이얼독 파트너 화면(dialodog.com/partners)에서 북마크를 누르면 실행돼요.
-// 다이얼독 오늘 출석부(유치원 예약)에 있는 아이만, 사진함에서 분류된 사진 + 정해 둔 글을 아이별 알림장으로 '임시저장'해요.
-// 보호자에게 바로 전송하지 않아요. H(호텔링) 아이는 넣지 않고, 출석부에 없어서 못 넣은 아이는 따로 알려 줘요.
+// 다이얼독 오늘 출석부(유치원 예약)에 있는 아이만, 사진함에서 분류된 사진 + 정해 둔 글을 아이별 알림장으로 보호자에게 바로 전송해요.
+// 보내기 전에 한 번 더 물어봐요. H(호텔링) 아이는 넣지 않고, 출석부에 없어서 못 넣은 아이는 따로 알려 줘요.
 (async () => {
   const FN = "https://urvtilhpvzcczcxedeim.supabase.co/functions/v1/dd-push";
   const TOKEN = window.__DDG_TOKEN || "";
@@ -95,7 +95,7 @@
     img.close?.();
     return await new Promise((r) => c.toBlob(r, "image/jpeg", 0.9));
   }
-  // 다이얼독 알림장 화면과 똑같은 방식: 사진 먼저 올리고(attachments), 알림장 모델로 임시저장
+  // 다이얼독 알림장 화면과 똑같은 방식: 사진 먼저 올리고(attachments), 알림장 모델로 전송 (임시저장 표시 없이 저장 = 전송)
   async function uploadAttachment(blob, name) {
     const fd = new FormData();
     fd.append("file", new File([blob], name, { type: "image/jpeg" }));
@@ -107,14 +107,13 @@
     return a.id;
   }
   const appP = new Promise((res) => window.require(["app"], res));
-  async function saveDraft(petId, attachmentIds, content) {
+  async function sendReport(petId, attachmentIds, content) {
     const app = await appP;
     const now = new Date().toISOString();
     const model = new app.report.ReportModel();
-    model.set("draft", now);
     await new Promise((res, rej) => model.save(
       { reportingDate: now, content: content || "", recipients: [petId], attachments: attachmentIds },
-      { success: res, error: (m, r) => rej(new Error(`임시저장 실패 (${r?.status})`)) },
+      { success: res, error: (m, r) => rej(new Error(`전송 실패 (${r?.status})`)) },
     ));
   }
   async function pool(items, limit, f) {
@@ -149,7 +148,7 @@
     let state = "ready", note = "";
     if (d?.hotel) { state = "hotel"; note = "호텔링(H)이라 넣지 않아요"; }
     else if (!unsentIds.has(String(p.id))) { state = "sent"; note = "오늘 알림장 이미 보냄"; }
-    else if (draftText.includes(String(p.id))) { state = "draft"; note = "임시저장 알림장이 이미 있어요"; }
+    else if (draftText.includes(String(p.id))) { state = "draft"; note = "임시보관함에 이 아이 알림장이 있어요 (겹치지 않게 빼요)"; }
     else if (!fresh.length) { state = "none"; note = d?.photos?.length ? "사진을 이미 넣었어요" : "댕겨올개에 분류된 사진이 없어요"; }
     else if (fresh.length > MAX) note = `${fresh.length}장 중 ${MAX}장만 (다이얼독 최대)`;
     return { pet: p, photos: fresh.slice(0, MAX), state, note, on: state === "ready" };
@@ -159,7 +158,7 @@
     ? `<div class="miss"><b>⚠️ 출석부에 없어서 못 넣는 아이 ${missing.length}마리</b>${missing.map(esc).join(", ")}<br><small>다이얼독 오늘 출석부에 없어요. 예약을 넣거나 직접 알림장을 써 주세요.</small></div>` : "";
   function drawList() {
     const ready = rows.filter((r) => r.on);
-    $bd.innerHTML = `<p class="msg">${+mine.day.slice(5, 7)}월 ${+mine.day.slice(8, 10)}일 출석부 ${rows.length}마리 · 분류된 사진과 아래 글을 아이별 알림장으로 <b>임시저장</b>해요. 보호자에게 바로 가지 않아요.</p>`
+    $bd.innerHTML = `<p class="msg">${+mine.day.slice(5, 7)}월 ${+mine.day.slice(8, 10)}일 출석부 ${rows.length}마리 · 분류된 사진과 아래 글을 아이별 알림장으로 <b>보호자에게 바로 전송</b>해요.</p>`
       + `<div class="note"><b>✍️ 알림장 글 (모든 아이 똑같이 들어가요)</b><textarea id="ddg-note" maxlength="1000" placeholder="글 없음 — 사진만 넣어요">${esc(noteText)}</textarea><small>댕겨올개 사이트의 📮 다이얼독 알림장 버튼에서 붙여 넣은 글이에요 · 여기서 고쳐도 돼요</small></div>`
       + missHtml()
       + `<div class="sec">출석부 아이</div>`
@@ -168,7 +167,7 @@
           <span class="nm">${esc(r.pet.name)}${r.note ? `<small>${esc(r.note)}</small>` : ""}</span>
           <span class="n">${r.state === "ready" ? `${r.photos.length}장` : ""}</span></label>`).join("")
         : `<p class="msg">오늘 유치원 예약이 없어요.</p>`);
-    $ft.innerHTML = `<button class="sub">닫기</button><button class="go" ${ready.length ? "" : "disabled"}>${ready.length ? `${ready.length}마리 임시저장` : "넣을 아이가 없어요"}</button>`;
+    $ft.innerHTML = `<button class="sub">닫기</button><button class="go" ${ready.length ? "" : "disabled"}>${ready.length ? `${ready.length}마리 전송` : "넣을 아이가 없어요"}</button>`;
     $ft.querySelector(".sub").onclick = () => panel.remove();
     $ft.querySelector(".go").onclick = run;
     $bd.querySelector("#ddg-note").oninput = (e) => { noteText = e.target.value; };
@@ -176,9 +175,10 @@
   }
   drawList();
 
-  /* ---------- 임시저장 ---------- */
+  /* ---------- 전송 ---------- */
   async function run() {
     const todo = rows.filter((r) => r.on);
+    if (!confirm(`${todo.length}마리 알림장을 보호자에게 바로 전송할까요?\n보낸 뒤에는 되돌릴 수 없어요.${noteText.trim() ? "" : "\n(글 없이 사진만 가요)"}`)) return;
     const content = noteText.trim();
     if (content !== (mine.note || "").trim()) await fn({ action: "note", text: content }).catch(() => {}); // 다음에도 같은 글
     const total = todo.reduce((n, r) => n + r.photos.length, 0);
@@ -198,20 +198,20 @@
           ids[k] = await uploadAttachment(blob, `${r.pet.name}-${k + 1}.jpg`);
           sent++; draw(`${r.pet.name} 사진 올리는 중…`);
         });
-        draw(`${r.pet.name} 알림장 임시저장 중…`);
-        await saveDraft(r.pet.id, ids, content);
+        draw(`${r.pet.name} 알림장 보내는 중…`);
+        await sendReport(r.pet.id, ids, content);
         okDogs++;
         await fn({ action: "mark", items: r.photos.map((p) => ({ photo_id: p.id, pet_id: String(r.pet.id) })) }).catch(() => {});
       } catch (e) {
         errs.push(`${r.pet.name}: ${e.message}`);
       }
     }
-    $bd.innerHTML = `<p class="${errs.length ? "err" : "ok"}">${okDogs}건을 임시보관함에 넣었어요${errs.length ? ` · ${errs.length}건 실패` : ""}</p>`
+    $bd.innerHTML = `<p class="${errs.length ? "err" : "ok"}">${okDogs}건을 보호자에게 보냈어요${errs.length ? ` · ${errs.length}건 실패` : ""}</p>`
       + (errs.length ? `<p class="msg">${errs.map(esc).join("<br>")}</p>` : "")
       + missHtml()
-      + `<p class="msg">임시보관함에서 내용을 확인하고 보내 주세요.</p>`;
-    $ft.innerHTML = `<button class="sub">닫기</button><button class="go">임시보관함 보기</button>`;
+      + `<p class="msg">알림장 목록에서 보낸 알림장을 볼 수 있어요.</p>`;
+    $ft.innerHTML = `<button class="sub">닫기</button><button class="go">알림장 목록 보기</button>`;
     $ft.querySelector(".sub").onclick = () => panel.remove();
-    $ft.querySelector(".go").onclick = () => { location.hash = "#reports/drafts"; panel.remove(); };
+    $ft.querySelector(".go").onclick = () => { location.hash = "#reports"; panel.remove(); };
   }
 })();

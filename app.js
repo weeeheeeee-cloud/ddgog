@@ -3460,7 +3460,7 @@ async function openDialdogPush() {
   const ov = document.createElement("div");
   ov.className = "rc-overlay dd-note-ov";
   ov.innerHTML = `<div class="rc-box dd-note-box">
-    <div class="rc-head"><div style="flex:1"><b>📮 다이얼독 알림장 임시저장</b><small class="muted">아래 글이 오늘 출석부 아이들 알림장에 똑같이 들어가요 (H 호텔링 제외)</small></div><button class="icon" data-x aria-label="닫기">×</button></div>
+    <div class="rc-head"><div style="flex:1"><b>📮 다이얼독 알림장 보내기</b><small class="muted">아래 글과 분류된 사진이 오늘 출석부 아이들에게 똑같이 전송돼요 (H 호텔링 제외)</small></div><button class="icon" data-x aria-label="닫기">×</button></div>
     <div class="rc-body">
       <textarea id="dd-note-text" maxlength="1000" rows="9" placeholder="여기에 알림장 글을 붙여 넣어 주세요"></textarea>
       <div class="dd-note-meta"><small class="muted">비워 두면 사진만 넣어요 · 다음에도 이 글이 그대로 남아 있어요</small><small id="dd-note-n" class="muted">0 / 1000</small></div>
@@ -3480,13 +3480,13 @@ async function openDialdogPush() {
   ta.focus();
   $("#dd-note-go", ov).addEventListener("click", async (e) => {
     const btn = e.currentTarget;
-    const w = window.open("https://dialodog.com/partners/#reports/drafts", "dialodog"); // 팝업 막힘 방지: 먼저 열기
+    const w = window.open("https://dialodog.com/partners/#reports", "dialodog"); // 팝업 막힘 방지: 먼저 열기
     btn.disabled = true; btn.textContent = "저장 중…";
     const { error } = await sb.from("app_settings").update({ value: { text: ta.value.trim().slice(0, 1000) } }).eq("name", "dd_note");
     if (error) { btn.disabled = false; btn.textContent = "저장하고 다이얼독 열기"; toast("글을 저장하지 못했어요. 다시 눌러 주세요."); return; }
     close();
     if (!w) toast("팝업이 막혔어요. 다이얼독을 직접 열어 주세요.", 6000);
-    toast("다이얼독에서 북마크 ‘댕겨올개 알림장’을 눌러 주세요. 아직 없으면 관리자 탭에서 만들어요.", 6000);
+    toast("다이얼독에서 북마크 ‘댕겨올개 알림장’을 누르고 ‘전송’을 눌러 주세요. 아직 없으면 관리자 탭에서 만들어요.", 6000);
   });
 }
 
