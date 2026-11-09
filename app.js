@@ -1377,7 +1377,7 @@ async function renderRoll() {
     const d = state.draft;
     count.textContent = `${d.names.length}마리 읽음`;
     // N(처음 오는 아이)으로 켠 이름은 같은 이름 고르기에서 뺌
-    const amb = d.names.map((n, i) => ({ n, i, c: matchDog(n, d, false).choices })).filter((x) => x.c && d.pick?.[norm(x.n)] !== NEW_DOG);
+    const amb = d.names.map((n, i) => ({ n, i, c: matchDog(n, d, false).choices })).filter((x) => x.c && d.pick?.[norm(x.n)] !== NEW_DOG && !d.split?.has(norm(x.n)));
     const sims = d.names.map((n, i) => ({ n, i, c: matchDog(n, d, false).similar })).filter((x) => x.c);
     const ambRef = amb.length || sims.length
       ? await signed("refs", [...amb, ...sims].flatMap((x) => x.c.map((c) => c.ref_path).filter(Boolean))) : null;
@@ -1386,7 +1386,8 @@ async function renderRoll() {
         <b>이름이 같은 아이가 있어요 — 오늘 온 아이를 눌러 주세요</b>
         ${amb.map(({ n, i, c }) => `<div class="same-row"><span class="same-label">${esc(n)}${d.guessed?.has(norm(n)) && d.pick?.[norm(n)] ? ` <small class="muted">(최근 자주 온 아이로 골라 둠)</small>` : ""}</span>
           <div class="same-opts">${c.map((x) => `<button class="same-opt ${d.pick?.[norm(n)] === x.id ? "on" : ""}" data-same="${i}" data-id="${x.id}">
-            ${x.ref_path ? `<img src="${ambRef(x.ref_path)}" alt="">` : ""}<span>${esc(x.name)}${breedTag(x, true)}</span></button>`).join("")}</div></div>`).join("")}
+            ${x.ref_path ? `<img src="${ambRef(x.ref_path)}" alt="">` : ""}<span>${esc(x.name)}${breedTag(x, true)}</span></button>`).join("")}
+            <button class="same-opt both" data-both="${i}"><span>${c.length === 2 ? "둘 다" : "모두"} 왔어요</span></button></div></div>`).join("")}
       </div>` : ""}
       ${sims.length ? `<div class="same-name similar">
         <b>비슷한 이름이 이미 있어요 — 같은 아이인지 골라 주세요</b>
@@ -1438,6 +1439,12 @@ async function renderRoll() {
     $$("[data-pick]", body).forEach((el) => el.addEventListener("change", () => {
       if (!el.value) return;
       d.pick = { ...(d.pick || {}), [norm(d.names[+el.dataset.pick])]: el.value };
+      renderRoll();
+    }));
+    $$("[data-both]", body).forEach((el) => el.addEventListener("click", () => {
+      const n = d.names[+el.dataset.both];
+      const c = matchDog(n, d, false).choices;
+      if (c) splitBoth(d, n, c);
       renderRoll();
     }));
     $$("[data-n]", body).forEach((el) => el.addEventListener("click", () => {
@@ -1702,6 +1709,19 @@ $("#board-file").addEventListener("change", async (e) => {
   renderRoll();
 });
 
+// 같은 이름 아이가 둘 다(모두) 온 날: 명단의 그 이름을 아이마다 한 칸씩으로 나눔 ("여름" → "여름 페키니즈", "여름 포메라니안")
+function splitBoth(d, n, list) {
+  const i = d.names.findIndex((x) => norm(x) === norm(n));
+  if (i < 0) return;
+  const labels = list.map((c) => (dupName(c) && c.breed ? `${c.name} ${c.breed}` : c.name));
+  d.pick = d.pick || {};
+  delete d.pick[norm(n)];
+  const hotel = isHotelName(d, n);
+  d.names.splice(i, 1, ...labels.filter((l) => !d.names.some((x, j) => j !== i && norm(x) === norm(l))));
+  list.forEach((c, k) => { d.pick[norm(labels[k])] = c.id; });
+  d.split = new Set([...(d.split || []), ...labels.map(norm)]); // 둘 다 고른 이름은 다시 묻지 않음
+  if (hotel) d.hotel = [...(d.hotel || []).filter((h) => norm(h) !== norm(n)), ...labels];
+}
 // 같은 이름 아이 고르기 창에 쓰는 구분 (견종, 없으면 생김새 메모)
 const tellApart = (c) => c.breed || (c.note ? String(c.note).slice(0, 24) : "") || (c.dd_pet_id ? "" : "카톡 아이");
 // 이름이 같은 아이가 여럿이면: 하나씩 번호로 물어봄 ("1. 페키니즈 2. 포메라니안"). 최근 자주 온 아이를 1번(기본값)으로
@@ -1717,11 +1737,14 @@ async function suggestPicks(d) {
   d.guessed = new Set();
   for (const [n, c] of amb) {
     const list = [...c].sort((a, b) => (score.get(b.id) || 0) - (score.get(a.id) || 0));
+    const all = list.length + 1;
     const v = prompt(`'${n}' 이름의 아이가 ${list.length}마리예요. 오늘 온 아이 번호를 눌러 주세요\n` +
       list.map((x, i) => `${i + 1}. ${tellApart(x) || x.name}${score.get(x.id) ? ` (최근 ${score.get(x.id)}번 옴)` : ""}`).join("\n") +
-      `\n0. 둘 다 아님 (처음 오는 아이)`, "1");
+      `\n${all}. ${list.length === 2 ? "둘 다" : "모두"} 왔어요` +
+      `\n0. ${list.length === 2 ? "둘 다" : "모두"} 아님 (처음 오는 아이)`, "1");
     if (v === null) continue; // 취소하면 아래 명단에서 직접 고르게
     if (String(v).trim() === "0") { d.pick[norm(n)] = NEW_DOG; continue; }
+    if (+v === all) { splitBoth(d, n, list); continue; }
     const got = list[+v - 1];
     if (got) d.pick[norm(n)] = got.id;
   }
