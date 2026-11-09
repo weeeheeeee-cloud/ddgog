@@ -990,8 +990,7 @@ async function selAction(kind) {
   toast(to ? `${photos.length}장을 ${to.name}(으)로 옮겼어요` : `${photos.length}장을 ${from?.name || ""}에서 빼서 맨 아래 '모르는 아이' 칸으로 보냈어요`);
   state.sel = null;
   await renderPhotos();
-  // A 폴더 사진을 B로 여러 장 옮겼으면, A의 나머지 사진도 B인지 한 번 더 확인
-  if (from && to && !from.auto) reviewFolder(from.id, to.id, null);
+  // 다른 사진은 AI가 알아서 옮기지 않음 (다시 검수는 직원이 '폴더 다시 검수'를 눌렀을 때만)
 }
 
 // ---- 폴더 다시 검수: 기준(대표 사진 + 직원이 고른 사진)과 너무 다른 사진은 빼서 아래로, 누운 사진은 세움
@@ -1886,7 +1885,9 @@ async function confirmRoll() {
   try {
     if (!hadRoll) {
       const { data: redo } = await sb.from("photos").select("id").eq("day", state.day).in("status", ["done", "review", "error"]).neq("confidence", "manual");
-      const ids = (redo || []).map((x) => x.id);
+      let ids = (redo || []).map((x) => x.id);
+      // 이미 분류된 사진은 물어보고 나서만 다시 분류
+      if (ids.length && !confirm(`명단 없이 먼저 분류된 사진 ${ids.length}장이 있어요.\n명단 기준으로 다시 분류할까요?\n\n(취소하면 지금 분류 그대로 둬요. 직원이 고친 사진은 어느 쪽이든 그대로예요)`)) ids = [];
       for (let i = 0; i < ids.length; i += 200) await sb.from("photos").update({ status: "pending", dog_ids: [] }).in("id", ids.slice(i, i + 200));
       if (ids.length) toast(`명단 없이 분류됐던 사진 ${ids.length}장을 명단 기준으로 다시 분류할게요`);
     }
@@ -2451,13 +2452,7 @@ $("#sheet-save").addEventListener("click", async () => {
     added.filter((a, i) => !(wrong.length && (added.length === 1 || i < wrong.length))).forEach((a) => learnMistake(sheetPhoto.id, null, a));
   }
   sheetPhoto.confidence = "manual";
-  followCorrection(sheetPhoto, before, ids);
-  {
-    // A로 잘못 들어간 걸 B로 고치면, A 폴더의 나머지 사진도 A인지 B인지 다시 확인해서 B면 옮김
-    const wrong = before.ids.filter((id) => !ids.includes(id) && !dogById(id)?.auto);
-    const added = ids.filter((id) => !before.ids.includes(id));
-    if (before.conf !== "manual" && wrong.length === 1 && added.length === 1) reviewFolder(wrong[0], added[0], sheetPhoto.id);
-  }
+  // 고친 사진 한 장만 바꿈. 비슷한 사진·같은 폴더 나머지 사진은 AI가 알아서 옮기지 않음 (시킬 때만 다시 검수)
   // 명단에 없던 아이를 직접 골랐으면 오늘 명단에 넣어서 AI도 그 아이를 후보로 보게 함
   const extra = ids.filter((id) => !state.attendance.has(id));
   if (extra.length && state.attendance.size) {
