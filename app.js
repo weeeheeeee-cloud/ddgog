@@ -290,7 +290,7 @@ async function findOrCreateDog(name) {
   const m = matchDog(name, null);
   if (m.dog) return m.dog;
   if (m.choices) {
-    const v = prompt(`'${name}' 이름의 아이가 여럿이에요. 번호를 골라 주세요\n` + m.choices.map((c, i) => `${i + 1}. ${c.name}`).join("\n"), "1");
+    const v = prompt(`'${name}' 이름의 아이가 여럿이에요. 번호를 골라 주세요\n` + m.choices.map((c, i) => `${i + 1}. ${tellApart(c) || c.name}`).join("\n"), "1");
     return v === null ? null : m.choices[+v - 1] || null;
   }
   if (m.similar) {
@@ -1152,7 +1152,7 @@ async function renameDog(dog) {
     else if (m.choices) {
       const list = m.choices.filter((c) => c.id !== dog.id);
       const v = prompt(`'${nm}' 이름의 아이가 여럿이에요. 번호를 골라 주세요 (새 아이면 0)\n` +
-        list.map((c, i) => `${i + 1}. ${c.name}`).join("\n"), "1");
+        list.map((c, i) => `${i + 1}. ${c.name}${tellApart(c) ? ` (${tellApart(c)})` : ""}`).join("\n"), "1");
       if (v === null) return false;
       same = list[+v - 1] || null;
     } else if (m.similar) {
@@ -1702,7 +1702,9 @@ $("#board-file").addEventListener("change", async (e) => {
   renderRoll();
 });
 
-// 이름이 같은 아이가 여럿이면: 최근에 자주 온 아이를 미리 골라 둠 (바꿀 수 있음)
+// 같은 이름 아이 고르기 창에 쓰는 구분 (견종, 없으면 생김새 메모)
+const tellApart = (c) => c.breed || (c.note ? String(c.note).slice(0, 24) : "") || (c.dd_pet_id ? "" : "카톡 아이");
+// 이름이 같은 아이가 여럿이면: 하나씩 번호로 물어봄 ("1. 페키니즈 2. 포메라니안"). 최근 자주 온 아이를 1번(기본값)으로
 async function suggestPicks(d) {
   const amb = d.names.map((n) => [n, matchDog(n, d, false).choices]).filter(([, c]) => c);
   if (!amb.length) return;
@@ -1714,11 +1716,14 @@ async function suggestPicks(d) {
   d.pick = d.pick || {};
   d.guessed = new Set();
   for (const [n, c] of amb) {
-    const best = [...c].sort((a, b) => (score.get(b.id) || 0) - (score.get(a.id) || 0));
-    if ((score.get(best[0].id) || 0) > (score.get(best[1].id) || 0)) {
-      d.pick[norm(n)] = best[0].id;
-      d.guessed.add(norm(n));
-    }
+    const list = [...c].sort((a, b) => (score.get(b.id) || 0) - (score.get(a.id) || 0));
+    const v = prompt(`'${n}' 이름의 아이가 ${list.length}마리예요. 오늘 온 아이 번호를 눌러 주세요\n` +
+      list.map((x, i) => `${i + 1}. ${tellApart(x) || x.name}${score.get(x.id) ? ` (최근 ${score.get(x.id)}번 옴)` : ""}`).join("\n") +
+      `\n0. 둘 다 아님 (처음 오는 아이)`, "1");
+    if (v === null) continue; // 취소하면 아래 명단에서 직접 고르게
+    if (String(v).trim() === "0") { d.pick[norm(n)] = NEW_DOG; continue; }
+    const got = list[+v - 1];
+    if (got) d.pick[norm(n)] = got.id;
   }
 }
 
