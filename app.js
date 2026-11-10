@@ -1450,11 +1450,10 @@ async function renderRoll() {
       <p class="small">읽은 이름이 맞는지 확인해 주세요. <b>이름을 누르면 고칠 수 있고</b>, ×로 뺄 수 있어요.
         <span class="tag-n">N</span>은 <b>처음 오는 아이</b>예요. 명단에 있는 아이와 이름이 같거나 비슷해도 N을 켜면 새 아이로 등록하고, 확정 후 대표 사진을 고를 수 있어요. 명단에 없는 이름은 자동으로 N이 켜져요.
         <span class="tag-k">K</span>는 <b>유치원생</b>(다이얼독 아이)이에요.
-        <span class="tag-d">D</span>는 <b>데이케어 손님</b>(시간제)이에요. 다이얼독 유치원생과 이름이 같아도 다른 아이로 봐요.
         <span class="tag-h">H</span> 표시는 호텔링이에요. H만 있는데 다이얼독에 같은 이름 유치원생이 있으면 <b>유치원생이 호텔링 중인지</b> 물어봐요. 둘 다 눌러서 켜고 끌 수 있어요. 호텔링 아이는 대표 사진 없이 분류하고, AI가 모르는 아이는 '모르는 아이' 칸에 비슷한 사진끼리 모아 둬요.
         ${d.unsure.length ? `<span class="q-legend">?</span> 표시는 글씨가 애매했던 이름이에요.` : ""}</p>
       <div class="chips roll-chips">${d.names.map((n, i) => `
-        <span class="${d.unsure.includes(n) ? "unsure" : ""} ${isNewName(n) ? "new" : ""} ${isHotelName(d, n) ? "hotel" : ""}"><b data-k="${i}" class="k-toggle ${isKinderName(d, n) ? "on" : ""}" title="유치원생 켜기/끄기">K</b><b data-h="${i}" class="h-toggle" title="호텔링 켜기/끄기">H</b><b data-dc="${i}" class="d-toggle ${isDaycareName(d, n) ? "on" : ""}" title="데이케어 손님 켜기/끄기">D</b><b data-n="${i}" class="n-toggle" title="처음 오는 아이 켜기/끄기">N</b><b data-edit="${i}">${esc(n)}</b>${(() => {
+        <span class="${d.unsure.includes(n) ? "unsure" : ""} ${isNewName(n) ? "new" : ""} ${isHotelName(d, n) ? "hotel" : ""}"><b data-k="${i}" class="k-toggle ${isKinderName(d, n) ? "on" : ""}" title="유치원생 켜기/끄기">K</b><b data-h="${i}" class="h-toggle" title="호텔링 켜기/끄기">H</b><b data-n="${i}" class="n-toggle" title="처음 오는 아이 켜기/끄기">N</b><b data-edit="${i}">${esc(n)}</b>${(() => {
           const m = matchDog(n, d);
           if (m.isNew) return "";
           if (m.hotelAsk) return `<select data-hpick="${i}" class="pick-dog ask-h"><option value="">유치원생 호텔링? 확인</option>${m.hotelAsk.map((c) => `<option value="${c.id}">유치원생 ${esc(c.name)}${c.breed ? ` (${esc(c.breed)})` : ""}가 호텔링 중</option>`).join("")}<option value="${NEW_DOG}">유치원생 아님 (호텔 손님)</option></select>`;

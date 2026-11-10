@@ -1,6 +1,6 @@
 // 출석 보드 사진에서 강아지 이름 읽기
-// body: { images: base64 JPEG[] (또는 image 하나), known: string[] }  →  { names, unsure, hotel(H 표시), kinder(K 표시 = 유치원생), daycare(D 표시 = 데이케어 손님) }
-// 보드 오른쪽 호텔링·데이케어 칸도 읽음. 같은 이름이 K 칸과 H/D 칸에 따로 있으면 다른 아이 → "몽이" + "몽이 데이"처럼 둘 다 넣음
+// body: { images: base64 JPEG[] (또는 image 하나), known: string[] }  →  { names, unsure, hotel(H 표시), kinder(K 표시 = 유치원생), daycare(항상 빈 값) }
+// 보드 오른쪽 호텔링 칸도 읽음. D 표시 아이는 명단에서 뺌. 같은 이름이 K 칸과 H 칸에 따로 있으면 다른 아이 → "라봉" + "라봉 호텔링"
 // 출석 보드 사진뿐 아니라 다이얼독 등 앱의 알림장·예약 목록 캡처도 읽음
 
 import { createClient } from "jsr:@supabase/supabase-js@2";
@@ -30,7 +30,7 @@ Extract ONLY the dogs' names.
 - Names in an app may be written with the breed or owner, e.g. "콩이(말티즈)" or "콩이 / 김OO" → just "콩이".
 - If a list of known dog names is given and a handwritten word is plausibly one of them, use the known spelling.
 - Keep each dog exactly once. BUT if the same name appears in two different sections with different marks
-  (e.g. "몽이 K" in the main columns and "몽이 D" in the hotel/daycare area), they are DIFFERENT dogs: list both entries.
+  (e.g. "몽이 K" in the main columns and "몽이 H" in the hotel area), they are DIFFERENT dogs: list both entries.
 - Include EVERY dog on the list, hotel guests too, even when a name is not among the known names
   (new or one-off guests are common).
 - Hotel guests (호텔링) are marked with an "H" (e.g. "H 콩이", "콩이(H)", "콩이 h", a circled H, or listed
@@ -38,8 +38,8 @@ Extract ONLY the dogs' names.
 - Daycare (유치원) dogs are marked with a "K" (e.g. "K 콩이", "콩이(K)", "콩이 k", a circled K, or listed
   under a K / 유치원 section). Do NOT include the K in the name; give it the mark "K".
   A dog can have both K and H (a daycare dog staying at the hotel) on the same line: then give both marks.
-- Day guests (시간제 데이케어 손님) are marked with a "D" (e.g. "몽이 D", "뭉치 D"), usually in the hotel area with
-  check-in times like "12:00 입실". Do NOT include the D in the name.
+- Some dogs in the hotel area are marked with a "D" (e.g. "몽이 D", "뭉치 D"). Give those the mark "D"
+  (do not include the D in the name); they will be left out of today's list.
 - Staff often write a short breed before or after the name to tell same-name dogs apart
   (e.g. "말티푸 호두", "웰시 여름", "포메 구름", "비숑 하루", "꼬숑 두식", "쿠키 잭"). Put the name in "name" and that
   breed word in "breed" (keep it as written, e.g. "웰시", "포메", "잭"). Leave "breed" empty when none is written.
@@ -108,7 +108,7 @@ Deno.serve(async (req) => {
     const ents = (parsed.entries as { name?: unknown; breed?: unknown; marks?: unknown }[]).map((e) => {
       const marks = (Array.isArray(e.marks) ? e.marks : []).map((m) => String(m).toUpperCase().trim()).filter((m) => ["K", "H", "D"].includes(m));
       return { name: stripD(strip(String(e.name ?? "").trim())), breed: String(e.breed ?? "").trim(), marks };
-    }).filter((e) => e.name);
+    }).filter((e) => e.name && !e.marks.includes("D")); // D 표시 아이는 명단에서 뺌
     // 보드 순서 그대로. 같은 이름이 둘이면 K(유치원생) 줄이 원래 이름을 갖고, H/D 손님 쪽에 "데이"·"호텔링"이 붙음
     const keyOf = (n: string) => n.replace(/\s+/g, "");
     const hasK = new Set(ents.filter((e) => e.marks.includes("K")).map((e) => keyOf(e.name)));
