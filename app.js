@@ -589,9 +589,10 @@ $$(".tabs button").forEach((b) => b.addEventListener("click", () => { state.tab 
 const HOTEL_V = Date.now();
 async function render() {
   $$(".tabs button").forEach((b) => b.classList.toggle("on", b.dataset.tab === state.tab));
-  document.querySelector(".layout")?.classList.toggle("wide", state.tab === "hotel" || state.tab === "pickup" || state.tab === "admin");
+  document.querySelector(".layout")?.classList.toggle("wide", state.tab === "hotel" || state.tab === "kinder" || state.tab === "pickup" || state.tab === "admin");
   $("#app")?.classList.toggle("tab-admin", state.tab === "admin");
   $("#app")?.classList.toggle("tab-hotel", state.tab === "hotel");
+  $("#app")?.classList.toggle("tab-kinder", state.tab === "kinder");
   $("#app")?.classList.toggle("tab-pickup", state.tab === "pickup");
   $("#app")?.classList.toggle("tab-board", state.tab === "board");
   $$(".tab").forEach((s) => s.classList.toggle("hidden", s.id !== "tab-" + state.tab));
@@ -604,6 +605,10 @@ async function render() {
   if (state.tab !== "pickup") await Promise.all([loadDogs(), loadAttendance(), loadPractice()]);
   if (state.tab === "photos") { await loadPhotos(); await renderPhotos(); }
   else if (state.tab === "roster") renderRoster();
+  else if (state.tab === "kinder") {
+    const m = await import(`./kinder.js?v=${HOTEL_V}`);
+    await m.renderKinder({ sb, toast, signed, esc, dogs: state.dogs });
+  }
   else if (state.tab === "hotel") {
     const m = await import(`./hotel.js?v=${HOTEL_V}`);
     await m.renderHotel({ sb, toast, signed, esc, dogs: state.dogs });

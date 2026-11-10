@@ -44,16 +44,35 @@
   #ddg-panel .note small{display:block;color:#6c7280;font-size:12px;margin-top:4px}
   #ddg-panel .miss{background:#fff4e5;border:1px solid #f5c58a;border-radius:14px;padding:10px 12px;margin-bottom:10px;color:#8a4b00}
   #ddg-panel .miss b{display:block;margin-bottom:2px}
-  #ddg-panel .sec{font-size:12px;font-weight:800;color:#6c7280;margin:12px 2px 6px}`;
+  #ddg-panel .sec{font-size:12px;font-weight:800;color:#6c7280;margin:12px 2px 6px}
+  #ddg-panel .mem{background:rgba(255,255,255,.14);border:0;color:#f0ede6;border-radius:999px;padding:7px 11px;font-weight:700;font-size:12.5px;cursor:pointer;white-space:nowrap}
+  #ddg-panel .mem:disabled{opacity:.6;cursor:default}
+  #ddg-panel .mbar{display:none;padding:10px 16px;font-size:13px;font-weight:700;background:#e9f7ee;color:#15803d}
+  #ddg-panel .mbar.on{display:block}
+  #ddg-panel .mbar.bad{background:#fde8e6;color:#b91c1c}`;
   const panel = document.createElement("div");
   panel.id = "ddg-panel";
   panel.innerHTML = `<style>${css}</style>
-    <div class="hd"><b>댕겨올개 → 알림장<small>다이얼독 오늘 출석부 아이만 · 호텔링(H) 제외</small></b><button class="x" title="닫기">×</button></div>
+    <div class="hd"><b>댕겨올개 → 알림장<small>다이얼독 오늘 출석부 아이만 · 호텔링(H) 제외</small></b><button class="mem" title="다이얼독 회원 명단을 댕겨올개 유치원 탭으로">👥 회원 명단 가져오기</button><button class="x" title="닫기">×</button></div>
+    <div class="mbar"></div>
     <div class="bd"><p class="msg">불러오는 중…</p></div>
     <div class="ft"></div>`;
   document.body.appendChild(panel);
   const $bd = panel.querySelector(".bd"), $ft = panel.querySelector(".ft");
   panel.querySelector(".x").onclick = () => panel.remove();
+  // 다이얼독 회원 명단 → 댕겨올개 유치원 탭 (알림장 보내기와 상관없이 따로)
+  panel.querySelector(".mem").onclick = async (e) => {
+    const btn = e.currentTarget, bar = panel.querySelector(".mbar");
+    btn.disabled = true; btn.textContent = "가져오는 중…"; bar.className = "mbar on"; bar.textContent = "다이얼독 회원 명단을 읽고 있어요…";
+    try {
+      const j = await dd("pets?perPage=3000");
+      const pets = j?.pets || [];
+      if (!pets.length) throw new Error("다이얼독 회원 명단이 비어 있어요");
+      const r = await fn({ action: "members", pets });
+      bar.textContent = `✅ 유치원 탭에 ${r.total}마리 넣었어요 (새로 ${r.added} · 갱신 ${r.updated}${r.gone ? ` · 그만 다님 ${r.gone}` : ""})`;
+    } catch (err) { bar.className = "mbar on bad"; bar.textContent = `⚠️ ${err.message}`; }
+    btn.disabled = false; btn.textContent = "👥 회원 명단 가져오기";
+  };
   const esc = (s) => String(s ?? "").replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
   const fail = (m) => { $bd.innerHTML = `<p class="err">${esc(m)}</p>`; $ft.innerHTML = `<button class="sub">닫기</button>`; $ft.querySelector("button").onclick = () => panel.remove(); };
 

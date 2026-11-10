@@ -2,6 +2,7 @@
 //  action "list": { token, day? } → 그날 분류된 사진을 다이얼독 반려견(petId)별로 { day, dogs: [{ petId, name, photos: [{ id, url, rotation, pushed }] }] }
 //  action "mark": { token, items: [{ photo_id, pet_id }] } → 다이얼독에 넣은 사진 기록 (다음에 같은 사진을 또 넣지 않게)
 //  action "note": { token, text } → 알림장에 모든 아이 똑같이 붙일 글 저장
+//  action "members": { token, pets } → 다이얼독 회원 명단을 유치원 탭(kinder_members)에 넣기/갱신
 //  list 응답에는 note(저장된 글), 아이별 hotel(그날 H 표시), others(다이얼독에 연결 안 된 아이)도 들어 있음
 // 관리 탭에서 만든 dd_push_links 열쇠가 켜져 있어야만 동작
 
@@ -88,6 +89,44 @@ Deno.serve(async (req) => {
           }).map((p) => ({ id: p.id, url: urls.get(p.path), rotation: p.rotation, pushed: p.pushed })).filter((p) => p.url),
         })),
       });
+    }
+    if (body.action === "members") {
+      // 다이얼독 회원(반려견) 명단 → 유치원 탭 (kinder_members). 우리 메모(notes)는 그대로 둠
+      const pets = (Array.isArray(body.pets) ? body.pets : []).slice(0, 3000) as Record<string, unknown>[];
+      if (!pets.length) return json({ error: "명단이 비어 있어요" }, 400);
+      const fmtPhone = (v: unknown) => {
+        const d = String(v ?? "").replace(/\D/g, "");
+        return d.length === 11 ? `${d.slice(0, 3)}-${d.slice(3, 7)}-${d.slice(7)}` : d.length === 10 ? `${d.slice(0, 3)}-${d.slice(3, 6)}-${d.slice(6)}` : String(v ?? "").trim();
+      };
+      const clean = (v: unknown) => { const t = String(v ?? "").replace(/\s+/g, " ").trim(); return t || null; };
+      const { data: dogs } = await admin.from("dogs").select("id, dd_pet_id").not("dd_pet_id", "is", null);
+      const dogOf = new Map((dogs ?? []).map((d) => [String(d.dd_pet_id), d.id]));
+      const now = new Date().toISOString();
+      const rows = pets.filter((p) => p.id && p.name).map((p) => {
+        const owners = (Array.isArray(p.owners) ? p.owners : []) as Record<string, unknown>[];
+        const main = owners.find((o) => o.primaryProfile) ?? owners[0] ?? {};
+        const addrOf = (o: Record<string, unknown>) => { const a = (o.address ?? {}) as Record<string, unknown>; return clean([a.address, a.addressDetail].filter(Boolean).join(" ")); };
+        const w = Number(p.weight);
+        return {
+          dd_pet_id: String(p.id), name: String(p.name).trim(), breed: clean(p.breed),
+          birthday: /^\d{4}-\d{2}-\d{2}$/.test(String(p.birthday ?? "")) ? p.birthday : null,
+          gender: clean(p.gender), neutered: clean(p.neutered), weight: Number.isFinite(w) && w > 0 ? w : null,
+          owner_name: clean(main.name), phone: main.phone ? fmtPhone(main.phone) : null, address: addrOf(main),
+          owners: owners.map((o) => ({ name: clean(o.name), phone: o.phone ? fmtPhone(o.phone) : null, address: addrOf(o), main: o === main })),
+          dd_memo: clean(p.memo), active: !p.removed, dog_id: dogOf.get(String(p.id)) ?? null, synced_at: now, updated_at: now,
+        };
+      });
+      const { data: before } = await admin.from("kinder_members").select("dd_pet_id");
+      const had = new Set((before ?? []).map((r) => r.dd_pet_id));
+      for (let i = 0; i < rows.length; i += 200) {
+        const { error } = await admin.from("kinder_members").upsert(rows.slice(i, i + 200), { onConflict: "dd_pet_id" });
+        if (error) return json({ error: `저장 실패: ${error.message}` }, 500);
+      }
+      // 다이얼독에서 지워진 아이는 '그만 다님'으로
+      const ids = new Set(rows.map((r) => r.dd_pet_id));
+      const gone = [...had].filter((x) => x && !ids.has(x));
+      if (gone.length) await admin.from("kinder_members").update({ active: false, updated_at: now }).in("dd_pet_id", gone);
+      return json({ ok: true, total: rows.length, added: rows.filter((r) => !had.has(r.dd_pet_id)).length, updated: rows.filter((r) => had.has(r.dd_pet_id)).length, gone: gone.length });
     }
     if (body.action === "note") {
       const text = String(body.text ?? "").slice(0, 1000);

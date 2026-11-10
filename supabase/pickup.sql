@@ -66,3 +66,14 @@ create policy "staff all photo_order" on public.photo_order for all to authentic
 
 -- 견종은 이름 괄호 대신 따로 (이미 적용됨)
 alter table public.dogs add column if not exists breed text;
+
+-- 유치원 회원 (다이얼독 회원 명단, 북마크의 '회원 명단 가져오기'로 갱신)
+create table if not exists public.kinder_members (
+  id uuid primary key default gen_random_uuid(),
+  dd_pet_id text unique, name text not null, breed text, birthday date, gender text, neutered text, weight numeric,
+  owner_name text, phone text, address text, owners jsonb not null default '[]', dd_memo text, notes text,
+  active boolean not null default true, dog_id uuid references public.dogs(id) on delete set null,
+  synced_at timestamptz, created_at timestamptz not null default now(), updated_at timestamptz not null default now()
+);
+alter table public.kinder_members enable row level security;
+create policy "staff all kinder_members" on public.kinder_members for all to authenticated using (true) with check (true);

@@ -1152,3 +1152,30 @@ small.breed { font-size: 11.5px; font-weight: 700; color: var(--muted); backgrou
 .dd-note-box textarea{width:100%;min-height:200px;border:1px solid var(--line);border-radius:12px;padding:12px;font:inherit;font-size:15px;line-height:1.5;resize:vertical;background:#fff;box-sizing:border-box}
 .dd-note-meta{display:flex;justify-content:space-between;gap:8px;margin-top:6px}
 .dd-note-meta small:last-child{white-space:nowrap}
+
+/* 유치원 회원 */
+#app.tab-kinder .date-row { display: none; }
+.kd-sync { margin:-4px 0 10px; font-size:12.5px; }
+.kd-bday { background:#fff4c2; border-radius:14px; padding:10px 14px; margin-bottom:10px; font-weight:700; color:#5a4a00; }
+.kd-bday button { border:0; background:none; font:inherit; font-weight:800; color:var(--navy); text-decoration:underline; cursor:pointer; padding:0; }
+.kd-tools { display:flex; gap:12px; align-items:center; flex-wrap:wrap; }
+.kd-tools .ho-search { flex:1 1 280px; }
+.kd-gone { display:inline-flex; gap:6px; align-items:center; font-size:13px; color:var(--muted); margin-bottom:12px; white-space:nowrap; }
+.kd-table .ho-tr { grid-template-columns:52px 1.3fr .9fr 1.1fr 2.2fr !important; }
+.kd-table .ho-tr.gone { opacity:.5; }
+.kd-av { width:40px; height:40px; border-radius:12px; object-fit:cover; display:grid; place-items:center; background:#f3efe6; font-style:normal; font-size:18px; }
+.kd-name b { display:block; font-weight:800; overflow:hidden; text-overflow:ellipsis; }
+.kd-name small { display:block; font-size:12px; color:var(--muted); overflow:hidden; text-overflow:ellipsis; }
+.kd-memo { font-size:13px; }
+.kd-links { display:flex; gap:6px; flex-wrap:wrap; margin-bottom:6px; }
+.kd-nolink { background:#f3efe6; color:var(--muted); border-radius:999px; padding:1px 8px; font-size:11px; font-weight:700; }
+.kd-notes { width:100%; border:1px solid var(--line); border-radius:12px; padding:10px 12px; font:inherit; font-size:14px; resize:vertical; box-sizing:border-box; }
+.kd-steps { margin:4px 0 12px; padding-left:20px; line-height:1.9; }
+@media (max-width: 760px) {
+  .kd-table .ho-tr { grid-template-columns:44px 1fr auto !important; grid-template-areas:"av name ph" "av own memo"; row-gap:2px; }
+  .kd-table .ho-tr > span:nth-child(1) { grid-area:av; }
+  .kd-table .ho-tr > span:nth-child(2) { grid-area:name; }
+  .kd-table .ho-tr > span:nth-child(3) { grid-area:own; display:block; font-size:13px; color:var(--muted); }
+  .kd-table .ho-tr > span:nth-child(4) { grid-area:ph; display:block; justify-self:end; font-size:13px; color:var(--muted); }
+  .kd-table .ho-tr > span:nth-child(5) { grid-area:memo; display:block; justify-self:end; max-width:46vw; font-size:12px; }
+}
