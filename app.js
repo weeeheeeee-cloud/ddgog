@@ -1281,9 +1281,11 @@ function blobToBase64(blob) {
 // 보드 이름 → 명단의 아이. "구름"처럼 같은 이름이 여럿(구름(포메라니안)·구름(비숑 프리제))이면 고르게 함
 const baseName = (s) => norm(String(s || "").replace(/\s*\(.*\)\s*$/, ""));
 // 이름 가족: 괄호·띄어쓰기 앞 첫 이름 ("토리 비숑", "토리(푸들)" → "토리")
-//  끝의 '이'는 떼고 비교 ("여름이" = "여름", "쪼복이" = "쪼복") — 다이얼독·보드에 '이'를 붙이기도 안 붙이기도 해서
-const famKey = (s) => { const k = norm(String(s || "").replace(/\s*\(.*$/, "").trim().split(/\s+/)[0]); return k.length >= 3 && k.endsWith("이") ? k.slice(0, -1) : k; };
-const familyOf = (n) => { const k = famKey(n); return k ? state.dogs.filter((d) => !d.auto && famKey(d.name) === k) : []; };
+const famKey = (s) => norm(String(s || "").replace(/\s*\(.*$/, "").trim().split(/\s+/)[0]);
+// 앞 글자가 같으면 같은 이름으로 봄: 보드에 "라봉"이라고 써도 다이얼독의 "라봉이", "여름" ↔ "여름이"
+//  (짧은 쪽이 2글자 이상일 때만 — "슈"처럼 한 글자는 똑같을 때만)
+const famSame = (a, b) => { const x = famKey(a), y = famKey(b); if (!x || !y) return false; if (x === y) return true; const [s, l] = x.length <= y.length ? [x, y] : [y, x]; return s.length >= 2 && l.startsWith(s); };
+const familyOf = (n) => (famKey(n) ? state.dogs.filter((d) => !d.auto && famSame(d.name, n)) : []);
 // 같은 이름 아이: 이름은 짧게 두고 견종(breed)으로 구분 → 화면에 견종을 작게, 파일·폴더 이름에는 견종을 붙임
 const dupName = (d) => !!d && !d.auto && state.dogs.some((x) => x.id !== d.id && !x.auto && x.active !== false && norm(x.name) === norm(d.name));
 const breedTag = (d, always = false) => (d?.breed && (always || dupName(d)) ? ` <small class="breed">${esc(d.breed)}</small>` : "");
@@ -1294,7 +1296,7 @@ const fileLabel = (d) => (d?.breed && dupName(d) ? `${d.name}_${d.breed}` : d.na
 //  H만 있고 다이얼독에 같은 이름 아이가 있음 → 유치원생이 호텔링 중인지, 다른 호텔 손님인지 물어봄 (hotelAsk)
 //  H만 있고 다이얼독에 없음 → 호텔 손님 (다이얼독 아이와 연결하지 않음)
 const isKinderName = (draft, n) => (draft?.kinder || []).some((k) => norm(k) === norm(n));
-const sameFamDd = (n) => { const k = famKey(n); return state.dogs.filter((d) => !d.auto && d.dd_pet_id && famKey(d.name) === k); };
+const sameFamDd = (n) => state.dogs.filter((d) => !d.auto && d.dd_pet_id && famSame(d.name, n));
 function matchDog(n, draft = state.draft, usePick = true) {
   const pick = usePick && draft?.pick?.[norm(n)];
   if (pick === NEW_DOG) return { isNew: true };
@@ -1339,8 +1341,8 @@ function matchDog0(n, draft = state.draft, usePick = true) {
     }
     return { choices: [...fam].sort((a, b) => refCount(b) - refCount(a) || a.name.localeCompare(b.name, "ko")) };
   }
-  // '이'만 다른 같은 이름 아이가 하나뿐이면 바로 그 아이 ("쪼복" → "쪼복이")
-  if (fam.length === 1 && famKey(n) === famKey(fam[0].name) && String(n || "").trim().split(/\s+/).length === 1) return { dog: fam[0] };
+  // 앞 글자가 같은 아이가 하나뿐이면 바로 그 아이 ("라봉" → "라봉이", "쪼복" → "쪼복이")
+  if (fam.length === 1 && String(n || "").trim().split(/\s+/).length === 1) return { dog: fam[0] };
   const exact = named.filter((d) => norm(d.name) === norm(n));
   const withRefs = (arr) => arr.filter((d) => refCount(d) > 0);
   if (withRefs(exact).length === 1) return { dog: withRefs(exact)[0] };
@@ -1774,8 +1776,7 @@ $("#board-file").addEventListener("change", async (e) => {
 
 // '유치원생 아님 (호텔 손님)': 다이얼독에 없는 같은 이름 아이(예전 호텔 손님)가 하나면 그 아이로, 아니면 새로 등록
 function hotelGuestFor(n) {
-  const k = famKey(n);
-  const old = state.dogs.filter((d) => !d.auto && !d.dd_pet_id && famKey(d.name) === k);
+  const old = state.dogs.filter((d) => !d.auto && !d.dd_pet_id && famSame(d.name, n));
   return old.length === 1 ? old[0].id : NEW_DOG;
 }
 // 보드를 읽은 뒤: H만 있고 다이얼독에 같은 이름 유치원생이 있으면 번호로 물어봄
