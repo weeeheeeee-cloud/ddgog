@@ -3,6 +3,8 @@
 //  action "mark": { token, items: [{ photo_id, pet_id }] } → 다이얼독에 넣은 사진 기록 (다음에 같은 사진을 또 넣지 않게)
 //  action "note": { token, text } → 알림장에 모든 아이 똑같이 붙일 글 저장
 //  action "members": { token, pets } → 다이얼독 회원 명단을 유치원 탭(kinder_members)에 넣기/갱신
+//  action "tickets": { token, types, tickets, pet_ids } → 이용권 가격표·아이별 이용권
+//  action "usage": { token, ticket_ids, rows } → 이용권별 차감(예약·출석·취소) 내역
 //  list 응답에는 note(저장된 글), 아이별 hotel(그날 H 표시), others(다이얼독에 연결 안 된 아이)도 들어 있음
 // 관리 탭에서 만든 dd_push_links 열쇠가 켜져 있어야만 동작
 
@@ -127,6 +129,72 @@ Deno.serve(async (req) => {
       const gone = [...had].filter((x) => x && !ids.has(x));
       if (gone.length) await admin.from("kinder_members").update({ active: false, updated_at: now }).in("dd_pet_id", gone);
       return json({ ok: true, total: rows.length, added: rows.filter((r) => !had.has(r.dd_pet_id)).length, updated: rows.filter((r) => had.has(r.dd_pet_id)).length, gone: gone.length });
+    }
+    if (body.action === "tickets") {
+      // 다이얼독 이용권 종류(가격표) + 아이별 이용권 → 유치원 탭
+      const now = new Date().toISOString();
+      const day = (v: unknown) => (/^\d{4}-\d{2}-\d{2}/.test(String(v ?? "")) ? String(v).slice(0, 10) : null);
+      const ts = (v: unknown) => (v ? `${String(v).replace(" ", "T")}${/[zZ+]/.test(String(v).slice(10)) ? "" : "+09:00"}` : null);
+      const types = (Array.isArray(body.types) ? body.types : []) as Record<string, unknown>[];
+      if (types.length) {
+        const { error } = await admin.from("kinder_ticket_types").upsert(types.map((t) => ({
+          id: Number(t.id), title: String(t.title ?? ""), quantity: Number(t.quantity) || 0, price: Number(t.price) || 0,
+          validity_period: Number(t.validityPeriod) || null, validity_unit: String(t.validityPeriodUnit ?? ""),
+          deleted: !!t.deleted, dd_created: ts(t.created), synced_at: now,
+        })), { onConflict: "id" });
+        if (error) return json({ error: `이용권 종류 저장 실패: ${error.message}` }, 500);
+      }
+      const tickets = (Array.isArray(body.tickets) ? body.tickets : []) as Record<string, unknown>[];
+      const rows = tickets.filter((t) => t.id && t.pawcardId).map((t) => ({
+        id: Number(t.id), dd_pet_id: String(t.pawcardId), ticket_type_id: Number(t.ticketTypeId) || null,
+        title: String(t.title ?? ""), quantity: Number(t.quantity) || 0, price: Number(t.price) || 0,
+        start_date: day(t.startDate), end_date: day(t.endDate), remain: Number(t.remain ?? 0),
+        status: t.cancelled || t.canceled ? "cancel" : String(t.ticketStatus ?? ""), depleted: !!t.depleted, expired_by_date: !!t.expiredByDate,
+        canceled_at: ts(t.canceled), dd_created: ts(t.created), synced_at: now,
+      }));
+      for (let i = 0; i < rows.length; i += 500) {
+        const { error } = await admin.from("kinder_tickets").upsert(rows.slice(i, i + 500), { onConflict: "id" });
+        if (error) return json({ error: `이용권 저장 실패: ${error.message}` }, 500);
+      }
+      // 이번에 받은 아이들 중 다이얼독에서 지워진 이용권은 지움
+      const pets = Array.isArray(body.pet_ids) ? (body.pet_ids as string[]).map(String) : [];
+      let removed = 0;
+      if (pets.length) {
+        const keep = new Set(rows.map((r) => r.id));
+        for (let i = 0; i < pets.length; i += 100) {
+          const { data: old } = await admin.from("kinder_tickets").select("id").in("dd_pet_id", pets.slice(i, i + 100));
+          const del = (old ?? []).map((o) => Number(o.id)).filter((id) => !keep.has(id));
+          if (del.length) { await admin.from("kinder_tickets").delete().in("id", del); removed += del.length; }
+        }
+      }
+      // 차감 내역을 새로 받아야 하는 이용권: 사용 전·사용 중, 최근 60일 안에 끝난 것, 아직 내역을 한 번도 안 받은 것
+      // (오래전에 끝난 이용권은 내역이 더 바뀌지 않으니 매번 다시 받지 않음 → 두 번째부터 빨라짐)
+      const cut = new Date(Date.now() + 9 * 3600e3 - 60 * 86400e3).toISOString().slice(0, 10);
+      const liveRows = rows.filter((r) => r.status !== "cancel");
+      const have = new Set<number>();
+      const liveIds = liveRows.map((r) => r.id);
+      for (let i = 0; i < liveIds.length; i += 300) {
+        const { data } = await admin.from("kinder_ticket_usage").select("ticket_id").in("ticket_id", liveIds.slice(i, i + 300));
+        (data ?? []).forEach((u) => have.add(Number(u.ticket_id)));
+      }
+      const need_usage = liveRows.filter((r) => r.status === "inUse" || r.status === "beforeUse" || !r.end_date || r.end_date >= cut || !have.has(r.id)).map((r) => r.id);
+      return json({ ok: true, types: types.length, tickets: rows.length, removed, need_usage });
+    }
+    if (body.action === "usage") {
+      // 이용권별 차감 내역 (그 이용권의 예전 내역은 지우고 새로)
+      const ids = (Array.isArray(body.ticket_ids) ? body.ticket_ids : []).map(Number).filter(Boolean);
+      const list = (Array.isArray(body.rows) ? body.rows : []) as Record<string, unknown>[];
+      const ts = (v: unknown) => (v ? `${String(v).replace(" ", "T")}${/[zZ+]/.test(String(v).slice(10)) ? "" : "+09:00"}` : null);
+      for (let i = 0; i < ids.length; i += 300) await admin.from("kinder_ticket_usage").delete().in("ticket_id", ids.slice(i, i + 300));
+      const rows = list.filter((u) => u.ticketId && u.bookingTime).map((u) => ({
+        ticket_id: Number(u.ticketId), booking_day: String(u.bookingTime).slice(0, 10), status: String(u.status ?? ""),
+        service: String(u.serviceName ?? ""), booked_at: ts(u.bookingCreated), canceled_at: ts(u.bookingCanceled),
+      }));
+      for (let i = 0; i < rows.length; i += 1000) {
+        const { error } = await admin.from("kinder_ticket_usage").upsert(rows.slice(i, i + 1000), { onConflict: "ticket_id,booking_day,status", ignoreDuplicates: true });
+        if (error) return json({ error: `차감 내역 저장 실패: ${error.message}` }, 500);
+      }
+      return json({ ok: true, rows: rows.length });
     }
     if (body.action === "note") {
       const text = String(body.text ?? "").slice(0, 1000);

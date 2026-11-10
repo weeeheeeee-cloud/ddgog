@@ -53,7 +53,7 @@
   const panel = document.createElement("div");
   panel.id = "ddg-panel";
   panel.innerHTML = `<style>${css}</style>
-    <div class="hd"><b>댕겨올개 → 알림장<small>다이얼독 오늘 출석부 아이만 · 호텔링(H) 제외</small></b><button class="mem" title="다이얼독 회원 명단을 댕겨올개 유치원 탭으로">👥 회원 명단 가져오기</button><button class="x" title="닫기">×</button></div>
+    <div class="hd"><b>댕겨올개 → 알림장<small>다이얼독 오늘 출석부 아이만 · 호텔링(H) 제외</small></b><button class="mem" title="다이얼독 회원·이용권을 댕겨올개 유치원 탭으로">👥 회원·이용권 가져오기</button><button class="x" title="닫기">×</button></div>
     <div class="mbar"></div>
     <div class="bd"><p class="msg">불러오는 중…</p></div>
     <div class="ft"></div>`;
@@ -63,15 +63,33 @@
   // 다이얼독 회원 명단 → 댕겨올개 유치원 탭 (알림장 보내기와 상관없이 따로)
   panel.querySelector(".mem").onclick = async (e) => {
     const btn = e.currentTarget, bar = panel.querySelector(".mbar");
-    btn.disabled = true; btn.textContent = "가져오는 중…"; bar.className = "mbar on"; bar.textContent = "다이얼독 회원 명단을 읽고 있어요…";
+    const say = (t) => { bar.textContent = t; };
+    btn.disabled = true; btn.textContent = "가져오는 중…"; bar.className = "mbar on";
+    const pool = async (items, n, f) => { let i = 0; await Promise.all(Array.from({ length: Math.min(n, items.length) }, async () => { while (i < items.length) { const k = i++; await f(items[k], k); } })); };
     try {
-      const j = await dd("pets?perPage=3000");
-      const pets = j?.pets || [];
+      say("다이얼독 회원 명단을 읽고 있어요…");
+      const pets = (await dd("pets?perPage=3000"))?.pets || [];
       if (!pets.length) throw new Error("다이얼독 회원 명단이 비어 있어요");
       const r = await fn({ action: "members", pets });
-      bar.textContent = `✅ 유치원 탭에 ${r.total}마리 넣었어요 (새로 ${r.added} · 갱신 ${r.updated}${r.gone ? ` · 그만 다님 ${r.gone}` : ""})`;
-    } catch (err) { bar.className = "mbar on bad"; bar.textContent = `⚠️ ${err.message}`; }
-    btn.disabled = false; btn.textContent = "👥 회원 명단 가져오기";
+      // 이용권 가격표 + 아이별 이용권
+      say(`회원 ${r.total}마리 넣었어요. 이용권 읽는 중…`);
+      const types = (await dd("tickets?_method=GET&perPage=500&currentPage=1"))?.ticketTypes || [];
+      const tickets = []; let n = 0;
+      await pool(pets, 8, async (p) => { const a = await dd(`pets/${p.id}/tickets`).catch(() => []); tickets.push(...(a || [])); n++; if (n % 10 === 0) say(`이용권 읽는 중… ${n}/${pets.length}마리`); });
+      const t = await fn({ action: "tickets", types, tickets, pet_ids: pets.map((p) => p.id) });
+      // 이용권별 차감 내역 (취소된 이용권 빼고)
+      const needSet = new Set((t.need_usage || []).map(Number));
+      const live = tickets.filter((x) => needSet.has(Number(x.id)));
+      const usage = []; let m = 0;
+      await pool(live, 12, async (x) => { const a = await dd(`pets/tickets/usage/${x.id}`).catch(() => []); usage.push(...(a || [])); m++; if (m % 20 === 0) say(`차감 내역 읽는 중… ${m}/${live.length}장`); });
+      say("저장하는 중…");
+      for (let i = 0; i < live.length; i += 300) {
+        const ids = live.slice(i, i + 300).map((x) => x.id), set = new Set(ids);
+        await fn({ action: "usage", ticket_ids: ids, rows: usage.filter((u) => set.has(u.ticketId)) });
+      }
+      say(`✅ 유치원 탭에 넣었어요 · 회원 ${r.total}마리 (새로 ${r.added}${r.gone ? ` · 그만 다님 ${r.gone}` : ""}) · 이용권 ${t.tickets}장 · 차감 내역 ${usage.length}건 · 가격표 ${t.types}종`);
+    } catch (err) { bar.className = "mbar on bad"; say(`⚠️ ${err.message}`); }
+    btn.disabled = false; btn.textContent = "👥 회원·이용권 가져오기";
   };
   const esc = (s) => String(s ?? "").replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
   const fail = (m) => { $bd.innerHTML = `<p class="err">${esc(m)}</p>`; $ft.innerHTML = `<button class="sub">닫기</button>`; $ft.querySelector("button").onclick = () => panel.remove(); };

@@ -6,7 +6,7 @@
 let C = null; // { sb, toast, signed, esc, dogs }
 const $ = (s, el = document) => el.querySelector(s);
 const $$ = (s, el = document) => [...el.querySelectorAll(s)];
-const ks = { q: "", showGone: false, members: [], hotelDogIds: new Set(), pickupNames: new Set() };
+const ks = { view: "members", q: "", showGone: false, stat: "soon", members: [], tickets: [], types: [], hotelDogIds: new Set(), pickupPhones: new Set() };
 
 const esc = (s) => String(s ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
 const digits = (s) => String(s || "").replace(/\D/g, "");
@@ -33,15 +33,58 @@ const ago = (ts) => {
   return `${Math.round(h / 24)}일 전`;
 };
 function toast(m, ms) { C?.toast?.(m, ms); }
+const won = (n) => `${Math.round(Number(n) || 0).toLocaleString("ko-KR")}원`;
+const DOW = ["일", "월", "화", "수", "목", "금", "토"];
+const md = (d) => (d ? `${+d.slice(5, 7)}/${+d.slice(8, 10)}` : "");
+const mdw = (d) => (d ? `${md(d)}(${DOW[new Date(d + "T00:00:00Z").getUTCDay()]})` : "");
+const daysTo = (d) => Math.round((Date.parse(d + "T00:00:00Z") - Date.parse(kstToday() + "T00:00:00Z")) / 86400e3);
+
+/* ---------- 이용권 ---------- */
+// status: inUse 사용 중 · beforeUse 사용 전(첫 예약부터 시작) · expired 끝남(다 씀/기간 만료) · cancel 취소
+const ORDER = { inUse: 0, beforeUse: 1, expired: 2, cancel: 3 };
+const ticketsOf = (m) => (m.dd_pet_id ? ks.tickets.filter((t) => t.dd_pet_id === m.dd_pet_id) : [])
+  .sort((a, b) => (ORDER[a.status] ?? 9) - (ORDER[b.status] ?? 9) || String(b.dd_created || "").localeCompare(String(a.dd_created || "")));
+const currentOf = (m) => ticketsOf(m).filter((t) => t.status === "inUse" || t.status === "beforeUse");
+function tStatus(t) {
+  if (t.status === "inUse") return ["사용 중", "use"];
+  if (t.status === "beforeUse") return ["사용 전", "before"];
+  if (t.status === "cancel") return ["취소", "cancel"];
+  if (t.depleted && !t.expired_by_date) return ["다 씀", "done"];
+  return [t.remain > 0 ? `기간 만료 · ${t.remain}회 못 씀` : "기간 만료", "expired"];
+}
+// 곧 끝나는 이용권: 1회 이하 남음 또는 5일 안에 끝남
+function warnOf(t) {
+  if (!t || t.status !== "inUse") return "";
+  if (t.remain <= 0) return "소진";
+  if (t.remain <= 1) return "1회 남음";
+  if (t.end_date && daysTo(t.end_date) <= 5) return daysTo(t.end_date) <= 0 ? "오늘 만료" : `${daysTo(t.end_date)}일 뒤 만료`;
+  return "";
+}
+function ticketCell(m) {
+  if (!m.dd_pet_id) return `<span class="muted">-</span>`;
+  const cur = currentOf(m);
+  if (!cur.length) return `<span class="kt-tag none">이용권 없음</span>`;
+  const t = cur[0], w = warnOf(t);
+  const main = t.status === "beforeUse" ? `${esc(t.title)} · 사용 전` : `${esc(t.title)} · <b>${t.remain}</b>/${t.quantity}회`;
+  return `<span class="kt-cell">${main}${cur.length > 1 ? ` <small>+${cur.length - 1}장</small>` : ""}<small>${t.end_date ? `~${md(t.end_date)}` : ""}${w ? ` <em class="kt-warn">${w}</em>` : ""}</small></span>`;
+}
 
 async function load() {
-  const [m, hp, pd] = await Promise.all([
+  const [m, hp, pd, tt] = await Promise.all([
     C.sb.from("kinder_members").select("*").order("name"),
     C.sb.from("hotel_pets").select("dog_id"),
     C.sb.from("pd_dogs").select("phone"),
+    C.sb.from("kinder_ticket_types").select("*"),
   ]);
   if (m.error) throw m.error;
   ks.members = m.data || [];
+  ks.types = tt.data || [];
+  ks.tickets = [];
+  for (let from = 0; ; from += 1000) {
+    const { data } = await C.sb.from("kinder_tickets").select("*").range(from, from + 999);
+    ks.tickets.push(...(data || []));
+    if (!data || data.length < 1000) break;
+  }
   ks.hotelDogIds = new Set((hp.data || []).map((x) => x.dog_id).filter(Boolean));
   ks.pickupPhones = new Set((pd.data || []).map((x) => digits(x.phone)).filter(Boolean));
 }
@@ -57,6 +100,23 @@ export async function renderKinder(ctx) {
 
 function draw() {
   const root = $("#tab-kinder");
+  if (!root.querySelector(".kd-shell")) {
+    root.innerHTML = `<div class="ho kd-shell">
+      <nav class="ho-nav">
+        <button data-kv="members">🐶 회원 목록</button>
+        <button data-kv="status">🎟️ 이용권 현황</button>
+        <button data-kv="prices">💰 가격표</button>
+      </nav>
+      <div class="ho-main" id="kd-main"></div></div>`;
+    $$("[data-kv]", root).forEach((b) => b.addEventListener("click", () => { ks.view = b.dataset.kv; draw(); }));
+  }
+  $$("[data-kv]", root).forEach((b) => b.classList.toggle("on", b.dataset.kv === ks.view));
+  if (ks.view === "status") return drawStatus();
+  if (ks.view === "prices") return drawPrices();
+  drawMembers();
+}
+function drawMembers() {
+  const root = $("#kd-main");
   const act = ks.members.filter((m) => m.active);
   const gone = ks.members.length - act.length;
   const synced = ks.members.map((m) => m.synced_at).filter(Boolean).sort().pop();
@@ -105,7 +165,7 @@ async function drawList() {
   const refPaths = list.map((m) => dogOf(m)?.ref_path).filter(Boolean);
   const ref = await C.signed("refs", refPaths);
   box.innerHTML = `<div class="ho-table kd-table">
-    <div class="ho-tr ho-th"><span></span><span>강아지</span><span>보호자</span><span>전화번호</span><span>메모</span></div>
+    <div class="ho-tr ho-th"><span></span><span>강아지</span><span>보호자</span><span>전화번호</span><span>이용권</span><span>메모</span></div>
     ${list.map((m) => {
       const dog = dogOf(m);
       const memo = [m.notes, m.dd_memo].filter(Boolean).join(" · ");
@@ -114,6 +174,7 @@ async function drawList() {
         <span class="kd-name"><b>${esc(m.name)}${isBirthday(m.birthday) ? " 🎂" : ""}</b><small>${esc([m.breed, GENDER[m.gender]].filter(Boolean).join(" · "))}${m.active ? "" : " · 그만 다님"}</small></span>
         <span>${esc(m.owner_name || "")}</span>
         <span class="ho-phone">${esc(m.phone || "")}</span>
+        <span>${ticketCell(m)}</span>
         <span class="muted kd-memo">${esc(memo)}</span>
       </button>`;
     }).join("")}</div>`;
@@ -164,6 +225,7 @@ async function openMember(id) {
             <b>${esc(m.name)}</b><br><small class="muted">${[m.breed, GENDER[m.gender], NEUT[m.neutered], m.birthday ? `${ageOf(m.birthday)} (${m.birthday})` : "", m.weight ? `${m.weight}kg` : ""].filter(Boolean).map(esc).join(" · ") || "정보 없음"}</small></div></div>
         </section>
       </div>
+      ${m.dd_pet_id ? `<section><h3>이용권 · 차감 내역</h3><div id="kd-tix"><p class="muted small">불러오는 중…</p></div></section>` : ""}
       ${m.dd_memo ? `<section><h3>다이얼독 메모</h3><p class="ho-pre">${esc(m.dd_memo)}</p></section>` : ""}
       <section><h3>우리 메모 <small class="muted">다이얼독에서 불러와도 지워지지 않아요</small></h3>
         <textarea id="kd-notes" rows="3" class="kd-notes" placeholder="선생님들끼리 알아야 할 것 (성격, 주의할 점, 픽드랍 정보 등)">${esc(m.notes || "")}</textarea>
@@ -176,6 +238,7 @@ async function openMember(id) {
       <span class="grow"></span>
       <button class="btn ghost sm" data-edit>정보 수정</button>
     </div>`, "wide");
+  if (m.dd_pet_id) drawTickets(m, $("#kd-tix", ov));
   const ta = $("#kd-notes", ov), sv = $("#kd-notes-save", ov);
   ta.addEventListener("input", () => { sv.disabled = ta.value === (m.notes || ""); });
   sv.addEventListener("click", async () => {
@@ -196,6 +259,100 @@ async function openMember(id) {
     if (error) { toast("삭제하지 못했어요"); return; }
     ks.members = ks.members.filter((x) => x.id !== m.id); close(); toast("삭제했어요"); draw();
   });
+}
+
+/* ---------- 아이별 이용권 + 차감 내역 ---------- */
+const USE = { attended: ["출석", "att"], reserved: ["예약", "res"], canceled: ["취소", "can"] };
+async function drawTickets(m, box) {
+  const tix = ticketsOf(m);
+  if (!tix.length) { box.innerHTML = `<p class="muted small">다이얼독에 이용권 기록이 없어요</p>`; return; }
+  const { data: use } = await C.sb.from("kinder_ticket_usage").select("*").in("ticket_id", tix.map((t) => t.id)).order("booking_day", { ascending: false });
+  const usageOf = (t) => (use || []).filter((u) => u.ticket_id === t.id);
+  const useList = (t) => {
+    const u = usageOf(t);
+    if (!u.length) return `<p class="muted small">차감 내역이 없어요</p>`;
+    const cnt = (k) => u.filter((x) => x.status === k).length;
+    return `<div class="kt-sum">출석 <b>${cnt("attended")}</b> · 예약 <b>${cnt("reserved")}</b>${cnt("canceled") ? ` · 취소 ${cnt("canceled")}` : ""}</div>
+      <ul class="kt-use">${u.map((x) => { const [lab, cls] = USE[x.status] || [x.status, ""]; return `<li class="${cls}"><span>${mdw(x.booking_day)}</span><em>${lab}</em></li>`; }).join("")}</ul>`;
+  };
+  const cur = tix.filter((t) => t.status === "inUse" || t.status === "beforeUse");
+  const past = tix.filter((t) => !cur.includes(t));
+  const card = (t) => {
+    const [lab, cls] = tStatus(t), w = warnOf(t);
+    const used = Math.max(0, t.quantity - t.remain);
+    return `<div class="kt-card ${cls}">
+      <div class="kt-top"><b>${esc(t.title)}</b><span class="kt-tag ${cls}">${lab}</span>${w ? `<em class="kt-warn">${w}</em>` : ""}<span class="grow"></span><b class="kt-left">${t.remain}<small>/${t.quantity}회 남음</small></b></div>
+      <div class="kt-bar"><i style="width:${t.quantity ? Math.min(100, (used / t.quantity) * 100) : 0}%"></i></div>
+      <div class="kt-meta">${t.start_date ? `${mdw(t.start_date)} ~ ${mdw(t.end_date)}` : "첫 예약하는 날부터 시작"} · ${t.price ? won(t.price) : "가격 없음"}</div>
+      ${useList(t)}
+    </div>`;
+  };
+  box.innerHTML = (cur.length ? cur.map(card).join("") : `<p class="kt-tag none" style="display:inline-block">지금 쓰는 이용권 없음</p>`)
+    + (past.length ? `<details class="kt-past"><summary>지난 이용권 ${past.length}장</summary>${past.map((t) => {
+      const [lab, cls] = tStatus(t);
+      return `<details class="kt-old"><summary><b>${esc(t.title)}</b> <span class="muted">${t.start_date ? `${md(t.start_date)}~${md(t.end_date)}` : ""} · ${t.price ? won(t.price) : "-"}</span> <span class="kt-tag ${cls}">${lab}</span></summary>${useList(t)}</details>`;
+    }).join("")}</details>` : "");
+}
+
+/* ---------- 이용권 현황 ---------- */
+function drawStatus() {
+  const main = $("#kd-main");
+  const act = ks.members.filter((m) => m.active && m.dd_pet_id);
+  const rows = act.map((m) => ({ m, cur: currentOf(m) }));
+  const using = rows.filter((r) => r.cur.some((t) => t.status === "inUse"));
+  const before = rows.filter((r) => r.cur.length && !r.cur.some((t) => t.status === "inUse"));
+  const soon = rows.filter((r) => r.cur.length && warnOf(r.cur[0]) && !r.cur.slice(1).some((t) => t.status === "beforeUse"));
+  const none = rows.filter((r) => !r.cur.length);
+  // 최근 30일 안에 출석한 적 있는데 이용권이 없는 아이를 먼저
+  const lastEnd = (m) => ticketsOf(m).map((t) => t.end_date).filter(Boolean).sort().pop() || "";
+  none.sort((a, b) => lastEnd(b.m).localeCompare(lastEnd(a.m)));
+  const sets = { soon: [soon, "곧 끝나는 아이", "1회 이하 남았거나 5일 안에 끝나요 (다음 이용권이 이미 있는 아이는 뺐어요)"], using: [using, "사용 중", ""], before: [before, "사용 전 이용권만 있음", "첫 예약하는 날부터 시작돼요"], none: [none, "이용권 없음", "최근에 끝난 아이부터 보여요"] };
+  const [list, title, hint] = sets[ks.stat] || sets.soon;
+  const tile = (k, n, lab, cls) => `<button class="kt-tile ${cls} ${ks.stat === k ? "on" : ""}" data-st="${k}"><b>${n}</b><span>${lab}</span></button>`;
+  main.innerHTML = `<div class="kd">
+    <div class="ho-head"><h2>이용권 현황 <small class="muted">다니는 아이 ${act.length}마리</small></h2>
+      <div class="ho-actions"><button class="btn ghost sm" id="kd-sync">🔄 다이얼독에서 불러오기</button></div></div>
+    <div class="kt-tiles">
+      ${tile("soon", soon.length, "곧 끝나요", "warn")}${tile("using", using.length, "사용 중", "")}${tile("before", before.length, "사용 전만", "")}${tile("none", none.length, "이용권 없음", "gray")}
+    </div>
+    <h3 class="kt-h">${title} <small class="muted">${hint}</small></h3>
+    ${list.length ? `<div class="ho-table kd-table kt-table">
+      <div class="ho-tr ho-th"><span></span><span>강아지</span><span>보호자</span><span>전화번호</span><span>이용권</span><span>${ks.stat === "none" ? "마지막 이용권" : "기간"}</span></div>
+      ${list.map(({ m, cur }) => {
+        const t = cur[0];
+        const lastT = ticketsOf(m).find((x) => x.status !== "cancel");
+        return `<button class="ho-tr" data-m="${m.id}"><span><i class="kd-av none">🐶</i></span>
+          <span class="kd-name"><b>${esc(m.name)}</b><small>${esc(m.breed || "")}</small></span>
+          <span>${esc(m.owner_name || "")}</span><span class="ho-phone">${esc(m.phone || "")}</span>
+          <span>${ticketCell(m)}</span>
+          <span class="muted">${t ? (t.start_date ? `${mdw(t.start_date)} ~ ${mdw(t.end_date)}` : "첫 예약부터") : lastT ? `${esc(lastT.title)} · ~${md(lastT.end_date)}` : "-"}</span></button>`;
+      }).join("")}</div>` : `<p class="muted">해당하는 아이가 없어요 🎉</p>`}
+  </div>`;
+  $$("[data-st]", main).forEach((b) => b.addEventListener("click", () => { ks.stat = b.dataset.st; drawStatus(); }));
+  $$("[data-m]", main).forEach((b) => b.addEventListener("click", () => openMember(b.dataset.m)));
+  $("#kd-sync", main).addEventListener("click", openSync);
+}
+
+/* ---------- 이용권 가격표 ---------- */
+function drawPrices() {
+  const main = $("#kd-main");
+  const types = ks.types.filter((t) => !t.deleted).sort((a, b) => a.quantity - b.quantity || b.price - a.price);
+  const inUse = (id) => ks.tickets.filter((t) => t.ticket_type_id === id && (t.status === "inUse" || t.status === "beforeUse")).length;
+  const sold = (id) => ks.tickets.filter((t) => t.ticket_type_id === id && t.status !== "cancel").length;
+  const unit = (t) => (t.validity_unit === "month" ? `${t.validity_period}개월` : `${t.validity_period}일`);
+  main.innerHTML = `<div class="kd">
+    <div class="ho-head"><h2>이용권 가격표 <small class="muted">${types.length}종 · 다이얼독 기준</small></h2>
+      <div class="ho-actions"><button class="btn ghost sm" id="kd-sync">🔄 다이얼독에서 불러오기</button></div></div>
+    <div class="ho-table kt-price">
+      <div class="ho-tr ho-th"><span>이용권</span><span>횟수</span><span>유효기간</span><span>금액</span><span>1회당</span><span>지금 쓰는 아이</span></div>
+      ${types.map((t) => `<div class="ho-tr"><span><b>${esc(t.title)}</b></span><span>${t.quantity}회</span><span>${unit(t)}</span>
+        <span>${t.price ? `<b>${won(t.price)}</b>` : `<span class="muted">가격 없음</span>`}</span>
+        <span class="muted">${t.price && t.quantity ? won(t.price / t.quantity) : "-"}</span>
+        <span>${inUse(t.id)}마리 <small class="muted">· 지금까지 ${sold(t.id)}장</small></span></div>`).join("")}
+    </div>
+    <p class="small muted" style="margin-top:10px">같은 이름에 금액이 다른 건 다이얼독에 따로 등록된 이용권이에요 (할인가 등). 가격은 다이얼독 ‘이용권’ 메뉴에서 바꾸고 불러오면 여기도 바뀌어요.</p>
+  </div>`;
+  $("#kd-sync", main).addEventListener("click", openSync);
 }
 
 /* ---------- 등록·수정 ---------- */
@@ -254,15 +411,15 @@ function openForm(m) {
 /* ---------- 다이얼독에서 불러오기 ---------- */
 function openSync() {
   const { ov } = modal(`
-    <div class="rc-head"><div class="grow"><b>🔄 다이얼독 회원 명단 불러오기</b><small class="muted">다이얼독에 있는 회원(강아지·보호자·전화·주소·메모)을 한 번에 가져와요</small></div>
+    <div class="rc-head"><div class="grow"><b>🔄 다이얼독에서 불러오기</b><small class="muted">회원(강아지·보호자·전화·주소·메모), 이용권, 차감 내역, 가격표를 한 번에 가져와요</small></div>
       <button class="btn ghost sm" data-close>닫기</button></div>
     <div class="rc-body">
       <ol class="kd-steps">
         <li>아래 <b>다이얼독 열기</b>를 눌러요.</li>
         <li>다이얼독 화면에서 즐겨찾기 <b>‘댕겨올개 알림장’</b>을 눌러요.</li>
-        <li>뜨는 창 위쪽의 <b>👥 회원 명단 가져오기</b>를 누르면 끝이에요.</li>
+        <li>뜨는 창 위쪽의 <b>👥 회원·이용권 가져오기</b>를 누르면 끝이에요. 회원, 이용권, 차감 내역, 가격표가 한 번에 들어와요.</li>
       </ol>
-      <p class="small muted">새로 온 아이는 추가되고, 바뀐 정보는 다이얼독 내용으로 바뀌어요. 다이얼독에서 지운 아이는 ‘그만 다님’으로 옮겨요. 우리 메모는 그대로 남아요.</p>
+      <p class="small muted">처음 한 번은 차감 내역이 많아 몇 분 걸릴 수 있어요. 그다음부터는 금방 끝나요. 새로 온 아이는 추가되고, 바뀐 정보는 다이얼독 내용으로 바뀌어요. 다이얼독에서 지운 아이는 ‘그만 다님’으로 옮겨요. 우리 메모는 그대로 남아요.</p>
     </div>
     <div class="rc-foot"><button class="btn ghost sm" data-close>닫기</button><button class="btn primary sm" id="kd-open-dd">다이얼독 열기</button></div>`);
   $("#kd-open-dd", ov).addEventListener("click", () => { window.open("https://dialodog.com/partners/#members", "dialodog"); });

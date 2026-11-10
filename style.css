@@ -1161,7 +1161,7 @@ small.breed { font-size: 11.5px; font-weight: 700; color: var(--muted); backgrou
 .kd-tools { display:flex; gap:12px; align-items:center; flex-wrap:wrap; }
 .kd-tools .ho-search { flex:1 1 280px; }
 .kd-gone { display:inline-flex; gap:6px; align-items:center; font-size:13px; color:var(--muted); margin-bottom:12px; white-space:nowrap; }
-.kd-table .ho-tr { grid-template-columns:52px 1.3fr .9fr 1.1fr 2.2fr !important; }
+.kd-table .ho-tr { grid-template-columns:52px 1.1fr .7fr 1fr 1.3fr 1.5fr !important; }
 .kd-table .ho-tr.gone { opacity:.5; }
 .kd-av { width:40px; height:40px; border-radius:12px; object-fit:cover; display:grid; place-items:center; background:#f3efe6; font-style:normal; font-size:18px; }
 .kd-name b { display:block; font-weight:800; overflow:hidden; text-overflow:ellipsis; }
@@ -1172,10 +1172,64 @@ small.breed { font-size: 11.5px; font-weight: 700; color: var(--muted); backgrou
 .kd-notes { width:100%; border:1px solid var(--line); border-radius:12px; padding:10px 12px; font:inherit; font-size:14px; resize:vertical; box-sizing:border-box; }
 .kd-steps { margin:4px 0 12px; padding-left:20px; line-height:1.9; }
 @media (max-width: 760px) {
-  .kd-table .ho-tr { grid-template-columns:44px 1fr auto !important; grid-template-areas:"av name ph" "av own memo"; row-gap:2px; }
+  .kd-table .ho-tr { grid-template-columns:44px 1fr auto !important; grid-template-areas:"av name tk" "av own ph"; row-gap:2px; }
   .kd-table .ho-tr > span:nth-child(1) { grid-area:av; }
   .kd-table .ho-tr > span:nth-child(2) { grid-area:name; }
   .kd-table .ho-tr > span:nth-child(3) { grid-area:own; display:block; font-size:13px; color:var(--muted); }
   .kd-table .ho-tr > span:nth-child(4) { grid-area:ph; display:block; justify-self:end; font-size:13px; color:var(--muted); }
-  .kd-table .ho-tr > span:nth-child(5) { grid-area:memo; display:block; justify-self:end; max-width:46vw; font-size:12px; }
+  .kd-table .ho-tr > span:nth-child(5) { grid-area:tk; display:block; justify-self:end; text-align:right; }
+  .kd-table .ho-tr > span:nth-child(6) { display:none; }
+}
+
+/* 유치원 이용권 */
+.kt-cell { display:block; font-size:13.5px; }
+.kt-cell b { color:var(--navy); }
+.kt-cell small { display:block; font-size:12px; color:var(--muted); }
+.kt-warn { font-style:normal; background:#fff1e6; color:#c2410c; font-weight:800; font-size:11px; border-radius:999px; padding:1px 7px; white-space:nowrap; }
+.kt-tag { display:inline-block; font-style:normal; font-size:11px; font-weight:800; border-radius:999px; padding:2px 8px; background:#f3efe6; color:var(--muted); white-space:nowrap; }
+.kt-tag.use { background:#e9f7ee; color:#15803d; }
+.kt-tag.before { background:#e8eef8; color:var(--navy); }
+.kt-tag.done { background:#f3efe6; color:#6c7280; }
+.kt-tag.expired { background:#fdeceb; color:#b91c1c; }
+.kt-tag.cancel { background:#f3efe6; color:#9ca3af; text-decoration:line-through; }
+.kt-tag.none { background:#fdeceb; color:#b91c1c; }
+.kt-card { border:1.5px solid var(--line); border-radius:16px; padding:12px 14px; margin-bottom:10px; background:#fff; }
+.kt-card.use { border-color:#9fd9b4; }
+.kt-top { display:flex; align-items:center; gap:8px; flex-wrap:wrap; }
+.kt-top > b:first-child { font-size:16px; }
+.kt-left { font-size:22px; color:var(--navy); }
+.kt-left small { font-size:12px; color:var(--muted); font-weight:700; margin-left:2px; }
+.kt-bar { height:8px; background:#f3efe6; border-radius:99px; overflow:hidden; margin:8px 0 6px; }
+.kt-bar i { display:block; height:100%; background:var(--yellow); }
+.kt-meta { font-size:12.5px; color:var(--muted); }
+.kt-sum { font-size:12.5px; margin:10px 0 6px; color:var(--ink); }
+.kt-use { list-style:none; margin:0; padding:0; display:grid; grid-template-columns:repeat(auto-fill, minmax(112px, 1fr)); gap:6px; }
+.kt-use li { display:flex; justify-content:space-between; align-items:center; gap:6px; background:#faf8f3; border-radius:10px; padding:6px 9px; font-size:13px; }
+.kt-use li em { font-style:normal; font-size:11px; font-weight:800; border-radius:999px; padding:1px 7px; }
+.kt-use li.att em { background:#e9f7ee; color:#15803d; }
+.kt-use li.res em { background:#e8eef8; color:var(--navy); }
+.kt-use li.can { opacity:.6; }
+.kt-use li.can em { background:#f3efe6; color:#6c7280; }
+.kt-past { margin-top:8px; }
+.kt-past > summary, .kt-old > summary { cursor:pointer; font-weight:700; padding:8px 2px; font-size:14px; }
+.kt-old { border-top:1px solid var(--line); padding:0 4px 6px; }
+.kt-old > summary { font-weight:600; display:flex; gap:8px; align-items:center; flex-wrap:wrap; }
+.kt-tiles { display:grid; grid-template-columns:repeat(4, 1fr); gap:10px; margin-bottom:14px; }
+.kt-tile { border:0; background:#fff; border-radius:16px; padding:14px; text-align:left; font:inherit; cursor:pointer; box-shadow:0 1px 2px rgba(15,27,45,.05); display:flex; flex-direction:column; gap:2px; }
+.kt-tile b { font-size:28px; color:var(--navy); line-height:1.1; }
+.kt-tile span { font-size:13px; font-weight:700; color:var(--muted); }
+.kt-tile.warn b { color:#c2410c; }
+.kt-tile.gray b { color:#b91c1c; }
+.kt-tile.on { outline:2.5px solid var(--navy); }
+.kt-h { margin:6px 2px 10px; font-size:16px; }
+.kt-h small { font-weight:500; font-size:12.5px; }
+.kt-price .ho-tr { grid-template-columns:1.1fr .6fr .7fr 1fr .8fr 1.3fr !important; cursor:default; }
+@media (max-width: 760px) {
+  .kt-tiles { grid-template-columns:repeat(2, 1fr); }
+  .kt-price .ho-tr { grid-template-columns:1fr auto !important; grid-template-areas:"t p" "q u"; row-gap:2px; }
+  .kt-price .ho-tr > span:nth-child(1) { grid-area:t; }
+  .kt-price .ho-tr > span:nth-child(4) { grid-area:p; display:block; justify-self:end; }
+  .kt-price .ho-tr > span:nth-child(2) { grid-area:q; display:block; font-size:12.5px; color:var(--muted); }
+  .kt-price .ho-tr > span:nth-child(5) { grid-area:u; display:block; justify-self:end; font-size:12.5px; }
+  .kt-price .ho-tr > span:nth-child(3), .kt-price .ho-tr > span:nth-child(6) { display:none; }
 }
