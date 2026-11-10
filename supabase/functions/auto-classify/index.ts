@@ -7,8 +7,32 @@ import { encodeBase64 } from "jsr:@std/encoding@1/base64";
 import { Image } from "https://deno.land/x/imagescript@1.3.0/mod.ts";
 
 const ANTHROPIC_KEY = Deno.env.get("ANTHROPIC_API_KEY") ?? "";
-// 방향 확인은 정확한 모델로: 같은 사진을 4방향으로 돌려 보여 주고 '바로 선 것'을 고르게 함 (각도를 맞히라는 것보다 훨씬 정확)
-const ROT_MODEL = Deno.env.get("ROTATE_MODEL") ?? "claude-sonnet-5-5";
+// 방향 확인 (비용 아끼기):
+//  1단계: 가벼운 모델(Haiku)에게 작은 사진 한 장만 보여 주고 '똑바로 서 있나?'만 물음 → 대부분 여기서 끝
+//  2단계: 돌려야 한다고 나온 사진만, 같은 사진을 4방향으로 보여 주고 '바로 선 것'을 고르게 함. 1단계와 답이 같을 때만 돌림
+const QUICK_MODEL = Deno.env.get("ROTATE_QUICK_MODEL") ?? "claude-haiku-5-5";
+const ROT_MODEL = Deno.env.get("ROTATE_MODEL") ?? "claude-sonnet-5-5"; // 2단계는 몇 장 안 되니 정확한 모델로
+const QUICK_SYSTEM = `You check whether a photo from a dog daycare is upright.
+Look at the floor/grass/ground, walls, furniture, people and gravity (not the dog's pose: dogs lie on their side or back).
+Reply with JSON only: {"rotate":0|90|180|270,"sure":true|false}
+"rotate" = degrees to turn the photo CLOCKWISE so it stands upright (0 if it is already upright). Most phone photos are upright.`;
+async function quickRotate(b64: string): Promise<number | null> {
+  const res = await fetch("https://api.anthropic.com/v1/messages", {
+    method: "POST",
+    headers: { "x-api-key": ANTHROPIC_KEY, "anthropic-version": "2023-06-01", "content-type": "application/json" },
+    body: JSON.stringify({ model: QUICK_MODEL, max_tokens: 200, system: QUICK_SYSTEM, messages: [{ role: "user", content: [
+      { type: "image", source: { type: "base64", media_type: "image/jpeg", data: b64 } }, { type: "text", text: "Upright?" },
+    ] }] }),
+  });
+  if (!res.ok) throw new Error(`quick ${res.status}`);
+  const out = await res.json();
+  const text: string = (out.content ?? []).map((c: { text?: string }) => c.text ?? "").join("");
+  const m = text.match(/\{[\s\S]*\}/);
+  const j = m ? JSON.parse(m[0]) : {};
+  const r = Number(j.rotate);
+  if (![0, 90, 180, 270].includes(r)) return null;
+  return r === 0 ? 0 : j.sure === false ? null : r;
+}
 const ROT_SYSTEM = `You see the SAME photo from a dog daycare shown in 4 orientations, labeled A, B, C, D.
 Pick the one that is upright, the way the photographer saw the scene: floor/grass/ground at the bottom,
 sky or ceiling at the top, walls, doors and furniture vertical, people standing or sitting upright, any text readable.
@@ -43,7 +67,7 @@ async function pickUpright(views: Map<number, string>, order: number[]): Promise
   const res = await fetch("https://api.anthropic.com/v1/messages", {
     method: "POST",
     headers: { "x-api-key": ANTHROPIC_KEY, "anthropic-version": "2023-06-01", "content-type": "application/json" },
-    body: JSON.stringify({ model: ROT_MODEL, max_tokens: 1500, system: ROT_SYSTEM, messages: [{ role: "user", content }] }),
+    body: JSON.stringify({ model: ROT_MODEL, max_tokens: 300, system: ROT_SYSTEM, messages: [{ role: "user", content }] }),
   });
   if (!res.ok) throw new Error(`rot ${res.status}`);
   const out = await res.json();
@@ -123,7 +147,7 @@ Deno.serve(async (req) => {
     }));
   }
   // 방향 확인: 최근 3일 분류된 사진 중 아직 방향을 확인하지 않은 것 (직원이 직접 돌린 사진은 rotation_checked=true 라 제외)
-  //  · 4방향을 보여 주고 바로 선 것을 고름 → 돌려야 한다고 나오면 순서를 섞어 한 번 더 물어 둘 다 같을 때만 돌림
+  //  · 작은 사진 한 장을 가벼운 모델에게 보여 '똑바로인가'만 확인 → 돌려야 한다고 나온 사진만 4방향 비교로 한 번 더, 둘 다 같을 때만 돌림
   //  · 확실하지 않으면 지금 방향을 그대로 둠
   let rotated = 0, checked = 0;
   if (ANTHROPIC_KEY && Date.now() - started < 100_000) {
@@ -140,11 +164,15 @@ Deno.serve(async (req) => {
           const { data: b } = await admin.storage.from("photos").download(p.thumb_path);
           if (!b) continue;
           const img = await Image.decode(new Uint8Array(await b.arrayBuffer()));
-          const views = new Map<number, string>();
-          for (const deg of [0, 90, 180, 270]) views.set(deg, encodeBase64(await rotCW(img, deg).encodeJPEG(80)));
-          const first = await pickUpright(views, shuffle([0, 90, 180, 270]));
+          // 작게 줄여서 보냄 (긴 변 384px) → 비용이 훨씬 적음
+          const sc = 384 / Math.max(img.width, img.height);
+          const small = sc < 1 ? img.resize(Math.round(img.width * sc), Math.round(img.height * sc)) : img;
+          const first = await quickRotate(encodeBase64(await small.encodeJPEG(75)));
           let r: number | null = first;
           if (first !== null && first !== 0) {
+            // 돌려야 한다고 나온 사진만 4방향 비교로 한 번 더 (1단계와 같을 때만 돌림)
+            const views = new Map<number, string>();
+            for (const deg of [0, 90, 180, 270]) views.set(deg, encodeBase64(await rotCW(small, deg).encodeJPEG(75)));
             const second = await pickUpright(views, shuffle([0, 90, 180, 270]));
             r = second === first ? first : null;
           }
