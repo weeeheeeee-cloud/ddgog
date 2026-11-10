@@ -1281,7 +1281,8 @@ function blobToBase64(blob) {
 // 보드 이름 → 명단의 아이. "구름"처럼 같은 이름이 여럿(구름(포메라니안)·구름(비숑 프리제))이면 고르게 함
 const baseName = (s) => norm(String(s || "").replace(/\s*\(.*\)\s*$/, ""));
 // 이름 가족: 괄호·띄어쓰기 앞 첫 이름 ("토리 비숑", "토리(푸들)" → "토리")
-const famKey = (s) => norm(String(s || "").replace(/\s*\(.*$/, "").trim().split(/\s+/)[0]);
+//  끝의 '이'는 떼고 비교 ("여름이" = "여름", "쪼복이" = "쪼복") — 다이얼독·보드에 '이'를 붙이기도 안 붙이기도 해서
+const famKey = (s) => { const k = norm(String(s || "").replace(/\s*\(.*$/, "").trim().split(/\s+/)[0]); return k.length >= 3 && k.endsWith("이") ? k.slice(0, -1) : k; };
 const familyOf = (n) => { const k = famKey(n); return k ? state.dogs.filter((d) => !d.auto && famKey(d.name) === k) : []; };
 // 같은 이름 아이: 이름은 짧게 두고 견종(breed)으로 구분 → 화면에 견종을 작게, 파일·폴더 이름에는 견종을 붙임
 const dupName = (d) => !!d && !d.auto && state.dogs.some((x) => x.id !== d.id && !x.auto && x.active !== false && norm(x.name) === norm(d.name));
@@ -1327,7 +1328,8 @@ function matchDog0(n, draft = state.draft, usePick = true) {
   const fam = familyOf(n);
   if (fam.length > 1) {
     const exactOne = fam.filter((d) => norm(d.name) === norm(n));
-    if (exactOne.length === 1 && norm(n) !== famKey(n)) return { dog: exactOne[0] };
+    // "토리 비숑"처럼 견종까지 붙여 쓴 이름이 명단과 똑같을 때만 바로 연결 ("여름이"처럼 한 단어면 같은 이름 아이 모두 중에서 고르게)
+    if (exactOne.length === 1 && /[\s(]/.test(String(n || "").trim())) return { dog: exactOne[0] };
     // 보드에 "구름 포메"처럼 견종까지 썼으면 그 아이로
     const raw = String(n || "");
     const rest = norm(raw.replace(/\s*\(.*$/, "").trim().split(/\s+/).slice(1).join("") + (raw.match(/\(([^)]*)\)/)?.[1] || ""));
@@ -1337,6 +1339,8 @@ function matchDog0(n, draft = state.draft, usePick = true) {
     }
     return { choices: [...fam].sort((a, b) => refCount(b) - refCount(a) || a.name.localeCompare(b.name, "ko")) };
   }
+  // '이'만 다른 같은 이름 아이가 하나뿐이면 바로 그 아이 ("쪼복" → "쪼복이")
+  if (fam.length === 1 && famKey(n) === famKey(fam[0].name) && String(n || "").trim().split(/\s+/).length === 1) return { dog: fam[0] };
   const exact = named.filter((d) => norm(d.name) === norm(n));
   const withRefs = (arr) => arr.filter((d) => refCount(d) > 0);
   if (withRefs(exact).length === 1) return { dog: withRefs(exact)[0] };
@@ -1453,7 +1457,7 @@ async function renderRoll() {
         <button class="btn ghost" type="submit">추가</button>
       </form>
       <div class="row" style="margin-top:10px">
-        <button id="roll-confirm" class="btn primary grow" ${d.names.length && !d.names.some((n) => unresolved(n, d)) ? "" : "disabled"}>${d.names.some((n) => unresolved(n, d)) ? "위에서 같은 아이인지 먼저 골라 주세요" : `명단 확정 (${d.names.length}마리)`}</button>
+        <button id="roll-confirm" class="btn primary grow ${d.names.some((n) => unresolved(n, d)) ? "wait" : ""}" ${d.names.length ? "" : "disabled"}>${(() => { const u = d.names.filter((n) => unresolved(n, d)); return u.length ? `${u.map(esc).slice(0, 3).join(", ")}${u.length > 3 ? ` 외 ${u.length - 3}` : ""} — 누구인지 골라 주세요` : `명단 확정 (${d.names.length}마리)`; })()}</button>
         <button id="roll-retake" class="btn ghost">다시 찍기</button>
         <button id="roll-cancel" class="btn ghost">취소</button>
       </div>`;
@@ -1516,7 +1520,18 @@ async function renderRoll() {
       renderRoll();
       $("#roll-add-name")?.focus();
     });
-    $("#roll-confirm").addEventListener("click", confirmRoll);
+    $("#roll-confirm").addEventListener("click", () => {
+      // 아직 고르지 않은 이름이 있으면 그 질문으로 데려가기
+      const u = d.names.findIndex((n) => unresolved(n, d));
+      if (u < 0) return confirmRoll();
+      const n = d.names[u], m = matchDog(n, d);
+      const target = m.similar || m.choices ? $(`.same-name [data-same="${u}"]`, body) || $(`[data-pick="${u}"]`, body) : $(`[data-hpick="${u}"]`, body);
+      const el = target?.closest(".same-row") || target || body;
+      el.scrollIntoView({ behavior: "smooth", block: "center" });
+      el.classList.remove("flash"); void el.offsetWidth; el.classList.add("flash");
+      if (target?.tagName === "SELECT") target.focus();
+      toast(`'${n}'이(가) 어느 아이인지 먼저 골라 주세요`);
+    });
     $("#roll-retake").addEventListener("click", () => $("#board-file").click());
     $("#roll-cancel").addEventListener("click", () => { state.draft = null; renderRoll(); });
     return;
