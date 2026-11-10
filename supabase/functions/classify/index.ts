@@ -31,6 +31,8 @@ How to recognize a dog — the face is NOT required. Use every clue together:
   may show different clothes, so an outfit difference from it does not rule a dog out.
 - A dog seen from the back or side, or with its face hidden, can still be matched when
   coat, body and clothes clearly fit one known dog and no other.
+Several dogs can share the same name (e.g. two "쿠키": a Pomeranian and a Jack Russell). They are told apart by the
+breed in brackets and by their numbers — always answer with the number, and never mix up dogs that only share a name.
 Many dogs look alike (e.g. several white Maltese, several Australian Shepherds). Only match when the
 specific dog is the same. Clothes change from day to day, so the body itself decides.
 WHITE DOGS NEED EXTRA CARE: this daycare has many white curly dogs (bichons, maltipoos, maltese, cotons)
@@ -169,7 +171,7 @@ Deno.serve(async (req) => {
   const practiceOn = photo.practice === true;
   const { data: assignedRaw } = await supa.from("assignments").select("dog_id").eq("day", photo.day);
   const assigned = practiceOn ? [] : assignedRaw;
-  let q = supa.from("dogs").select("id, name, auto, note, tips, tips_ai, features, ref_path, dog_refs(path, created_at)")
+  let q = supa.from("dogs").select("id, name, breed, auto, note, tips, tips_ai, features, ref_path, dog_refs(path, created_at)")
     .eq("active", true).order("created_at");
   // recheck: '새 강아지' 그룹 사진을 이름 있는 아이들과만 다시 비교
   if (only) {
@@ -222,7 +224,8 @@ Deno.serve(async (req) => {
   let fpHint = "";
   if (photo.vec && !recheck && !only && !find.length) {
     const { data: st } = await supa.from("app_settings").select("value").eq("name", "fp").maybeSingle();
-    const cfg = { enabled: true, twin: 0.95, dog: 0.86, margin: 0.07, min_n: 2, ...(st?.value ?? {}) };
+    // dog2/margin2: 조금 덜 닮았어도 2등과 차이가 크게 나면 그 아이 (쿠키 포메처럼 생김새가 뚜렷한 아이)
+    const cfg = { enabled: true, twin: 0.95, dog: 0.86, margin: 0.07, min_n: 2, dog2: 0.78, margin2: 0.15, ...(st?.value ?? {}) };
     if (cfg.enabled) {
       const named = refs.filter((d) => !d.auto);
       const finish = async (ids: string[], note: string) => {
@@ -240,8 +243,9 @@ Deno.serve(async (req) => {
       if (named.length) {
         const { data: m } = await supa.rpc("fp_match", { q: photo.vec, dogs: named.map((d) => d.id), p_day: photo.day, p_photo: photoId });
         const top = m?.[0], second = m?.[1];
-        const nameOf = (id: string) => named.find((d) => d.id === id)?.name ?? "?";
-        if (top && top.sim >= cfg.dog && top.n >= cfg.min_n && (!second || top.sim - second.sim >= cfg.margin)) {
+        const nameOf = (id: string) => { const d = named.find((x) => x.id === id); return d ? `${d.name}${d.breed ? `(${d.breed})` : ""}` : "?"; };
+        const gap = second ? top.sim - second.sim : 1;
+        if (top && top.n >= cfg.min_n && ((top.sim >= cfg.dog && gap >= cfg.margin) || (top.sim >= cfg.dog2 && gap >= cfg.margin2))) {
           return await finish([top.dog_id], `지문: ${nameOf(top.dog_id)} (${top.sim.toFixed(2)})`);
         }
         if (m?.length) fpHint = `Visual fingerprint similarity (a hint only; check with your own eyes): ` +
@@ -265,7 +269,7 @@ Deno.serve(async (req) => {
       for (let i = 0; i < refs.length; i++) {
         const d = refs[i];
         const tips = [d.tips, d.tips_ai].filter(Boolean).join(" / ");
-        content.push({ type: "text", text: `[${i + 1}] ${d.name}${d.note ? ` — ${d.note}` : ""}${tips ? ` | 구분: ${tips}` : ""}${d.paths.length > 1 ? ` (${d.paths.length} photos)` : ""}${d.features ? `\n  부위별 특징:\n  ${d.features.replace(/\n/g, "\n  ")}` : ""}` });
+        content.push({ type: "text", text: `[${i + 1}] ${d.name}${d.breed ? ` (${d.breed})` : ""}${d.note ? ` — ${d.note}` : ""}${tips ? ` | 구분: ${tips}` : ""}${d.paths.length > 1 ? ` (${d.paths.length} photos)` : ""}${d.features ? `\n  부위별 특징:\n  ${d.features.replace(/\n/g, "\n  ")}` : ""}` });
         for (const path of d.paths) {
           const b64 = refCache.get(path);
           if (b64) content.push({ type: "image", source: { type: "base64", media_type: "image/jpeg", data: b64 } });
@@ -291,7 +295,7 @@ Deno.serve(async (req) => {
         const nm = (id: string | null) => {
           if (!id) return "none of them";
           const n = idx.get(id);
-          return n ? `[${n}] ${refs[n - 1].name}` : "another dog (not here today)";
+          return n ? `[${n}] ${refs[n - 1].name}${refs[n - 1].breed ? ` (${refs[n - 1].breed})` : ""}` : "another dog (not here today)";
         };
         for (const l of usable) {
           const b64 = refCache.get(l.path);
@@ -334,7 +338,7 @@ Deno.serve(async (req) => {
         const d = p.dog_ids[0];
         if (!latest.has(d)) latest.set(d, p.thumb_path);
       }
-      const looks = refs.map((d, i) => ({ n: i + 1, name: d.name, path: latest.get(d.id) })).filter((x) => x.path);
+      const looks = refs.map((d, i) => ({ n: i + 1, name: `${d.name}${d.breed ? ` (${d.breed})` : ""}`, path: latest.get(d.id) })).filter((x) => x.path);
       if (looks.length) {
         content.push({ type: "text", text: "Today's look (same dogs, photographed today):" });
         await Promise.all(looks.filter((x) => !refCache.has("today:" + x.path)).map(async (x) => {

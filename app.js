@@ -996,6 +996,8 @@ async function selAction(kind) {
   state.sel = null;
   await renderPhotos();
   // 다른 사진은 AI가 알아서 옮기지 않음 (다시 검수는 직원이 '폴더 다시 검수'를 눌렀을 때만)
+  // 단, '모르는 아이' 칸에서 보낸 거면 칸에 남은 같은 아이 사진은 따라가게
+  if (to && !from) followUnsorted(to.id);
 }
 
 // ---- 폴더 다시 검수: 기준(대표 사진 + 직원이 고른 사진)과 너무 다른 사진은 빼서 아래로, 누운 사진은 세움
@@ -2351,6 +2353,35 @@ async function followCorrection(p, before, ids) {
     renderPhotos();
   } catch (e) { console.warn(e); }
 }
+// '모르는 아이' 칸에서 직원이 사진을 어떤 아이로 보내면: 칸에 남은 사진 중 지문이 그 아이와 확실히 맞는 사진도 따라감
+//  (직원이 확인한 사진은 건드리지 않음 — '모르는 아이' 칸에 있는, 아직 아무도 확인 안 한 사진만)
+const following = new Set();
+async function followUnsorted(toId) {
+  if (following.has(toId)) return;
+  following.add(toId);
+  try {
+    const to = dogById(toId);
+    if (!to || to.auto) return;
+    const rest = state.photos.filter((p) => p.vec && p.confidence !== "manual" && (p.status === "review" || p.status === "error") && !(p.not_dogs || []).includes(toId));
+    if (!rest.length) return;
+    const pool0 = state.attendance.size ? [...state.attendance] : state.dogs.filter((d) => !d.auto).map((d) => d.id);
+    const cands = [...new Set([...pool0, toId])].filter((id) => !dogById(id)?.auto);
+    const hit = [];
+    await pool(rest, 4, async (p) => {
+      const { data: m } = await sb.rpc("fp_match", { q: p.vec, dogs: cands, p_day: state.day, p_photo: p.id });
+      const top = m?.[0], second = m?.[1];
+      if (top?.dog_id === toId && top.sim >= 0.7 && (!second || top.sim - second.sim >= 0.08)) hit.push(p);
+    });
+    if (!hit.length) return;
+    for (const p of hit) {
+      const upd = { dog_ids: [toId], status: "done", confidence: "low", ai_note: `직원이 ${to.name}(으)로 보낸 사진과 닮아서 따라감` };
+      await sb.from("photos").update(upd).eq("id", p.id).or("confidence.is.null,confidence.neq.manual");
+      Object.assign(p, upd);
+    }
+    toast(`'모르는 아이' 칸에서 ${to.name} 사진 ${hit.length}장을 더 찾아서 같이 보냈어요`, 5000);
+    if (state.tab === "photos") await renderPhotos();
+  } catch (e) { console.warn(e); } finally { following.delete(toId); }
+}
 const reviewing = new Set();
 async function reviewFolder(aId, bId, exceptId) {
   const key = `${aId}>${bId}`;
@@ -2491,6 +2522,8 @@ $("#sheet-save").addEventListener("click", async () => {
   }
   sheetPhoto.confidence = "manual";
   // 고친 사진 한 장만 바꿈. 비슷한 사진·같은 폴더 나머지 사진은 AI가 알아서 옮기지 않음 (시킬 때만 다시 검수)
+  // 단, '모르는 아이' 칸에서 보낸 사진이면 그 칸에 남은 같은 아이 사진은 따라가게
+  if ((before.status === "review" || before.status === "error" || !before.ids.length) && ids.length === 1) setTimeout(() => followUnsorted(ids[0]), 300);
   // 명단에 없던 아이를 직접 골랐으면 오늘 명단에 넣어서 AI도 그 아이를 후보로 보게 함
   const extra = ids.filter((id) => !state.attendance.has(id));
   if (extra.length && state.attendance.size) {
