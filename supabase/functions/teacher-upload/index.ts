@@ -45,8 +45,11 @@ Deno.serve(async (req) => {
     const urls = [];
     for (const it of items) {
       const id = String(it.id);
-      const full = await admin.storage.from("photos").createSignedUploadUrl(`${day}/${id}.jpg`);
-      const thumb = await admin.storage.from("photos").createSignedUploadUrl(`${day}/thumb/${id}.jpg`);
+      // upsert: 지난번에 파일은 올라갔는데 등록 전에 끊긴 사진도 다시 시도하면 그대로 덮어써서 이어 감
+      const [full, thumb] = await Promise.all([
+        admin.storage.from("photos").createSignedUploadUrl(`${day}/${id}.jpg`, { upsert: true }),
+        admin.storage.from("photos").createSignedUploadUrl(`${day}/thumb/${id}.jpg`, { upsert: true }),
+      ]);
       if (full.error || thumb.error) return json({ error: "업로드 준비 실패" }, 500);
       urls.push({ id, full: full.data.token, thumb: thumb.data.token, fullPath: `${day}/${id}.jpg`, thumbPath: `${day}/thumb/${id}.jpg` });
     }
@@ -58,12 +61,20 @@ Deno.serve(async (req) => {
     // 학습 모드가 켜져 있으면 학습용 사진으로 따로 모음
     const { data: pm } = await admin.from("app_settings").select("value").eq("name", "practice").maybeSingle();
     const practice = pm?.value?.on === true;
-    const { data: existing } = await admin.from("photos").select("phash, taken_at").eq("day", day).eq("practice", practice);
-    const seen = (existing ?? []).map((p) => ({ h: p.phash as string, t: p.taken_at ? +new Date(p.taken_at) : null }));
+    // 그날 사진 전부 (하루 1000장이 넘어도 빠짐없이)
+    const existing: { id: string; phash: string | null; taken_at: string | null }[] = [];
+    for (let from = 0; ; from += 1000) {
+      const { data } = await admin.from("photos").select("id, phash, taken_at").eq("day", day).eq("practice", practice).range(from, from + 999);
+      existing.push(...(data ?? []));
+      if (!data || data.length < 1000) break;
+    }
+    const already = new Set(existing.map((p) => p.id)); // 이미 등록된 사진(다시 보낸 것) → 그대로 성공 처리
+    const seen = existing.map((p) => ({ h: p.phash as string, t: p.taken_at ? +new Date(p.taken_at) : null }));
     let added = 0, skipped = 0;
     const rows = [];
     for (const it of items) {
       const id = String(it.id);
+      if (already.has(id)) { added++; continue; }
       const h = typeof it.phash === "string" ? it.phash : null;
       const t = it.taken_at ? +new Date(String(it.taken_at)) : null;
       if (h && seen.some((x) => x.t === t && hamming(x.h, h) <= 4)) {
@@ -80,7 +91,8 @@ Deno.serve(async (req) => {
       added++;
     }
     if (rows.length) {
-      const { error } = await admin.from("photos").insert(rows);
+      // 같은 사진이 두 번 와도(재시도) 오류 없이 한 번만
+      const { error } = await admin.from("photos").upsert(rows, { onConflict: "id", ignoreDuplicates: true });
       if (error) return json({ error: "저장 실패" }, 500);
     }
     return json({ added, skipped });
