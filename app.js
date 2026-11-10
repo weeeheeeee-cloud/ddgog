@@ -1303,7 +1303,14 @@ function matchDog(n, draft = state.draft, usePick = true) {
   if (pick && dogById(pick)) return { dog: dogById(pick) };
   const r = matchDog0(n, draft, usePick);
   if (!draft) return r;
-  const K = isKinderName(draft, n), H = isHotelName(draft, n);
+  const K = isKinderName(draft, n), H = isHotelName(draft, n), D = isDaycareName(draft, n);
+  if (D && !K && !H) {
+    // 데이케어 손님: 다이얼독 유치원생과는 연결하지 않고, 예전에 온 같은 이름 손님이 있으면 그 아이로
+    const guests = familyOf(n).filter((d) => !d.dd_pet_id);
+    if (guests.length === 1) return { dog: guests[0] };
+    if (guests.length > 1) return { choices: guests };
+    return {};
+  }
   if (K) {
     const dd = (x) => x.filter((d) => d.dd_pet_id);
     if (r.choices) { const c = dd(r.choices); return c.length === 1 ? { dog: c[0] } : c.length ? { choices: c } : r; }
@@ -1342,7 +1349,7 @@ function matchDog0(n, draft = state.draft, usePick = true) {
     return { choices: [...fam].sort((a, b) => refCount(b) - refCount(a) || a.name.localeCompare(b.name, "ko")) };
   }
   // 앞 글자가 같은 아이가 하나뿐이면 바로 그 아이 ("라봉" → "라봉이", "쪼복" → "쪼복이")
-  if (fam.length === 1 && String(n || "").trim().split(/\s+/).length === 1) return { dog: fam[0] };
+  if (fam.length === 1) return { dog: fam[0] };
   const exact = named.filter((d) => norm(d.name) === norm(n));
   const withRefs = (arr) => arr.filter((d) => refCount(d) > 0);
   if (withRefs(exact).length === 1) return { dog: withRefs(exact)[0] };
@@ -1406,6 +1413,8 @@ function askSimilar(name, list) {
 }
 const isNewName = (n) => { const m = matchDog(n); return !m.dog && !m.choices && !m.similar && !m.hotelAsk; };
 const isHotelName = (draft, n) => (draft.hotel || []).some((h) => norm(h) === norm(n));
+// D = 시간제 데이케어 손님 (다이얼독 유치원생 아님)
+const isDaycareName = (draft, n) => (draft?.daycare || []).some((h) => norm(h) === norm(n));
 
 async function renderRoll() {
   renderSide();
@@ -1441,10 +1450,11 @@ async function renderRoll() {
       <p class="small">읽은 이름이 맞는지 확인해 주세요. <b>이름을 누르면 고칠 수 있고</b>, ×로 뺄 수 있어요.
         <span class="tag-n">N</span>은 <b>처음 오는 아이</b>예요. 명단에 있는 아이와 이름이 같거나 비슷해도 N을 켜면 새 아이로 등록하고, 확정 후 대표 사진을 고를 수 있어요. 명단에 없는 이름은 자동으로 N이 켜져요.
         <span class="tag-k">K</span>는 <b>유치원생</b>(다이얼독 아이)이에요.
+        <span class="tag-d">D</span>는 <b>데이케어 손님</b>(시간제)이에요. 다이얼독 유치원생과 이름이 같아도 다른 아이로 봐요.
         <span class="tag-h">H</span> 표시는 호텔링이에요. H만 있는데 다이얼독에 같은 이름 유치원생이 있으면 <b>유치원생이 호텔링 중인지</b> 물어봐요. 둘 다 눌러서 켜고 끌 수 있어요. 호텔링 아이는 대표 사진 없이 분류하고, AI가 모르는 아이는 '모르는 아이' 칸에 비슷한 사진끼리 모아 둬요.
         ${d.unsure.length ? `<span class="q-legend">?</span> 표시는 글씨가 애매했던 이름이에요.` : ""}</p>
       <div class="chips roll-chips">${d.names.map((n, i) => `
-        <span class="${d.unsure.includes(n) ? "unsure" : ""} ${isNewName(n) ? "new" : ""} ${isHotelName(d, n) ? "hotel" : ""}"><b data-k="${i}" class="k-toggle ${isKinderName(d, n) ? "on" : ""}" title="유치원생 켜기/끄기">K</b><b data-h="${i}" class="h-toggle" title="호텔링 켜기/끄기">H</b><b data-n="${i}" class="n-toggle" title="처음 오는 아이 켜기/끄기">N</b><b data-edit="${i}">${esc(n)}</b>${(() => {
+        <span class="${d.unsure.includes(n) ? "unsure" : ""} ${isNewName(n) ? "new" : ""} ${isHotelName(d, n) ? "hotel" : ""}"><b data-k="${i}" class="k-toggle ${isKinderName(d, n) ? "on" : ""}" title="유치원생 켜기/끄기">K</b><b data-h="${i}" class="h-toggle" title="호텔링 켜기/끄기">H</b><b data-dc="${i}" class="d-toggle ${isDaycareName(d, n) ? "on" : ""}" title="데이케어 손님 켜기/끄기">D</b><b data-n="${i}" class="n-toggle" title="처음 오는 아이 켜기/끄기">N</b><b data-edit="${i}">${esc(n)}</b>${(() => {
           const m = matchDog(n, d);
           if (m.isNew) return "";
           if (m.hotelAsk) return `<select data-hpick="${i}" class="pick-dog ask-h"><option value="">유치원생 호텔링? 확인</option>${m.hotelAsk.map((c) => `<option value="${c.id}">유치원생 ${esc(c.name)}${c.breed ? ` (${esc(c.breed)})` : ""}가 호텔링 중</option>`).join("")}<option value="${NEW_DOG}">유치원생 아님 (호텔 손님)</option></select>`;
@@ -1507,6 +1517,11 @@ async function renderRoll() {
       else if (isNewName(n)) { toast("명단에 없는 이름이라 처음 오는 아이로 등록돼요"); return; }
       else d.pick[k] = NEW_DOG;                      // N 켜기 → 이름이 같아도 새 아이로
       d.guessed?.delete(k);
+      renderRoll();
+    }));
+    $$("[data-dc]", body).forEach((el) => el.addEventListener("click", () => {
+      const n = d.names[+el.dataset.dc];
+      d.daycare = isDaycareName(d, n) ? (d.daycare || []).filter((h) => norm(h) !== norm(n)) : [...(d.daycare || []), n];
       renderRoll();
     }));
     $$("[data-h]", body).forEach((el) => el.addEventListener("click", () => {
@@ -1763,7 +1778,7 @@ $("#board-file").addEventListener("change", async (e) => {
       try { msg = (await error.context.json()).error || ""; } catch { /* 무시 */ }
       throw new Error(msg || (error.context?.status === 404 ? "이름 읽기 기능을 찾을 수 없어요" : "읽지 못했어요"));
     }
-    state.draft = { names: data.names || [], unsure: data.unsure || [], hotel: data.hotel || [], kinder: data.kinder || [], img: URL.createObjectURL(blobs[0]), more: blobs.length - 1 };
+    state.draft = { names: data.names || [], unsure: data.unsure || [], hotel: data.hotel || [], kinder: data.kinder || [], daycare: data.daycare || [], img: URL.createObjectURL(blobs[0]), more: blobs.length - 1 };
     if (!state.draft.names.length) toast("이름을 찾지 못했어요. 직접 추가해 주세요.");
     askHotelKids(state.draft);
     await suggestPicks(state.draft);
@@ -1852,6 +1867,7 @@ async function confirmRoll() {
   try {
     const ids = [];
     const hotelIds = new Set();
+    const daycareIds = new Set();
     const firstIds = new Set();
     for (const name of state.draft.names) {
       let dog = matchDog(name).dog;
@@ -1860,14 +1876,15 @@ async function confirmRoll() {
         // 오늘 이미 '처음 오는 아이'로 등록한 같은 이름 아이가 있으면 또 만들지 않고 그 아이로 (다시 확정해도 두 번 생기지 않게)
         const todayNew = state.dogs.find((x) => !x.auto && !x.dd_pet_id && norm(x.name) === norm(nm) &&
           x.created_at && new Date(Date.parse(x.created_at) + 9 * 3600e3).toISOString().slice(0, 10) === kstToday());
-        if (todayNew) { dog = todayNew; ids.push(dog.id); if (isHotelName(state.draft, name)) hotelIds.add(dog.id); continue; }
-        const guest = isHotelName(state.draft, name) && !isKinderName(state.draft, name);
+        if (todayNew) { dog = todayNew; ids.push(dog.id); if (isHotelName(state.draft, name)) hotelIds.add(dog.id); if (isDaycareName(state.draft, name)) daycareIds.add(dog.id); continue; }
+        const dayGuest = isDaycareName(state.draft, name) && !isKinderName(state.draft, name) && !isHotelName(state.draft, name);
+        const guest = (isHotelName(state.draft, name) || dayGuest) && !isKinderName(state.draft, name);
         if (!guest && state.dogs.some((x) => !x.auto && norm(x.name) === norm(nm))) {
           const v = prompt(`'${name}' 이름의 아이가 이미 명단에 있어요.\n처음 오는 아이를 구분할 이름을 적어 주세요 (예: ${name} 푸들)`, `${name} `);
           if (v === null || !v.trim()) throw new Error("cancel");
           nm = v.trim();
         }
-        const { data, error } = await sb.from("dogs").insert({ name: nm, auto: false, active: true, ...(guest ? { breed: "호텔 손님" } : {}) }).select().single();
+        const { data, error } = await sb.from("dogs").insert({ name: nm, auto: false, active: true, ...(guest ? { breed: dayGuest ? "데이케어 손님" : "호텔 손님" } : {}) }).select().single();
         if (error) throw error;
         dog = data;
         state.dogs.push(dog);
@@ -1878,6 +1895,7 @@ async function confirmRoll() {
       }
       ids.push(dog.id);
       if (isHotelName(state.draft, name)) hotelIds.add(dog.id);
+      if (isDaycareName(state.draft, name)) daycareIds.add(dog.id);
     }
     hadRoll = state.attendance.size > 0;
     // 사진으로 넣어 둔 호텔링 아이(보드에 없음)는 명단을 확정해도 그대로 둠
@@ -1887,7 +1905,7 @@ async function confirmRoll() {
     if (uniq.length) {
       // 다시 확정해도 오늘 처음 온 아이 표시는 유지
       for (const id of state.first) if (uniq.includes(id)) firstIds.add(id);
-      const { error } = await sb.from("assignments").insert(uniq.map((dog_id) => ({ day: state.day, dog_id, hotel: hotelIds.has(dog_id), first: firstIds.has(dog_id) })));
+      const { error } = await sb.from("assignments").insert(uniq.map((dog_id) => ({ day: state.day, dog_id, hotel: hotelIds.has(dog_id), daycare: daycareIds.has(dog_id), first: firstIds.has(dog_id) })));
       if (error) throw error;
     }
     state.attendance = new Set(uniq);
@@ -1895,7 +1913,7 @@ async function confirmRoll() {
     state.first = firstIds;
     state.draft = null;
     state.dogs.sort(dogOrder);
-    const need = uniq.filter((id) => !dogById(id)?.ref_path && !hotelIds.has(id)).length;
+    const need = uniq.filter((id) => !dogById(id)?.ref_path && !hotelIds.has(id) && !daycareIds.has(id)).length;
     toast(need ? `명단 저장! 대표 사진이 필요한 아이 ${need}마리` : "명단 저장! 모두 아는 얼굴이에요");
   } catch (err) {
     if (err?.message === "cancel") { btn.disabled = false; renderRoll(); return; }

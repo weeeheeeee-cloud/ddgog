@@ -40,8 +40,9 @@ Deno.serve(async (req) => {
       const byDog = new Map((dogs ?? []).filter((d) => d.dd_pet_id).map((d) => [d.id, d]));
       const nameOf = new Map((dogs ?? []).map((d) => [d.id, d.name]));
       // 그날 H(호텔링) 표시된 아이
-      const { data: asg } = await admin.from("assignments").select("dog_id, hotel").eq("day", day);
-      const hotelIds = new Set((asg ?? []).filter((a) => a.hotel).map((a) => a.dog_id));
+      // (D 데이케어 손님도 다이얼독 유치원생이 아니라서 같이 뺌)
+      const { data: asg } = await admin.from("assignments").select("dog_id, hotel, daycare").eq("day", day);
+      const hotelIds = new Set((asg ?? []).filter((a) => a.hotel || a.daycare).map((a) => a.dog_id));
       const { data: noteRow } = await admin.from("app_settings").select("value").eq("name", "dd_note").maybeSingle();
       const photos: { id: string; path: string; rotation: number | null; dog_ids: string[]; taken_at: string | null; created_at: string }[] = [];
       for (let from = 0; ; from += 1000) {
