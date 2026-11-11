@@ -30,8 +30,8 @@ const COLOR = /(흰|화이트|순백|백색|아이보리|갈색|검|블랙|붉|�
 const OTHER = /(갈색|검|블랙|붉|황갈|살구|적갈|레드|초코|초콜|회색|회갈|은회|탄|트라이|삼색|블루|골드|베이지|주황|애프리콧|세이블|흑백|밤색|투톤|무늬|얼룩|파이드)/;
 const isWhite = (note: string | null, breed: string | null) => {
   const parts = String(note ?? "").split(/[,·]/).map((x) => x.trim()).filter(Boolean);
-  const c = parts.find((x) => COLOR.test(x));
-  if (!c) return /(비숑|말티즈|꼬똥|코똥|꼬숑|사모예드|화이트 테리어)/.test(`${breed ?? ""} ${note ?? ""}`);
+  const c = parts.find((x) => COLOR.test(x))?.split("+")[0]; // "흰색 푸들(빵이)+은회색 푸들(뚱이)" → 흰 아이가 있으면 흰색으로
+  if (!c) return true; // 털색을 모르면 빼지 않음 (많이 고쳤으면 배움)
   return /(흰|화이트|순백|백색|아이보리)/.test(c) && !OTHER.test(c);
 };
 
