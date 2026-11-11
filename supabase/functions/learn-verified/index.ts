@@ -2,11 +2,11 @@
 //  body: { day, dog_ids?: string[], final?: true, curate_all?: true }
 //  - 알림장 다운로드·다이얼독 저장 직후 (보통): 그날 그 아이 사진을 '직원 확인됨'으로 표시 + 많이 고친 아이는 새 모습을 조금 배움
 //  - final: 그날 알림장 전송이 다 끝난 뒤 그날 사진 전체를 다시 훑어 공부 (이미 배운 날도 다시)
-//  - curate_all: 모든 아이 대표 사진을 30장 이내로 정리만
+//  - curate_all: 모든 아이 대표 사진을 20장 이내로 정리만
 //  공부 대상: 그날 직원이 많이 고친(검수·수동 수정) 흰색 계열 아이만. 유색 아이·이미 잘 맞히는 아이는 새로 배우지 않음
 //   (고친 횟수 = 그날 그 아이가 맞는 답이거나 틀린 답이었던 수정 기록 수. 많이 고칠수록 더 많이 배움, 고쳤던 사진을 먼저 배움)
 //   단, app_settings 'learn_focus'에 있는 아이(예: 쿠키 포메)는 털색·고친 횟수와 상관없이 온 날마다 꼭 공부
-//  대표 사진은 아이당 최대 30장. 넘으면 서로 가장 다른 모습(앞·옆·뒤·누운 모습·옷·미용)이 남도록 골라서
+//  대표 사진은 아이당 최대 20장. 넘으면 서로 가장 다른 모습(앞·옆·뒤·누운 모습·옷·미용)이 남도록 골라서
 //  비슷한 사진끼리 겹친 것부터 뺌. 첫 프로필 사진은 항상 남김
 // 인증: 직원 로그인 또는 x-worker-key
 
@@ -21,7 +21,7 @@ const CORS = {
 const json = (body: unknown, status = 200) =>
   new Response(JSON.stringify(body), { status, headers: { ...CORS, "Content-Type": "application/json" } });
 
-const MAX_REFS = 30;      // 아이당 대표 사진 최대
+const MAX_REFS = 20;      // 아이당 대표 사진 최대
 const SAME = 0.93;        // 이보다 비슷하면 이미 아는 모습 → 건너뜀
 
 const MIN_FIX = 3;        // 그날 이만큼 이상 고친 아이만 새로 배움
@@ -76,7 +76,7 @@ function pickDiverse(items: Item[], newLimit: number): Set<string> {
     chosen.push(x);
     if (x.isNew) newCount++;
   }
-  // 30장이 안 되면 기존 사진은 모두 남김
+  // 20장이 안 되면 기존 사진은 모두 남김
   if (chosen.length < MAX_REFS) for (const x of pool) if (!x.isNew && chosen.length < MAX_REFS) chosen.push(x);
   return new Set(chosen.map((x) => x.key));
 }
@@ -211,7 +211,7 @@ Deno.serve(async (req) => {
   const { data: fz } = await admin.from("app_settings").select("value").eq("name", "learn_focus").maybeSingle();
   const focus = new Set<string>(((fz?.value as { dog_ids?: string[] } | null)?.dog_ids ?? []).map(String));
 
-  // 3) 많이 고친 흰색 계열 아이만 새 모습 학습. 나머지는 대표 사진 30장 정리만
+  // 3) 많이 고친 흰색 계열 아이만 새 모습 학습. 나머지는 대표 사진 20장 정리만
   let added = 0, removed = 0;
   const report: Record<string, { fix: number; added: number; skip?: string }> = {};
   for (const dogId of ids) {
