@@ -258,13 +258,30 @@ function bindSend(ov, after) {
   $$("[data-sms]", ov).forEach((b) => b.addEventListener("click", () => { smsInvite(dogById(b.dataset.sms)); after?.(b.dataset.sms); }));
 }
 
+// 아이 검색: 이름·보호자·전화번호(숫자만 쳐도 됨)로 목록 거르기
+const qOf = (d) => `${d.name} ${d.owner_name || ""} ${digits(d.phone)}`.toLowerCase().replace(/\s+/g, "");
+const searchBox = () => `<input class="pk-search" type="search" placeholder="🔍 아이 이름·보호자·전화번호 검색" autocomplete="off">`;
+function applySearch(ov) {
+  const inp = $(".pk-search", ov);
+  const q = (inp?.value || "").toLowerCase().replace(/[\s-]+/g, "");
+  let n = 0;
+  $$(".pk-mrow[data-q]", ov).forEach((r) => { const hit = !q || r.dataset.q.includes(q); r.style.display = hit ? "" : "none"; if (hit) n++; });
+  const none = $(".pk-none", ov);
+  if (none) none.hidden = !q || n > 0;
+}
+function bindSearch(ov) {
+  const inp = $(".pk-search", ov);
+  inp?.addEventListener("input", () => applySearch(ov));
+}
+
 // 한 명씩 차례로 보내기 (보낸 아이는 ✓)
 function openSender(list, title) {
   const draw = (ov) => {
     const sent = sentSet();
-    $(".pk-send", ov).innerHTML = list.map((d) => `<div class="pk-mrow ${sent.has(d.id) ? "sent" : ""}">
+    $(".pk-send", ov).innerHTML = list.map((d) => `<div class="pk-mrow ${sent.has(d.id) ? "sent" : ""}" data-q="${esc(qOf(d))}">
       <span class="grow"><b>${sent.has(d.id) ? "✓ " : ""}${esc(d.name)}</b><small class="muted">${esc([d.owner_name, d.phone].filter(Boolean).join(" · ")) || "연락처 없음"}</small></span>
-      ${sendBtns(d)}</div>`).join("") || `<p class="muted small">보낼 아이가 없어요.</p>`;
+      ${sendBtns(d)}</div>`).join("") + (list.length ? `<p class="muted small pk-none" hidden>찾는 아이가 없어요.</p>` : `<p class="muted small">보낼 아이가 없어요.</p>`);
+    applySearch(ov);
     $(".pk-send-count", ov).textContent = `${list.filter((d) => sent.has(d.id)).length} / ${list.length} 보냄`;
     bindSend(ov, () => setTimeout(() => draw(ov), 400));
   };
@@ -272,8 +289,10 @@ function openSender(list, title) {
     <div class="rc-head"><div class="grow"><b>${title}</b><small class="muted pk-send-count"></small></div><button class="btn ghost sm" data-close>닫기</button></div>
     <div class="rc-body">
       <p class="muted small">‘카톡 보내기’를 누르면 공유 창이 떠요 → 카카오톡 → 보호자를 골라 보내면 돼요. ‘문자’는 받는 사람과 내용이 채워진 채로 문자 앱이 열려요. 보낸 아이는 ✓ 표시돼요.</p>
+      ${list.length > 5 ? searchBox() : ""}
       <div class="pk-send"></div>
     </div>`, "wide");
+  bindSearch(ov);
   draw(ov);
 }
 
@@ -284,12 +303,14 @@ function openManage() {
     <div class="rc-body">
       <div class="pk-tools"><button class="btn primary sm" data-new>+ 아이 추가</button><button class="btn ghost sm" data-sendall>📨 전체 보내기</button><button class="btn ghost sm" data-all>링크 전체 복사</button></div>
       <p class="muted small">아이마다 보호자 전용 링크가 있어요. ‘카톡 보내기’나 ‘문자’로 보호자에게 보내 주세요. 매주 같은 링크라 한 번 받은 보호자는 그 링크로 계속 들어오면 돼요.</p>
-      <div class="pk-manage">${ps.dogs.map((d) => `<div class="pk-mrow ${d.active ? "" : "off"}">
+      ${searchBox()}
+      <div class="pk-manage">${ps.dogs.map((d) => `<div class="pk-mrow ${d.active ? "" : "off"}" data-q="${esc(qOf(d))}">
         <span class="grow"><b>${esc(d.name)}</b>${d.active ? "" : ` <span class="tag off">꺼짐</span>`}<small class="muted">${esc([d.owner_name, d.phone].filter(Boolean).join(" · "))}</small></span>
         ${d.active ? sendBtns(d) : ""}
         <button class="btn ghost mini" data-ed="${d.id}">수정</button>
-      </div>`).join("") || `<p class="muted small">아직 없어요.</p>`}</div>
+      </div>`).join("") || `<p class="muted small">아직 없어요.</p>`}<p class="muted small pk-none" hidden>찾는 아이가 없어요.</p></div>
     </div>`, "wide");
+  bindSearch(ov);
   $("[data-new]", ov).addEventListener("click", () => { close(); openDogForm(null); });
   $("[data-all]", ov).addEventListener("click", () => {
     const list = ps.dogs.filter((d) => d.active);
