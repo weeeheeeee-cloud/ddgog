@@ -631,6 +631,37 @@ async function drawTasks() {
     await m.renderTasks({ sb, toast, root: $("#tasks") });
   } catch (e) { console.error(e); }
 }
+// ---- 한참 뒤에 새로 들어온 사진 표시: 이 기기에서 그 아이 폴더를 본 뒤에 새로 들어온 사진을 명단에 '새 N'으로
+const SEEN_KEY = () => `ddg-seen:${state.day}`;
+function seenAll() { try { return JSON.parse(localStorage.getItem(SEEN_KEY()) || "{}"); } catch { return {}; } }
+function folderPhotos(dogId) { return state.photos.filter((p) => p.status === "done" && p.dog_ids.includes(dogId)); }
+function newPhotos(dogId) {
+  const s = seenAll()[dogId];
+  if (!s) return [];
+  const ids = new Set(s);
+  return folderPhotos(dogId).filter((p) => !ids.has(p.id));
+}
+function markSeen(dogId) {
+  if (!dogId || state.practice) return;
+  const all = seenAll();
+  all[dogId] = folderPhotos(dogId).map((p) => p.id);
+  try { localStorage.setItem(SEEN_KEY(), JSON.stringify(all)); } catch { /* 저장 못 해도 괜찮음 */ }
+  const row = document.querySelector(`#side-list [data-side="${dogId}"] .new-badge`);
+  if (row) row.remove();
+}
+let seenObs = null;
+function watchFolders(box) {
+  seenObs?.disconnect();
+  if (!("IntersectionObserver" in window)) return;
+  const timers = new Map();
+  seenObs = new IntersectionObserver((ents) => ents.forEach((e) => {
+    const id = e.target.dataset.list;
+    if (e.isIntersecting) { if (!timers.has(id)) timers.set(id, setTimeout(() => markSeen(id), 2000)); }
+    else { clearTimeout(timers.get(id)); timers.delete(id); }
+  }), { threshold: 0.35 });
+  $$(".dog-group[data-list]", box).forEach((g) => { if (dogById(g.dataset.list)) seenObs.observe(g); });
+}
+
 async function renderPhotos() {
   renderRoll(); // 왼쪽 오늘 명단(장수)도 함께 갱신
   renderFind();
@@ -679,7 +710,8 @@ async function renderPhotos() {
   const thumb = await signed("photos", P.map((p) => p.thumb_path));
   const ref = await signed("refs", dogIds.map((id) => dogById(id)?.ref_path));
   const covers = new Set(dogIds.map(coverOf).filter(Boolean));
-  const img = (p) => `<img loading="lazy" src="${thumb(p.thumb_path)}" data-photo="${p.id}" class="${covers.has(p.id) ? "cover " : ""}rot${p.rotation || 0}${p.status === "done" && p.confidence === "low" ? " unsure" : ""}${state.sel?.ids.has(p.id) ? " picked" : ""}" alt=""${p.status === "done" && p.confidence === "low" ? ' title="AI가 확신하지 못한 사진 — 확인해 주세요"' : ""}>`;
+  const fresh = new Set(dogIds.flatMap((id) => newPhotos(id).map((p) => p.id)));
+  const img = (p) => `<img loading="lazy" src="${thumb(p.thumb_path)}" data-photo="${p.id}" class="${fresh.has(p.id) ? "fresh " : ""}${covers.has(p.id) ? "cover " : ""}rot${p.rotation || 0}${p.status === "done" && p.confidence === "low" ? " unsure" : ""}${state.sel?.ids.has(p.id) ? " picked" : ""}" alt=""${p.status === "done" && p.confidence === "low" ? ' title="AI가 확신하지 못한 사진 — 확인해 주세요"' : ""}>`;
 
   box.innerHTML = dogIds.map((id) => {
     const dog = dogById(id);
@@ -729,6 +761,7 @@ async function renderPhotos() {
   }));
   lists.set("unsorted", burstGroups(unsortedClusters(unsorted).flat()).map((g) => g.rep.id));
   lists.set("skipped", skipped.map((p) => p.id));
+  watchFolders(box);
   $("#skip-toggle")?.addEventListener("click", () => { state.showSkipped = !state.showSkipped; renderPhotos(); });
   $("#skip-all")?.addEventListener("click", async () => {
     if (!confirm(`찾는 아이가 아닌 사진 ${skipped.length}장을 오늘 명단의 모든 아이 기준으로 다시 분류할까요?`)) return;
@@ -2951,6 +2984,7 @@ async function renderSide() {
       return `<div class="side-item"><button class="side-row ${n ? "" : "zero"}" data-side="${d.id}" title="${esc(d.name)}">
         ${d.ref_path ? `<img src="${ref(d.ref_path)}" alt="">` : `<span class="noimg">?</span>`}
         <span class="nm">${state.hotel.has(d.id) ? `<b class="tag-h">H</b>` : ""}${esc(d.name)}${breedTag(d)}</span>
+        ${(() => { const k = state.practice ? 0 : newPhotos(d.id).length; return k ? `<i class="new-badge" title="이 폴더를 본 뒤에 새로 들어온 사진이에요. 눌러서 확인해 주세요">새 ${k}</i>` : ""; })()}
         <b class="cnt ${up ? "bump" : ""}">${n}<small>장</small>${up ? `<i class="plus">+${up}</i>` : ""}</b>
       </button>${inToday ? `<button class="side-x" data-unroll="${d.id}" title="오늘 명단에서 빼기">×</button>` : ""}</div>`;
     };
