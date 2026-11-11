@@ -928,6 +928,20 @@ async function selAction(kind) {
   const photos = state.photos.filter((p) => sel.ids.has(p.id));
   if (!photos.length) return;
   const from = dogById(sel.key);
+  // 폴더에는 비슷한 사진(연속 촬영)이 묶음마다 3장만 보이고 나머지는 접혀 있음.
+  // 보이는 사진만 옮기면 접혀 있던 같은 장면 사진이 다시 올라와 '그대로 남은 것'처럼 보이므로 같이 옮김
+  if (from && kind !== "del" && !state.expanded.has(from.id)) {
+    const t = (p) => new Date(p.taken_at || p.created_at).getTime();
+    const inFolder = state.photos.filter((p) => p.status === "done" && p.dog_ids.includes(from.id));
+    const { extra } = splitSimilar(inFolder, from.id);
+    const picked = new Set(photos.map((p) => p.id));
+    for (const q of extra) {
+      if (picked.has(q.id)) continue;
+      if (photos.some((p) => p.phash && q.phash && hamming(p.phash, q.phash) <= SIM_DIST && Math.abs(t(p) - t(q)) <= SIM_GAP)) {
+        photos.push(q); picked.add(q.id);
+      }
+    }
+  }
   if (kind === "del") {
     if (!confirm(`선택한 사진 ${photos.length}장을 완전히 삭제할까요? 되돌릴 수 없어요.`)) return;
     const ids = new Set(photos.map((p) => p.id));
@@ -2521,6 +2535,21 @@ $("#sheet-save").addEventListener("click", async () => {
     added.filter((a, i) => !(wrong.length && (added.length === 1 || i < wrong.length))).forEach((a) => learnMistake(sheetPhoto.id, null, a));
   }
   sheetPhoto.confidence = "manual";
+  // 접혀 있던 같은 장면(연속 촬영) 사진이 빠진 아이 폴더에 '그대로 남은 것'처럼 다시 올라오지 않게 같이 옮김
+  {
+    const t = (p) => new Date(p.taken_at || p.created_at).getTime();
+    const sp = sheetPhoto, same = (a, b) => a.length === b.length && a.every((x) => b.includes(x));
+    for (const w of before.ids.filter((id) => !ids.includes(id))) {
+      if (state.expanded.has(w)) continue;
+      const { extra } = splitSimilar(state.photos.filter((p) => p.status === "done" && p.dog_ids.includes(w)), w);
+      for (const q of extra) {
+        if (q.id === sp.id || !same(q.dog_ids, before.ids)) continue;
+        if (!(sp.phash && q.phash && hamming(sp.phash, q.phash) <= SIM_DIST && Math.abs(t(sp) - t(q)) <= SIM_GAP)) continue;
+        await sb.from("photos").update({ dog_ids: ids, status: "done", confidence: "manual" }).eq("id", q.id);
+        Object.assign(q, { dog_ids: [...ids], status: "done", confidence: "manual" });
+      }
+    }
+  }
   // 고친 사진 한 장만 바꿈. 비슷한 사진·같은 폴더 나머지 사진은 AI가 알아서 옮기지 않음 (시킬 때만 다시 검수)
   // 단, '모르는 아이' 칸에서 보낸 사진이면 그 칸에 남은 같은 아이 사진은 따라가게
   if ((before.status === "review" || before.status === "error" || !before.ids.length) && ids.length === 1) setTimeout(() => followUnsorted(ids[0]), 300);
