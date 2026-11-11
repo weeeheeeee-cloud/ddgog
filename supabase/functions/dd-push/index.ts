@@ -1,5 +1,6 @@
 // 다이얼독 알림장 임시저장: 다이얼독 화면에서 실행되는 스크립트(dd-push.js)가 호출
 //  action "list": { token, day? } → 그날 분류된 사진을 다이얼독 반려견(petId)별로 { day, dogs: [{ petId, name, photos: [{ id, url, rotation, pushed }] }] }
+//  action "finish": { token, pet_ids, photo_id } → 전송 끝: 그날 사진 다시 학습 + 대표 사진 정리
 //  action "mark": { token, items: [{ photo_id, pet_id }] } → 다이얼독에 넣은 사진 기록 (다음에 같은 사진을 또 넣지 않게)
 //  action "note": { token, text } → 알림장에 모든 아이 똑같이 붙일 글 저장
 //  action "members": { token, pets } → 다이얼독 회원 명단을 유치원 탭(kinder_members)에 넣기/갱신
@@ -202,11 +203,30 @@ Deno.serve(async (req) => {
       await admin.from("app_settings").upsert({ name: "dd_note", value: { text } }, { onConflict: "name" });
       return json({ ok: true });
     }
+    // 알림장 전송이 다 끝남 → 보낸 아이들의 그날 사진 전체를 다시 학습하고 대표 사진(최대 30장) 정리
+    if (body.action === "finish") {
+      const pets = (Array.isArray(body.pet_ids) ? body.pet_ids : []).map(String).slice(0, 500);
+      const pid = String(body.photo_id ?? "");
+      if (!pets.length || !pid) return json({ ok: true, dogs: 0 });
+      const { data: ds } = await admin.from("dogs").select("id").in("dd_pet_id", pets);
+      const { data: ph } = await admin.from("photos").select("day").eq("id", pid).maybeSingle();
+      const { data: k } = await admin.from("internal_keys").select("key").eq("name", "worker").single();
+      if (ds?.length && ph?.day && k?.key) {
+        const learn = fetch(`${Deno.env.get("SUPABASE_URL")}/functions/v1/learn-verified`, {
+          method: "POST",
+          headers: { "content-type": "application/json", "x-worker-key": k.key, apikey: Deno.env.get("SUPABASE_ANON_KEY") ?? "" },
+          body: JSON.stringify({ day: ph.day, dog_ids: ds.map((d) => d.id), final: true }),
+        }).catch(() => {});
+        // @ts-ignore EdgeRuntime 은 Supabase 런타임에 있음
+        if (typeof EdgeRuntime !== "undefined") EdgeRuntime.waitUntil(learn); else await learn;
+      }
+      return json({ ok: true, dogs: ds?.length ?? 0 });
+    }
     if (body.action === "mark") {
       const items = (Array.isArray(body.items) ? body.items : []).slice(0, 2000) as { photo_id: string; pet_id: string }[];
       if (items.length) await admin.from("dd_pushed").upsert(items.map((x) => ({ photo_id: x.photo_id, pet_id: String(x.pet_id) })), { ignoreDuplicates: true });
       // 임시저장까지 끝난 아이 = 검수 끝 → 그 아이들 학습 (기다리지 않고 뒤에서)
-      if (items.length) {
+      if (items.length && body.nolearn !== true) {
         const pets = [...new Set(items.map((x) => String(x.pet_id)))];
         const { data: ds } = await admin.from("dogs").select("id").in("dd_pet_id", pets);
         const { data: ph } = await admin.from("photos").select("day").eq("id", items[0].photo_id).maybeSingle();

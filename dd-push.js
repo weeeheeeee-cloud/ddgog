@@ -220,7 +220,8 @@
     if (content !== (mine.note || "").trim()) await fn({ action: "note", text: content }).catch(() => {}); // 다음에도 같은 글
     const total = todo.reduce((n, r) => n + r.photos.length, 0);
     let sent = 0, okDogs = 0;
-    const errs = [];
+    const errs = [], donePets = [];
+    let anyPhoto = null;
     $ft.innerHTML = "";
     const draw = (now) => {
       $bd.innerHTML = `<p class="msg">${esc(now)}</p><div class="bar"><i style="width:${total ? (sent / total) * 100 : 0}%"></i></div>
@@ -238,15 +239,18 @@
         draw(`${r.pet.name} 알림장 보내는 중…`);
         await sendReport(r.pet.id, ids, content);
         okDogs++;
-        await fn({ action: "mark", items: r.photos.map((p) => ({ photo_id: p.id, pet_id: String(r.pet.id) })) }).catch(() => {});
+        await fn({ action: "mark", nolearn: true, items: r.photos.map((p) => ({ photo_id: p.id, pet_id: String(r.pet.id) })) }).catch(() => {});
+        donePets.push(String(r.pet.id)); anyPhoto = anyPhoto || r.photos[0]?.id;
       } catch (e) {
         errs.push(`${r.pet.name}: ${e.message}`);
       }
     }
+    // 전송 끝 → 그날 사진 다시 학습하고 대표 사진 정리 (서버에서 뒤로)
+    if (donePets.length && anyPhoto) await fn({ action: "finish", pet_ids: donePets, photo_id: anyPhoto }).catch(() => {});
     $bd.innerHTML = `<p class="${errs.length ? "err" : "ok"}">${okDogs}건을 보호자에게 보냈어요${errs.length ? ` · ${errs.length}건 실패` : ""}</p>`
       + (errs.length ? `<p class="msg">${errs.map(esc).join("<br>")}</p>` : "")
       + missHtml()
-      + `<p class="msg">알림장 목록에서 보낸 알림장을 볼 수 있어요.</p>`;
+      + `<p class="msg">알림장 목록에서 보낸 알림장을 볼 수 있어요.${donePets.length ? "<br>오늘 사진으로 아이들 모습을 다시 학습하는 중이에요 (몇 분 걸려요, 창 닫아도 돼요)." : ""}</p>`;
     $ft.innerHTML = `<button class="sub">닫기</button><button class="go">알림장 목록 보기</button>`;
     $ft.querySelector(".sub").onclick = () => panel.remove();
     $ft.querySelector(".go").onclick = () => { location.hash = "#reports"; panel.remove(); };
