@@ -218,10 +218,11 @@ Deno.serve(async (req) => {
     if (arr.length <= k || k < 3) return spread(arr, k);
     return [...spread(arr.slice(0, -2), k - 2), ...arr.slice(-2)];
   };
-  const refs = withRefs.map((d) => ({ ...d, paths: pickRefs(d.paths, perDog) }));
+  let refs = withRefs.map((d) => ({ ...d, paths: pickRefs(d.paths, perDog) }));
 
   // ---- 지문(이미지 특징값) 먼저: 확실하면 AI 없이 바로 분류, 애매하면 후보를 AI에게 힌트로
   let fpHint = "";
+  let fpRank: { dog_id: string; sim: number }[] = [];
   if (photo.vec && !recheck && !only && !find.length) {
     const { data: st } = await supa.from("app_settings").select("value").eq("name", "fp").maybeSingle();
     // dog2/margin2: 조금 덜 닮았어도 2등과 차이가 크게 나면 그 아이 (쿠키 포메처럼 생김새가 뚜렷한 아이)
@@ -248,10 +249,25 @@ Deno.serve(async (req) => {
         if (top && top.n >= cfg.min_n && ((top.sim >= cfg.dog && gap >= cfg.margin) || (top.sim >= cfg.dog2 && gap >= cfg.margin2))) {
           return await finish([top.dog_id], `지문: ${nameOf(top.dog_id)} (${top.sim.toFixed(2)})`);
         }
-        if (m?.length) fpHint = `Visual fingerprint similarity (a hint only; check with your own eyes): ` +
-          m.slice(0, 3).map((x: { dog_id: string; sim: number }) => `[${refs.findIndex((d) => d.id === x.dog_id) + 1}] ${nameOf(x.dog_id)} ${x.sim.toFixed(2)}`).join(", ");
+        fpRank = m ?? [];
       }
     }
+  }
+  // ---- 비용 줄이기: 명단 아이가 많으면 지문이 가장 비슷한 8마리만 AI에게 보여 줌 (아이당 대표 사진 4장)
+  //  실제 사진으로 확인해 보니 정답 아이는 거의 항상 지문 8등 안에 있음. 그 밖이면 '모르는 아이'로 감
+  const FP_K = 8;
+  let narrowed = false;
+  const namedCount = refs.filter((d) => !d.auto).length;
+  if (fpRank.length && namedCount > FP_K) {
+    const keep = new Set(fpRank.slice(0, FP_K).map((x) => x.dog_id));
+    refs = withRefs.filter((d) => keep.has(d.id)).map((d) => ({ ...d, paths: pickRefs(d.paths, 4) }));
+    narrowed = true;
+  }
+  if (fpRank.length) {
+    const nameOf2 = (id: string) => { const d = refs.find((x) => x.id === id); return d ? `${d.name}${d.breed ? `(${d.breed})` : ""}` : "?"; };
+    fpHint = `Visual fingerprint similarity (a hint only; check with your own eyes): ` +
+      fpRank.slice(0, 3).filter((x) => refs.some((d) => d.id === x.dog_id))
+        .map((x) => `[${refs.findIndex((d) => d.id === x.dog_id) + 1}] ${nameOf2(x.dog_id)} ${x.sim.toFixed(2)}`).join(", ");
   }
 
   // 대표 사진을 한꺼번에(16장씩 동시에) 미리 불러옴. 한 장씩 받으면 사진 1장 분류에 1분 넘게 걸림
@@ -285,7 +301,7 @@ Deno.serve(async (req) => {
       const ids = refs.map((d) => d.id);
       const { data: les } = await supa.from("lessons").select("wrong_dog, right_dog, path, note")
         .or(`wrong_dog.in.(${ids.join(",")}),right_dog.in.(${ids.join(",")})`)
-        .order("created_at", { ascending: false }).limit(16);
+        .order("created_at", { ascending: false }).limit(narrowed ? 6 : 16);
       const usable = (les ?? []).filter((l) => idx.has(l.wrong_dog) || idx.has(l.right_dog));
       if (usable.length) {
         await Promise.all(usable.filter((l) => !refCache.has(l.path)).map(async (l) => {
@@ -316,6 +332,10 @@ Deno.serve(async (req) => {
     } else if (only) {
       content.push({ type: "text", text: "Note: staff just found that one photo filed under one of these two dogs was actually the other. " +
         "These two dogs are easy to confuse. Look very carefully at the distinguishing points and today's look, and decide which of the two is in the new photo." });
+    }
+    if (narrowed) {
+      content.push({ type: "text", text: "Note: these candidates are the dogs here today that look most similar by visual fingerprint. " +
+        "The right dog is almost always among them, but if none truly matches, leave it out (unknown_main / new_dog) instead of forcing it." });
     }
     if (practice) {
       content.push({ type: "text", text: "Note: no attendance list today. These candidates were pre-selected by visual similarity " +
