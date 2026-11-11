@@ -138,12 +138,33 @@ function draw() {
 async function refresh() { await load(); draw(); }
 
 /* ================= 고객 관리 ================= */
+// 이름 검색: 그대로 / 초성(ㅃㄱ) / 비슷한 소리(빼곰 = 빼꼼, 된소리·띄어쓰기 무시) 모두 찾음
+const CHO = "ㄱㄲㄴㄷㄸㄹㅁㅂㅃㅅㅆㅇㅈㅉㅊㅋㅌㅍㅎ", JUNG = "ㅏㅐㅑㅒㅓㅔㅕㅖㅗㅘㅙㅚㅛㅜㅝㅞㅟㅠㅡㅢㅣ", JONG = " ㄱㄲㄳㄴㄵㄶㄷㄹㄺㄻㄼㄽㄾㄿㅀㅁㅂㅄㅅㅆㅇㅈㅊㅋㅌㅍㅎ";
+const SOFT = { "ㄲ": "ㄱ", "ㄸ": "ㄷ", "ㅃ": "ㅂ", "ㅆ": "ㅅ", "ㅉ": "ㅈ", "ㅐ": "ㅔ", "ㅒ": "ㅖ" };
+function jamo(str) {
+  let o = "";
+  for (const ch of String(str || "")) {
+    const c = ch.charCodeAt(0) - 0xac00;
+    if (c >= 0 && c < 11172) o += CHO[Math.floor(c / 588)] + JUNG[Math.floor((c % 588) / 28)] + (c % 28 ? JONG[c % 28] : "");
+    else o += ch;
+  }
+  return o;
+}
+const soft = (s) => [...jamo(String(s || "").toLowerCase().replace(/\s+/g, ""))].map((x) => SOFT[x] || x).join("");
+const choOf = (s) => [...String(s || "")].map((ch) => { const c = ch.charCodeAt(0) - 0xac00; return c >= 0 && c < 11172 ? CHO[Math.floor(c / 588)] : ch; }).join("");
+function nameHit(name, q) {
+  const t = String(q || "").trim().toLowerCase().replace(/\s+/g, "");
+  if (!t) return true;
+  const n = String(name || "").toLowerCase().replace(/\s+/g, "");
+  if (n.includes(t)) return true;
+  if (/^[ㄱ-ㅎ]+$/.test(t)) return choOf(n).includes(t);
+  return t.length >= 2 && soft(n).includes(soft(t));
+}
 function matches(c, q) {
   if (!q) return true;
-  const t = q.trim().toLowerCase();
   const d = digits(q);
-  const names = [c.owner_name, ...petsOf(c.id).map((p) => p.name)].join(" ").toLowerCase();
-  return names.includes(t) || (d.length >= 2 && digits(c.phone).includes(d));
+  if (d.length >= 2 && digits(c.phone).includes(d)) return true;
+  return [c.owner_name, ...petsOf(c.id).map((p) => p.name)].some((n) => nameHit(n, q));
 }
 function drawCustomers() {
   const main = $("#ho-main");
@@ -155,7 +176,7 @@ function drawCustomers() {
         <button class="btn primary sm" id="ho-new">+ 신규 고객 등록</button>
       </div>
     </div>
-    <input id="ho-q" class="ho-search" type="search" placeholder="강아지 이름 · 보호자 이름 · 전화번호" value="${esc(hs.q)}" autocomplete="off">
+    <input id="ho-q" class="ho-search" type="search" placeholder="🔍 검색 — 강아지 이름 · 보호자 이름 · 전화번호 (초성도 돼요)" value="${esc(hs.q)}" autocomplete="off">
     <div id="ho-list"></div>`;
   $("#ho-new").addEventListener("click", () => openCustomerForm(null));
   $("#ho-import").addEventListener("click", openImport);
@@ -439,6 +460,8 @@ function openCustomerForm(cust, preset = {}) {
   $("#cf-save", ov).addEventListener("click", async () => {
     const btn = $("#cf-save", ov);
     const val = (s) => $(s, ov).value.trim() || null;
+    // 입력칸에 보이는 값을 그대로 다시 읽음 (한글 입력 중 바로 저장을 눌러도 마지막 글자까지 반영)
+    $$(".ho-petrow", ov).forEach((r) => $$("[data-f]", r).forEach((el) => { if (pets[+r.dataset.i]) pets[+r.dataset.i][el.dataset.f] = el.value; }));
     const named = pets.filter((p) => String(p.name || "").trim());
     if (!named.length && !val("#cf-owner")) { toast("강아지 이름이나 보호자 이름 중 하나는 적어 주세요"); return; }
     btn.disabled = true; btn.textContent = "저장 중…";
@@ -458,8 +481,19 @@ function openCustomerForm(cust, preset = {}) {
         const w = parseFloat(String(p.weight ?? "").replace(/[^\d.]/g, ""));
         const pr = { customer_id: id, name: String(p.name).trim(), breed: p.breed || null, sex: p.sex || null,
           neutered: p.neutered && p.neutered !== "" ? p.neutered : null, age: p.age || null, weight: isFinite(w) ? w : null, dog_id: p.dog_id || null, sort: i };
-        const r = p.id ? await C.sb.from("hotel_pets").update(pr).eq("id", p.id) : await C.sb.from("hotel_pets").insert(pr);
+        const r = p.id ? await C.sb.from("hotel_pets").update(pr).eq("id", p.id).select("id") : await C.sb.from("hotel_pets").insert(pr).select("id");
         if (r.error) throw r.error.code === "23505" ? new Error(`${pr.name}은(는) 이미 다른 호텔링 고객에 연결돼 있어요`) : r.error;
+        if (p.id && !r.data?.length) throw new Error(`${pr.name} 이름을 저장하지 못했어요. 새로고침 후 다시 해 주세요`);
+        // 이름을 바꿨으면 이 고객의 예약(캘린더)에 적힌 이름도 같이 바꿈: "빼곰" → "빼꼼", "비비/빼곰" → "비비/빼꼼"
+        const old = p.id ? hs.pets.find((x) => x.id === p.id)?.name : null;
+        if (old && old !== pr.name) {
+          for (const b of bookingsOf(id)) {
+            const parts = String(b.label || "").split("/").map((x) => x.trim());
+            if (!parts.includes(old)) continue;
+            const label = parts.map((x) => (x === old ? pr.name : x)).join("/");
+            await C.sb.from("hotel_bookings").update({ label }).eq("id", b.id);
+          }
+        }
       }
       for (const f of newForms) {
         const path = `${id}/${crypto.randomUUID()}.jpg`;
@@ -657,7 +691,7 @@ function drawCalendar() {
   const q = $("#cal-q");
   q.addEventListener("input", () => {
     const s = q.value.trim().toLowerCase();
-    const res = s ? hs.bookings.filter((b) => b.label.toLowerCase().includes(s) || petsOf(b.customer_id).some((p) => p.name.toLowerCase().includes(s)))
+    const res = s ? hs.bookings.filter((b) => nameHit(b.label, s) || petsOf(b.customer_id).some((p) => nameHit(p.name, s)))
       .sort((a, b) => b.check_in.localeCompare(a.check_in)).slice(0, 12) : [];
     $("#cal-res").innerHTML = res.length ? res.map((b) => `<button data-go="${b.id}">${kindTag(b.kind)} ${esc(b.label)} <small>${md(b.check_in)} → ${md(b.check_out)}${b.status === "cancelled" ? " · 취소" : ""}</small></button>`).join("")
       : s ? `<p class="muted small">없어요</p>` : "";
@@ -739,7 +773,7 @@ function openBooking(bk, preset = {}) {
       const s = q.value.trim();
       const res = s ? hs.customers.filter((c) => matches(c, s)).slice(0, 8) : [];
       const linkedIds = new Set(hs.pets.map((p) => p.dog_id).filter(Boolean));
-      const roster = s ? C.dogs.filter((d) => !d.auto && !linkedIds.has(d.id) && d.name.toLowerCase().includes(s.toLowerCase())).slice(0, 6) : [];
+      const roster = s ? C.dogs.filter((d) => !d.auto && !linkedIds.has(d.id) && nameHit(d.name, s)).slice(0, 6) : [];
       $("#bk-cres", ov).innerHTML = res.map((c) => `<button type="button" data-pc="${c.id}">${kindTag(c.kind)} ${esc(custLabel(c))} <small>${esc(c.owner_name || "")} ${esc(c.phone || "")}</small></button>`).join("")
         + roster.map((d) => `<button type="button" data-pd="${d.id}">${kindTag("K")} ${esc(d.name)} <small>유치원 명단</small></button>`).join("")
         || (s ? `<p class="muted small">없어요. ‘새 고객 등록’을 눌러 주세요.</p>` : "");
