@@ -5,6 +5,7 @@
 //  - curate_all: 모든 아이 대표 사진을 30장 이내로 정리만
 //  공부 대상: 그날 직원이 많이 고친(검수·수동 수정) 흰색 계열 아이만. 유색 아이·이미 잘 맞히는 아이는 새로 배우지 않음
 //   (고친 횟수 = 그날 그 아이가 맞는 답이거나 틀린 답이었던 수정 기록 수. 많이 고칠수록 더 많이 배움, 고쳤던 사진을 먼저 배움)
+//   단, app_settings 'learn_focus'에 있는 아이(예: 쿠키 포메)는 털색·고친 횟수와 상관없이 온 날마다 꼭 공부
 //  대표 사진은 아이당 최대 30장. 넘으면 서로 가장 다른 모습(앞·옆·뒤·누운 모습·옷·미용)이 남도록 골라서
 //  비슷한 사진끼리 겹친 것부터 뺌. 첫 프로필 사진은 항상 남김
 // 인증: 직원 로그인 또는 x-worker-key
@@ -207,6 +208,8 @@ Deno.serve(async (req) => {
     if (l.right_dog && v) fixVecs.set(l.right_dog, [...(fixVecs.get(l.right_dog) ?? []), v]);
   }
   const dogInfo = new Map((dogRows ?? []).map((d) => [d.id, d]));
+  const { data: fz } = await admin.from("app_settings").select("value").eq("name", "learn_focus").maybeSingle();
+  const focus = new Set<string>(((fz?.value as { dog_ids?: string[] } | null)?.dog_ids ?? []).map(String));
 
   // 3) 많이 고친 흰색 계열 아이만 새 모습 학습. 나머지는 대표 사진 30장 정리만
   let added = 0, removed = 0;
@@ -216,7 +219,8 @@ Deno.serve(async (req) => {
     const info = dogInfo.get(dogId);
     const fix = fixCount.get(dogId) ?? 0;
     const white = isWhite(info?.note ?? null, info?.breed ?? null);
-    if (!white || fix < MIN_FIX) {
+    const isFocus = focus.has(dogId);
+    if (!isFocus && (!white || fix < MIN_FIX)) {
       const r = await curate(dogId, [], 0);
       removed += r.removed;
       report[dogId] = { fix, added: 0, skip: !white ? "유색" : "잘 맞힘" };
@@ -235,9 +239,9 @@ Deno.serve(async (req) => {
       if (cands.some((c) => cos(c.v, p.v!) >= 0.96)) continue;
       cands.push(p as Cand);
     }
-    const r = await curate(dogId, cands, newLimitOf(fix, final));
+    const r = await curate(dogId, cands, isFocus ? Math.max(newLimitOf(fix, final), final ? 8 : 4) : newLimitOf(fix, final));
     added += r.added; removed += r.removed;
-    report[dogId] = { fix, added: r.added };
+    report[dogId] = { fix, added: r.added, ...(isFocus ? { skip: "집중" } : {}) };
     const prev = final ? (await admin.from("learned_days").select("refs_added").eq("day", day).eq("dog_id", dogId).maybeSingle()).data?.refs_added ?? 0 : 0;
     await admin.from("learned_days").upsert({
       day, dog_id: dogId, refs_added: prev + r.added,
