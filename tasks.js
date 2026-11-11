@@ -76,9 +76,6 @@ export async function renderTasks(ctx) {
     { key: "manual", title: "할 일", icon: "📌", list: items.filter((it) => it.cls === "manual"), add: true },
   ];
   const sum = (list) => list.filter((it) => !isDone(it)).length;
-  let openDone = false;
-  try { openDone = sessionStorage.getItem("tk-done-open") === "1"; } catch { /* 괜찮음 */ }
-  const doneList = items.filter(isDone);
 
   const isPast = day < t0;
   root.innerHTML = `
@@ -95,7 +92,8 @@ export async function renderTasks(ctx) {
       <div class="tk-ring ${items.length && !left ? "all" : ""}">${items.length ? (left ? `<b>${left}</b><small>남음</small>` : `<b>🎉</b><small>모두 끝</small>`) : `<b>0</b><small>할 일</small>`}</div>
     </div>
     ${groups.map((g) => {
-      const open = g.list.filter((it) => !isDone(it));
+      // 완료한 것도 지우지 않고 그 자리(맨 아래)에 체크된 채로 보여 줌
+      const open = [...g.list.filter((it) => !isDone(it)), ...g.list.filter(isDone)];
       if (!open.length && !g.add) return "";
       return `<section class="tk-group ${g.key}">
         <h3><span>${g.icon} ${g.title}</span>${g.list.length ? `<em>${sum(g.list)}</em>` : ""}</h3>
@@ -103,15 +101,11 @@ export async function renderTasks(ctx) {
         ${g.add ? `<form class="tk-add" autocomplete="off"><input id="tk-new" maxlength="120" placeholder="${isToday ? "+ 할 일 추가 (예: 콩이 약 먹이기)" : `+ ${md(day)} 할 일 추가`}"><button class="btn primary sm">추가</button></form>` : ""}
       </section>`;
     }).join("")}
-    ${doneList.length ? `<section class="tk-group done-g">
-      <button class="tk-fold" id="tk-fold">${openDone ? "▾" : "▸"} 완료 ${doneList.length}개</button>
-      ${openDone ? `<ul class="tk-list">${doneList.map(itemHtml).join("")}</ul>` : ""}
-    </section>` : ""}`;
+    `;
 
   $$("[data-go]", root).forEach((b) => b.addEventListener("click", () => { boardDay = b.dataset.go; renderTasks(C); }));
   $$("[data-mv]", root).forEach((b) => b.addEventListener("click", () => { boardDay = addDays(boardDay, +b.dataset.mv); renderTasks(C); }));
   $("#tk-date", root)?.addEventListener("change", (e) => { if (e.target.value) { boardDay = e.target.value; renderTasks(C); } });
-  $("#tk-fold", root)?.addEventListener("click", () => { try { sessionStorage.setItem("tk-done-open", openDone ? "0" : "1"); } catch { /* 괜찮음 */ } renderTasks(C); });
   $$("[data-tk]", root).forEach((el) => el.addEventListener("change", () => toggle(items[+el.dataset.tk], el.checked)));
   $$("[data-del]", root).forEach((el) => el.addEventListener("click", async () => {
     const it = items[+el.dataset.del];
