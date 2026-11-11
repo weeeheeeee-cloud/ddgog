@@ -1923,6 +1923,18 @@ async function confirmRoll() {
       const { error } = await sb.from("assignments").insert(uniq.map((dog_id) => ({ day: state.day, dog_id, hotel: hotelIds.has(dog_id), daycare: daycareIds.has(dog_id), first: firstIds.has(dog_id) })));
       if (error) throw error;
     }
+    // 다시 확정하면서 명단에서 빠진 아이: 그 아이로 분류된 사진은 그 아이를 빼고 다시 분류 (아래 '명단 밖'에 이름이 남지 않게)
+    const dropped = [...state.attendance].filter((id) => !uniq.includes(id));
+    if (dropped.length) {
+      const hit = state.photos.filter((p) => p.dog_ids.some((d) => dropped.includes(d)));
+      await pool(hit, 6, async (p) => {
+        const rest = p.dog_ids.filter((d) => !dropped.includes(d));
+        const upd = rest.length ? { dog_ids: rest, status: "done" } : { dog_ids: [], status: "pending", confidence: null, ai_note: null, claimed_at: null };
+        await sb.from("photos").update(upd).eq("id", p.id);
+        Object.assign(p, upd);
+      });
+      if (hit.length) setTimeout(() => classifyPending(), 500);
+    }
     state.attendance = new Set(uniq);
     state.hotel = hotelIds;
     state.first = firstIds;
