@@ -1245,4 +1245,4 @@ small.breed { font-size: 11.5px; font-weight: 700; color: var(--muted); backgrou
 .pk-search:focus { outline:2px solid #003B89; outline-offset:-1px; }
 /* 폴더를 본 뒤 새로 들어온 사진 */
 .side-row .new-badge { font-style: normal; font-size: 11px; font-weight: 800; color: #003B89; background: #FCCC00; border-radius: 99px; padding: 2px 7px; margin-left: auto; margin-right: 6px; white-space: nowrap; }
-.grid img.fresh { outline: 3px solid #FCCC00; outline-offset: -3px; box-shadow: 0 0 0 2px #003B89 inset; }
+.grid img.fresh { box-shadow: 0 0 0 4px #003B89, 0 0 0 7px #FCCC00; }
