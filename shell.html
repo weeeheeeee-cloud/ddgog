@@ -248,12 +248,19 @@
       <input id="sheet-search" type="search" placeholder="이름 검색 → Enter로 추가" autocomplete="off">
     </div>
     <div id="sheet-chips" class="chips"></div>
-    <div class="row">
-      <button id="sheet-save" class="btn primary grow">분류 저장</button>
-      <button id="sheet-new" class="btn ghost">이 사진으로 아이 등록</button>
-      <button id="sheet-dl" class="btn ghost">이 사진 받기</button>
-      <button id="sheet-out" class="btn ghost hidden">여기서 빼기</button>
-      <button id="sheet-del" class="btn ghost danger">삭제</button>
+    <!-- 툴바: 스크롤하지 않아도 늘 아래에 붙어 있음 -->
+    <div class="sheet-tools">
+      <div class="st-main">
+        <button id="sheet-save" class="btn primary">✔ 분류 저장</button>
+        <button id="sheet-rot2" class="btn ghost" title="시계 방향으로 돌리기">↻ 돌리기</button>
+        <button id="sheet-ref" class="btn ghost" title="고른 아이의 대표 사진으로 추가">⭐ 대표 사진</button>
+      </div>
+      <div class="st-more">
+        <button id="sheet-new" class="btn ghost">이 사진으로 아이 등록</button>
+        <button id="sheet-dl" class="btn ghost">이 사진 받기</button>
+        <button id="sheet-out" class="btn ghost hidden">여기서 빼기</button>
+        <button id="sheet-del" class="btn ghost danger">삭제</button>
+      </div>
     </div>
   </div>
 </div>

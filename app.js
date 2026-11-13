@@ -2542,6 +2542,35 @@ $("#sheet-rot").addEventListener("click", async () => {
   if (t) t.className = `rot${p.rotation}`;
 });
 
+// 툴바의 돌리기 = 사진 위 ↻ 버튼과 같음
+$("#sheet-rot2").addEventListener("click", () => $("#sheet-rot").click());
+// 이 사진을 고른 아이의 대표 사진으로 추가 (여러 마리를 골랐으면 번호로 물어봄)
+$("#sheet-ref").addEventListener("click", async (e) => {
+  const p = sheetPhoto;
+  if (!p) return;
+  const ids = $$("#sheet-chips button.on").map((b) => b.dataset.dog);
+  if (!ids.length) { toast("어느 아이의 대표 사진인지 먼저 아이를 골라 주세요"); return; }
+  let dog = dogById(ids[0]);
+  if (ids.length > 1) {
+    const list = ids.map(dogById).filter(Boolean);
+    const a = prompt(`어느 아이의 대표 사진으로 넣을까요?\n${list.map((d, i) => `${i + 1}. ${d.name}${d.breed && dupName(d) ? ` ${d.breed}` : ""}`).join("\n")}\n\n번호를 적어 주세요`, "1");
+    if (a === null) return;
+    dog = list[(+a || 0) - 1];
+    if (!dog) { toast("번호를 다시 확인해 주세요"); return; }
+  }
+  const btn = e.currentTarget;
+  btn.disabled = true; btn.textContent = "저장 중…";
+  try {
+    const url = await signed("photos", [p.path]);
+    let blob = await fetch(url(p.path)).then((r) => r.blob());
+    if (p.rotation) blob = await rotateBlob(blob, p.rotation);
+    const n = await addRefs(dog, [blob]);
+    toast(n ? `${dog.name} 대표 사진에 넣었어요 ⭐ (분류는 ‘분류 저장’으로)` : "저장하지 못했어요");
+    if (n) queueRescan();
+  } catch (err) { console.error(err); toast("저장하지 못했어요"); }
+  btn.disabled = false; btn.textContent = "⭐ 대표 사진";
+});
+
 $("#sheet-dl").addEventListener("click", async (e) => {
   const p = sheetPhoto;
   const names = p.dog_ids.map((id) => dogById(id)?.name).filter(Boolean).join("_") || "사진";

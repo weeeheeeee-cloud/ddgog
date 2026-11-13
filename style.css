@@ -1278,3 +1278,21 @@ small.breed { font-size: 11.5px; font-weight: 700; color: var(--muted); backgrou
   #sel-bar.tool .btn { flex:none; white-space:nowrap; }
   #sel-bar.tool .tool-size { display:none; }
 }
+
+/* 사진 크게 보기: 아래에 붙어 있는 툴바 (아이를 고르고 내려가지 않아도 바로 저장·돌리기·대표 사진) */
+.sheet-tools { position:sticky; bottom:calc(-16px - env(safe-area-inset-bottom)); z-index:3; margin:10px -16px calc(-16px - env(safe-area-inset-bottom));
+  padding:10px 16px calc(10px + env(safe-area-inset-bottom)); background:#fff; border-top:1px solid var(--line); box-shadow:0 -6px 18px rgba(0,0,0,.08);
+  display:flex; flex-wrap:wrap; gap:8px; align-items:center; }
+.st-main { display:flex; gap:6px; flex:1 1 auto; }
+.st-main .btn { white-space:nowrap; }
+.st-main #sheet-save { flex:1 1 auto; font-size:16px; }
+.st-more { display:flex; gap:6px; flex-wrap:wrap; }
+.st-more .btn { padding:6px 10px; font-size:13px; white-space:nowrap; }
+@media (max-width: 700px) {
+  .sheet-tools { gap:6px; }
+  .st-main { flex-basis:100%; }
+  .st-main .btn { flex:1 1 0; padding-left:6px; padding-right:6px; }
+  .st-main #sheet-save { flex:1.4 1 0; }
+  .st-more { flex-wrap:nowrap; overflow-x:auto; flex-basis:100%; scrollbar-width:none; }
+  .st-more::-webkit-scrollbar { display:none; }
+}
