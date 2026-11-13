@@ -889,6 +889,7 @@ function renderSelBar() {
     // 선택 전: 지금 보고 있는 폴더용 도구
     viewKey = groupInView();
     if (!viewKey) { bar.remove(); return; }
+    bar.className = "tool";
     const d = dogById(viewKey);
     bar.innerHTML = `<b class="tool-title">${esc(groupName(viewKey))}</b>
       <button class="btn primary sm" data-tool="select">☑ 여러 장 선택</button>
@@ -909,6 +910,7 @@ function renderSelBar() {
     }));
     return;
   }
+  bar.className = "sel";
   const key = state.sel.key, n = state.sel.ids.size;
   const dog = dogById(key);
   // 고른 사진을 작은 섬네일로 모아 보여줌 (눌러서 빼기)

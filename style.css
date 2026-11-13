@@ -1260,3 +1260,21 @@ small.breed { font-size: 11.5px; font-weight: 700; color: var(--muted); backgrou
 .ho-todo { font-style:normal; font-size:11px; font-weight:700; background:#fff4c2; color:#92400e; border-radius:999px; padding:1px 8px; white-space:nowrap; }
 .ho-todo-box { background:#fff4c2; color:#7c4a03; border-radius:12px; padding:10px 12px; margin-bottom:12px; display:flex; align-items:center; gap:8px; flex-wrap:wrap; }
 .ho-todo-box button { margin-left:auto; }
+
+/* 폰 화면: 폴더 머리글 제목이 세로로 찌그러지지 않게 버튼은 아랫줄로 */
+.dog-head .grow { min-width:0; }
+@media (max-width: 700px) {
+  .dog-head { flex-wrap:wrap; }
+  .dog-head .grow { flex:1 1 calc(100% - 52px); }
+  .dog-head > .btn { flex:0 0 auto; }
+  .dog-head small { word-break:keep-all; }
+}
+/* 폰 화면: 따라다니는 도구는 아래쪽 한 줄로 얇게 (옆으로 밀어서 더 보기) */
+@media (max-width: 999px) {
+  #sel-bar.tool { left:8px; right:8px; bottom:calc(10px + env(safe-area-inset-bottom)); transform:none; max-width:none;
+    flex-wrap:nowrap; overflow-x:auto; gap:6px; padding:8px 10px; border-radius:999px; -webkit-overflow-scrolling:touch; scrollbar-width:none; }
+  #sel-bar.tool::-webkit-scrollbar { display:none; }
+  #sel-bar.tool .tool-title { flex:0 1 auto; min-width:0; max-width:34vw; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; font-size:13px; }
+  #sel-bar.tool .btn { flex:none; white-space:nowrap; }
+  #sel-bar.tool .tool-size { display:none; }
+}
