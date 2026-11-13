@@ -1296,3 +1296,30 @@ small.breed { font-size: 11.5px; font-weight: 700; color: var(--muted); backgrou
   .st-more { flex-wrap:nowrap; overflow-x:auto; flex-basis:100%; scrollbar-width:none; }
   .st-more::-webkit-scrollbar { display:none; }
 }
+
+/* ===== 모바일: 화면이 옆으로 밀리거나 확대되지 않게 (전체 페이지 공통) ===== */
+html { overflow-x: hidden; overflow-x: clip; }
+html, body { max-width: 100%; overscroll-behavior-x: none; }
+body { overflow-x: clip; }
+img, video, canvas { max-width: 100%; }
+/* 입력칸·날짜칸이 칸 너비보다 넓어져 창 밖으로 삐져나가지 않게 */
+input, select, textarea { max-width: 100%; min-width: 0; }
+.ho-grid > *, .ho-cols > *, .ho-qrow > *, .ho-line, .ho-svc > *, .rc-body > * { min-width: 0; }
+@media (hover: none) and (pointer: coarse), (max-width: 820px) {
+  /* 아이폰은 글자 16px 미만 입력칸을 누르면 화면을 확대·이동시킴 → 입력칸 글자를 16px로 */
+  input:not([type="checkbox"]):not([type="radio"]):not([type="range"]), select, textarea { font-size: 16px !important; }
+  /* 아이폰 날짜·시간 칸은 자기 너비를 고집해서 옆으로 튀어나감 → 칸 너비에 맞춤 */
+  input[type="date"], input[type="time"], input[type="datetime-local"], input[type="month"] {
+    -webkit-appearance: none; appearance: none; min-height: 42px; text-align: left;
+  }
+  label > input[type="date"], label > input[type="time"] { display: block; width: 100%; }
+  .tk-pick input { min-height: 0; }
+  input::-webkit-date-and-time-value { text-align: left; }
+}
+/* 팝업 창: 가로로 안 움직이고, 안쪽 스크롤이 뒤 화면으로 번지지 않게 */
+.rc-overlay, .sheet, .ref-view { overscroll-behavior: contain; }
+.rc-box, .sheet-body { max-width: 100%; min-width: 0; overflow-x: hidden; }
+.rc-body { overflow-x: hidden; overscroll-behavior: contain; -webkit-overflow-scrolling: touch; }
+.rc-head > *, .rc-foot > * { min-width: 0; }
+/* 일부러 옆으로 넘기는 영역(탭·주간표 등)은 그 안에서만 움직이게 */
+.tabs, .teacher-pick, .pk-grid-wrap, .pk-board-wrap, .adm-nav, .sel-tray, .st-more { overscroll-behavior-x: contain; }

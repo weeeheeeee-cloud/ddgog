@@ -126,6 +126,12 @@
   .tips li::before { content:counter(t); font-family:var(--display); font-weight:900; font-size:15px; color:var(--navy); width:30px; height:30px; flex:none;
                      border-radius:50%; border:1.5px solid var(--navy); display:grid; place-items:center; }
   .foot { text-align:center; color:#a29c8f; font-size:11px; letter-spacing:.2em; margin-top:34px; font-weight:700; }
+  /* 모바일: 화면이 옆으로 밀리거나 입력 시 확대되지 않게 */
+  html { overflow-x:hidden; overflow-x:clip; }
+  html, body { max-width:100%; overscroll-behavior-x:none; }
+  body { overflow-x:clip; }
+  input:not([type="checkbox"]):not([type="radio"]), select, textarea { font-size:16px !important; max-width:100%; min-width:0; }
+  img, video, canvas { max-width:100%; }
 </style>
 </head>
 <body>

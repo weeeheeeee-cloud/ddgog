@@ -135,6 +135,12 @@
   .muted-p { grid-column:1/-1; color:var(--muted); font-size:14px; text-align:center; }
   .pin { width:100%; margin-top:18px; border:0; border-radius:18px; background:#fff; text-align:center; font-size:32px; font-weight:900; letter-spacing:.4em; padding:14px 0 14px .4em; color:var(--navy); }
   .pin-err { min-height:20px; margin:8px 0 0; color:var(--bad); font-weight:700; font-size:14px; }
+  /* 모바일: 화면이 옆으로 밀리거나 입력 시 확대되지 않게 */
+  html { overflow-x:hidden; overflow-x:clip; }
+  html, body { max-width:100%; overscroll-behavior-x:none; }
+  body { overflow-x:clip; }
+  input:not([type="checkbox"]):not([type="radio"]), select, textarea { font-size:16px !important; max-width:100%; min-width:0; }
+  img, video, canvas { max-width:100%; }
 </style>
 </head>
 <body>
