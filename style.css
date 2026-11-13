@@ -1246,3 +1246,17 @@ small.breed { font-size: 11.5px; font-weight: 700; color: var(--muted); backgrou
 /* 폴더를 본 뒤 새로 들어온 사진 */
 .side-row .new-badge { font-style: normal; font-size: 11px; font-weight: 800; color: #003B89; background: #FCCC00; border-radius: 99px; padding: 2px 7px; margin-left: auto; margin-right: 6px; white-space: nowrap; }
 .grid img.fresh { box-shadow: 0 0 0 4px #003B89, 0 0 0 7px #FCCC00; }
+
+/* 호텔링: 명단에 없는 아이 바로 등록 · 동명 아이 견종 */
+.ho-quick { background:#fffbea; border:1px solid #f5dc7a; border-radius:12px; padding:10px; display:grid; gap:8px; }
+.ho-quick-head { display:flex; flex-wrap:wrap; gap:6px; align-items:baseline; }
+.ho-qrow { display:grid; grid-template-columns:1fr 1fr auto; gap:6px; align-items:center; }
+.ho-qrow input { border:1px solid var(--line); border-radius:10px; padding:8px 11px; font:inherit; background:#fff; min-width:0; }
+.ho-qrow .ho-dup { grid-column:1 / -1; }
+.ho-qrow input.must, .ho-petrow input.must { border-color:#dc2626; background:#fff1f1; }
+.ho-csearch > div button.ho-qgo { background:#fffbea; color:var(--navy); font-weight:700; border-top:1px dashed var(--line); border-radius:0 0 8px 8px; }
+.ho-dup { font-style:normal; font-size:11px; font-weight:700; background:#eef2ff; color:#3730a3; border-radius:999px; padding:1px 8px; }
+.ho-dup.need { background:#fee2e2; color:#b91c1c; }
+.ho-todo { font-style:normal; font-size:11px; font-weight:700; background:#fff4c2; color:#92400e; border-radius:999px; padding:1px 8px; white-space:nowrap; }
+.ho-todo-box { background:#fff4c2; color:#7c4a03; border-radius:12px; padding:10px 12px; margin-bottom:12px; display:flex; align-items:center; gap:8px; flex-wrap:wrap; }
+.ho-todo-box button { margin-left:auto; }

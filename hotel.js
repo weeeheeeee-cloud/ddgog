@@ -110,6 +110,27 @@ const custById = (id) => hs.customers.find((c) => c.id === id);
 const custLabel = (c) => petsOf(c.id).map((p) => p.name).join("/") || "(이름 없음)";
 const bookingsOf = (cid) => hs.bookings.filter((b) => b.customer_id === cid);
 const active = (b) => b.status !== "cancelled";
+// 같은 이름 아이: 호텔링 고객 아이 + (호텔링에 연결 안 된) 유치원 명단 아이 중 이름이 같은 아이가 또 있으면 견종을 꼭 같이 보여 줌
+const nkey = (n) => baseName(n).replace(/\s+/g, "");
+function nameCount(name, skip = {}) {
+  const k = nkey(name);
+  if (!k) return 0;
+  const linked = new Set(hs.pets.map((p) => p.dog_id).filter(Boolean));
+  return hs.pets.filter((p) => p.id !== skip.petId && nkey(p.name) === k).length
+    + C.dogs.filter((d) => !d.auto && !linked.has(d.id) && d.id !== skip.dogId && nkey(d.name) === k).length;
+}
+const dogBreed = (d) => d?.breed || breedOf(d?.name);
+const dogShow = (d) => (nameCount(d.name, { dogId: d.id }) > 0 ? `${baseName(d.name)}·${dogBreed(d) || "견종?"}` : d.name);
+const isDup = (p) => nameCount(p.name, { petId: p.id, dogId: p.dog_id }) > 0;
+const petShow = (p) => (isDup(p) ? `${p.name}·${p.breed || "견종?"}` : p.name);
+const custShow = (c) => petsOf(c.id).map(petShow).join("/") || "(이름 없음)";
+// 예약에 적힌 이름(비비/모모)에도 동명 아이면 견종을 붙여서 보여 줌 (저장된 이름은 그대로)
+const labelShow = (b) => String(b.label || "").split("/").map((x) => {
+  const nm = x.trim(), p = petsOf(b.customer_id).find((q) => q.name === nm);
+  return p && isDup(p) ? petShow(p) : nm;
+}).join("/");
+// 바로 등록하고 보호자 정보를 아직 안 채운 고객
+const needInfo = (c) => !c.owner_name && !c.phone;
 const dt = (d, t, end) => new Date(`${d}T${t || (end ? "23:59" : "00:00")}:00+09:00`);
 
 /* ================= 화면 틀 ================= */
@@ -200,7 +221,7 @@ function drawList() {
       const next = bs.filter((b) => b.check_out >= t && b.status !== "out").sort((a, b) => a.check_in.localeCompare(b.check_in))[0];
       return `<button class="ho-tr" data-cust="${c.id}">
         <span>${kindTag(c.kind)}</span>
-        <span class="ho-pet">${esc(custLabel(c))}</span>
+        <span class="ho-pet">${esc(custShow(c))}${needInfo(c) ? ` <em class="ho-todo">정보 미입력</em>` : ""}</span>
         <span>${esc(c.owner_name || "")}</span>
         <span class="ho-phone">${esc(c.phone || "")}</span>
         <span class="muted">${past ? `${md(past.check_in)} → ${md(past.check_out)}` : "-"}</span>
@@ -237,14 +258,15 @@ async function openCustomer(id) {
   const v = c.vaccines || {};
   const row = (k, val) => val ? `<div class="ho-kv"><span>${k}</span><b>${val}</b></div>` : "";
   const bRow = (b) => `<button class="ho-bk ${b.status}" data-bk="${b.id}">
-      ${kindTag(b.kind)}<span class="grow"><b>${esc(b.label)}</b> <small class="muted">${md(b.check_in)}${b.in_time ? " " + b.in_time : ""} → ${md(b.check_out)}${b.out_time ? " " + b.out_time : ""}</small>
+      ${kindTag(b.kind)}<span class="grow"><b>${esc(labelShow(b))}</b> <small class="muted">${md(b.check_in)}${b.in_time ? " " + b.in_time : ""} → ${md(b.check_out)}${b.out_time ? " " + b.out_time : ""}</small>
       <br><small class="muted">${STATUS[b.status]}${svcText(b) ? " · " + svcText(b) : ""}${b.notes ? " · " + esc(b.notes) : ""}</small></span>
       <b>${won(b.total)} ${payTag(b)}</b></button>`;
   const { ov, close } = modal(`
-    <div class="rc-head"><div class="grow"><b class="ho-title">${kindTag(c.kind)} ${esc(custLabel(c))}</b>
+    <div class="rc-head"><div class="grow"><b class="ho-title">${kindTag(c.kind)} ${esc(custShow(c))}</b>
       <small class="muted">${esc(c.owner_name || "보호자 이름 없음")}${c.consult_date ? ` · 상담 ${c.consult_date}` : ""}</small></div>
       <button class="btn ghost sm" data-close>닫기</button></div>
     <div class="rc-body">
+      ${needInfo(c) ? `<div class="ho-todo-box">⚡ 바로 등록한 고객이에요. 보호자·상담지 정보를 나중에 채워 주세요. <button class="btn primary mini" data-fill>정보 채우기</button></div>` : ""}
       <div class="ho-cols">
         <section><h3>보호자</h3>
           ${row("이름", esc(c.owner_name))}
@@ -257,7 +279,7 @@ async function openCustomer(id) {
           ${pets.map((p) => {
             const dog = C.dogs.find((d) => d.id === p.dog_id);
             return `<div class="ho-pet-card">${dog?.ref_path ? `<img src="${ref(dog.ref_path)}" alt="">` : ""}<div>
-              <b>${esc(p.name)}</b>${dog ? ` <small class="hk-link">명단 연결</small>` : ""}
+              <b>${esc(p.name)}</b>${isDup(p) ? ` <small class="ho-dup ${p.breed ? "" : "need"}">동명 · ${esc(p.breed || "견종을 적어 주세요")}</small>` : ""}${dog ? ` <small class="hk-link">명단 연결</small>` : ""}
               <br><small class="muted">${[p.breed, p.sex === "M" ? "남아" : p.sex === "F" ? "여아" : "", p.neutered === "yes" ? "중성화 완료" : p.neutered === "no" ? "중성화 미완료" : "", p.age, p.weight ? p.weight + "kg" : ""].filter(Boolean).map(esc).join(" · ") || "정보 없음"}</small></div></div>`;
           }).join("")}
         </section>
@@ -278,6 +300,7 @@ async function openCustomer(id) {
     </div>`, "wide");
   $$("[data-bk]", ov).forEach((b) => b.addEventListener("click", () => { close(); openBooking(hs.bookings.find((x) => x.id === b.dataset.bk)); }));
   $("[data-edit]", ov).addEventListener("click", () => { close(); openCustomerForm(c); });
+  $("[data-fill]", ov)?.addEventListener("click", () => { close(); openCustomerForm(c); });
   $("[data-book]", ov).addEventListener("click", () => { close(); openBooking(null, { customer: c }); });
   $("[data-del]", ov).addEventListener("click", async () => {
     if (!confirm(`'${custLabel(c)}' 고객을 삭제할까요?\n예약 ${bs.length}건과 상담지 사진도 함께 지워져요. 되돌릴 수 없어요.\n(사진 분류 명단은 그대로예요)`)) return;
@@ -302,7 +325,7 @@ async function openImport() {
     const list = dogs.filter((d) => !q || d.name.toLowerCase().includes(q)).slice(0, 60);
     $("#imp-list", ov).innerHTML = list.map((d) => `<button data-dog="${d.id}" class="${linked.has(d.id) ? "done" : ""}">
         ${d.ref_path ? `<img src="${ref(d.ref_path)}" alt="">` : `<span class="avatar"></span>`}
-        <span class="grow"><b>${esc(d.name)}</b>${linked.has(d.id) ? `<br><small>호텔링 고객 · 바로 예약</small>` : ""}</span></button>`).join("")
+        <span class="grow"><b>${esc(dogShow(d))}</b>${linked.has(d.id) ? `<br><small>호텔링 고객 · 바로 예약</small>` : ""}</span></button>`).join("")
       || `<p class="muted">명단에 없는 이름이에요. 신규 고객으로 등록해 주세요.</p>`;
     $$("[data-dog]", ov).forEach((b) => b.addEventListener("click", () => {
       const d = dogs.find((x) => x.id === b.dataset.dog);
@@ -387,7 +410,10 @@ function openCustomerForm(cust, preset = {}) {
       <input data-f="weight" placeholder="몸무게 kg" inputmode="decimal" value="${p.weight ?? ""}">
       ${p.dog_id ? `<small class="hk-link" title="사진 분류 명단과 연결됨">명단 연결</small>` : ""}
       <button type="button" class="btn ghost mini" data-rm="${i}" title="이 아이 빼기">×</button></div>`).join("");
-    $$(".ho-petrow", ov).forEach((r) => $$("[data-f]", r).forEach((el) => el.addEventListener("input", () => { pets[+r.dataset.i][el.dataset.f] = el.value; })));
+    $$(".ho-petrow", ov).forEach((r) => {
+      $$("[data-f]", r).forEach((el) => el.addEventListener("input", () => { pets[+r.dataset.i][el.dataset.f] = el.value; markDup(r); }));
+      markDup(r);
+    });
     $$("[data-rm]", ov).forEach((b) => b.addEventListener("click", () => {
       const [p] = pets.splice(+b.dataset.rm, 1);
       if (p?.id) removedPets.push(p.id);
@@ -395,6 +421,14 @@ function openCustomerForm(cust, preset = {}) {
       drawPets();
     }));
   };
+  // 같은 이름 아이가 또 있으면 견종 칸을 꼭 채우게 표시
+  function markDup(r) {
+    const p = pets[+r.dataset.i];
+    const dup = !!p && nameCount(p.name, { petId: p.id, dogId: p.dog_id }) > 0;
+    const br = $('[data-f="breed"]', r);
+    br.classList.toggle("must", dup && !String(p.breed || "").trim());
+    br.placeholder = dup ? "견종 (동명 · 꼭)" : "견종";
+  }
   drawPets();
   $("#cf-addpet", ov).addEventListener("click", () => { pets.push({ name: "" }); drawPets(); });
   $("#cf-linkpet", ov).addEventListener("click", () => {
@@ -403,11 +437,11 @@ function openCustomerForm(cust, preset = {}) {
     const linked = new Set(hs.pets.filter((p) => p.dog_id && p.customer_id !== cust?.id).map((p) => p.dog_id));
     const hits = C.dogs.filter((d) => !d.auto && d.name.includes(name.trim()));
     if (!hits.length) { toast("명단에 없는 이름이에요"); return; }
-    const d = hits.length === 1 ? hits[0] : hits[(+prompt(hits.map((h, i) => `${i + 1}. ${h.name}`).join("\n") + "\n\n번호를 골라 주세요", "1") || 1) - 1];
+    const d = hits.length === 1 ? hits[0] : hits[(+prompt(hits.map((h, i) => `${i + 1}. ${dogShow(h)}`).join("\n") + "\n\n번호를 골라 주세요", "1") || 1) - 1];
     if (!d) return;
     if (linked.has(d.id) || pets.some((p) => p.dog_id === d.id)) { toast(`${d.name}은(는) 이미 다른 호텔링 고객에 있어요`); return; }
     const empty = pets.find((p) => !p.name && !p.dog_id);
-    const np = { name: baseName(d.name), breed: breedOf(d.name), dog_id: d.id };
+    const np = { name: baseName(d.name), breed: dogBreed(d), dog_id: d.id };
     if (empty) Object.assign(empty, np); else pets.push(np);
     drawPets();
   });
@@ -464,6 +498,12 @@ function openCustomerForm(cust, preset = {}) {
     $$(".ho-petrow", ov).forEach((r) => $$("[data-f]", r).forEach((el) => { if (pets[+r.dataset.i]) pets[+r.dataset.i][el.dataset.f] = el.value; }));
     const named = pets.filter((p) => String(p.name || "").trim());
     if (!named.length && !val("#cf-owner")) { toast("강아지 이름이나 보호자 이름 중 하나는 적어 주세요"); return; }
+    const nb = named.find((p) => !String(p.breed || "").trim() && nameCount(p.name, { petId: p.id, dogId: p.dog_id }) > 0);
+    if (nb) {
+      toast(`‘${String(nb.name).trim()}’ 이름의 아이가 또 있어요. 견종을 꼭 적어 주세요`, 4000);
+      $(`.ho-petrow[data-i="${pets.indexOf(nb)}"] [data-f="breed"]`, ov)?.focus();
+      return;
+    }
     btn.disabled = true; btn.textContent = "저장 중…";
     try {
       const vaccines = { hospital: val("#cf-hosp") };
@@ -546,8 +586,8 @@ function drawWeek(wk, t, cls = "") {
     const svc = svcText(b);
     return `<button class="ho-chip ho-bar ${b.kind === "K" ? "k" : "h"} ${head ? "head" : ""} ${tail ? "tail" : ""} ${s0 === s1 ? "one" : ""} ${b.id === hs.highlight ? "hl" : ""} ${b.status}" data-bk="${b.id}"
       style="grid-column:${s0 + 1} / span ${s1 - s0 + 1};grid-row:${lane + 2}"
-      title="${esc(b.label)} ${md(b.check_in)}~${md(b.check_out)}${svc ? ` · ${esc(svc)}` : ""}">
-      <span class="ho-cl">${head ? "▸" : "…"}${b.kind} ${esc(b.label)}${svc ? `<i class="ho-bang">!</i>` : ""}</span>
+      title="${esc(labelShow(b))} ${md(b.check_in)}~${md(b.check_out)}${svc ? ` · ${esc(svc)}` : ""}">
+      <span class="ho-cl">${head ? "▸" : "…"}${b.kind} ${esc(labelShow(b))}${svc ? `<i class="ho-bang">!</i>` : ""}</span>
       ${tail ? `<small class="ho-fee-s">${b.prepaid ? `<em class="ho-paid">선결제</em>` : ""}${won(b.total)}◂</small>` : ""}</button>`;
   }).join("");
   return `<div class="ho-week ${cls}" style="grid-template-rows:28px ${lanes.length ? `repeat(${lanes.length}, auto) ` : ""}minmax(10px, 1fr)">${cells}${bars}</div>`;
@@ -583,7 +623,7 @@ function drawSumWeek(wk, t) {
     return `<div class="ho-day ${d.slice(0, 7) !== hs.month ? "other" : ""} ${d === t ? "today" : ""} ${dow(d) === 0 ? "sun" : dow(d) === 6 ? "sat" : ""}" data-day="${d}" style="grid-column:${i + 1}">
       <div class="ho-sum-top"><span class="ho-dn">${+d.slice(8)}</span>${x.night ? `<em class="ho-occ" title="이날 밤 투숙 ${x.night}마리"><i>🏨 </i>${x.night}</em>` : ""}</div>
       ${x.ins.length || x.outs.length ? `<div class="ho-io">${x.ins.length ? `<span class="in">입실 ${x.ins.length}</span>` : ""}${x.outs.length ? `<span class="out">퇴실 ${x.outs.length}</span>` : ""}</div>` : ""}
-      <div class="ho-names">${shown.map(([b, k]) => `<button class="ho-nm ${b.kind === "K" ? "k" : "h"} ${k} ${b.id === hs.highlight ? "hl" : ""}" data-bk="${b.id}">${k === "in" ? "▸" : k === "out" ? "◂" : ""}${esc(b.label)}${svcText(b) ? `<i class="ho-bang">!</i>` : ""}</button>`).join("")}
+      <div class="ho-names">${shown.map(([b, k]) => `<button class="ho-nm ${b.kind === "K" ? "k" : "h"} ${k} ${b.id === hs.highlight ? "hl" : ""}" data-bk="${b.id}">${k === "in" ? "▸" : k === "out" ? "◂" : ""}${esc(labelShow(b))}${svcText(b) ? `<i class="ho-bang">!</i>` : ""}</button>`).join("")}
         ${more > 0 ? `<span class="ho-more d">+${more}건 더</span>` : ""}${order.length > 2 ? `<span class="ho-more m">+${order.length - 2}</span>` : ""}</div>
       <span class="ho-add" data-add="${d}" title="이 날 입실로 예약 추가">+ 예약</span></div>`;
   }).join("")}</div>`;
@@ -593,7 +633,7 @@ function openDay(d) {
   const x = dayInfo(d);
   const sec = (title, list, cls) => list.length ? `<h3 class="ho-sub">${title} <small class="muted">${list.length}건</small></h3>${list.map((b) => {
     const c = custById(b.customer_id);
-    return `<button class="ho-bk ${b.status} ${cls}" data-bk="${b.id}">${kindTag(b.kind)}<span class="grow"><b>${esc(b.label)}</b> <small class="muted">${esc(c?.owner_name || "")}</small>
+    return `<button class="ho-bk ${b.status} ${cls}" data-bk="${b.id}">${kindTag(b.kind)}<span class="grow"><b>${esc(labelShow(b))}</b> <small class="muted">${esc(c?.owner_name || "")}</small>
       <br><small class="muted">${md(b.check_in)}${b.in_time ? " " + b.in_time : ""} → ${md(b.check_out)}${b.out_time ? " " + b.out_time : ""}${svcText(b) ? " · " + esc(svcText(b)) : ""}</small></span></button>`;
   }).join("")}` : "";
   const { ov, close } = modal(`
@@ -659,7 +699,7 @@ function drawCalendar() {
       return `<h3 class="ho-sub">${m}월 호텔링 예약 <small class="muted">${list.filter(active).length}건</small></h3>` + (list.length ? `<div class="ho-table ho-mlist">
         <div class="ho-tr ho-th"><span>구분</span><span>강아지</span><span>입실</span><span>퇴실</span><span>숙박</span><span>정산</span><span>상태</span></div>
         ${list.map((b) => `<button class="ho-tr ${b.status} ${b.id === hs.highlight ? "hl" : ""}" data-bk="${b.id}">
-          <span>${kindTag(b.kind)}</span><span class="ho-pet">${esc(b.label)}</span>
+          <span>${kindTag(b.kind)}</span><span class="ho-pet">${esc(labelShow(b))}</span>
           <span>${md(b.check_in)}${b.in_time ? ` ${b.in_time}` : ""}</span>
           <span>${md(b.check_out)}${b.out_time ? ` ${b.out_time}` : ""}</span>
           <span class="muted">${nightsOf(b.check_in, b.check_out).length}박</span>
@@ -693,7 +733,7 @@ function drawCalendar() {
     const s = q.value.trim().toLowerCase();
     const res = s ? hs.bookings.filter((b) => nameHit(b.label, s) || petsOf(b.customer_id).some((p) => nameHit(p.name, s)))
       .sort((a, b) => b.check_in.localeCompare(a.check_in)).slice(0, 12) : [];
-    $("#cal-res").innerHTML = res.length ? res.map((b) => `<button data-go="${b.id}">${kindTag(b.kind)} ${esc(b.label)} <small>${md(b.check_in)} → ${md(b.check_out)}${b.status === "cancelled" ? " · 취소" : ""}</small></button>`).join("")
+    $("#cal-res").innerHTML = res.length ? res.map((b) => `<button data-go="${b.id}">${kindTag(b.kind)} ${esc(labelShow(b))} <small>${md(b.check_in)} → ${md(b.check_out)}${b.status === "cancelled" ? " · 취소" : ""}</small></button>`).join("")
       : s ? `<p class="muted small">없어요</p>` : "";
     $$("[data-go]", $("#cal-res")).forEach((x) => x.addEventListener("click", () => {
       const b = hs.bookings.find((k) => k.id === x.dataset.go);
@@ -710,7 +750,7 @@ function openStatList(kind, list) {
     <div class="rc-head"><b class="grow">${title} ${list.length}건</b><button class="btn ghost sm" data-close>닫기</button></div>
     <div class="rc-body">${list.length ? list.map((b) => {
       const c = custById(b.customer_id);
-      return `<button class="ho-bk ${b.status}" data-bk="${b.id}">${kindTag(b.kind)}<span class="grow"><b>${esc(b.label)}</b> <small class="muted">${esc(c?.owner_name || "")} ${esc(c?.phone || "")}</small>
+      return `<button class="ho-bk ${b.status}" data-bk="${b.id}">${kindTag(b.kind)}<span class="grow"><b>${esc(labelShow(b))}</b> <small class="muted">${esc(c?.owner_name || "")} ${esc(c?.phone || "")}</small>
         <br><small class="muted">${md(b.check_in)}${b.in_time ? " " + b.in_time : ""} → ${md(b.check_out)}${b.out_time ? " " + b.out_time : ""} · ${STATUS[b.status]}${svcText(b) ? " · " + svcText(b) : ""}</small></span></button>`;
     }).join("") : `<p class="muted">없어요</p>`}</div>`);
   $$("[data-bk]", ov).forEach((b) => b.addEventListener("click", () => { close(); openBooking(hs.bookings.find((x) => x.id === b.dataset.bk)); }));
@@ -754,18 +794,59 @@ function openBooking(bk, preset = {}) {
       <span class="grow"></span>
       <button class="btn ghost sm" data-close>닫기</button><button class="btn primary sm" id="bk-save">저장</button></div>`, "wide");
 
+  // 명단에 없는 아이 바로 등록: 이름(동명이면 견종)만 적고 예약 → 보호자·상담지는 나중에 고객 관리에서 채움
+  let qn = null; // [{ name, breed }]
+  const syncQuickLabel = () => { $("#bk-label", ov).value = qn.map((p) => p.name.trim()).filter(Boolean).join("/"); drawFee(); };
+  const drawQuick = () => {
+    $("#bk-sub", ov).textContent = "바로 등록 · 보호자 정보는 나중에";
+    $("#bk-cust", ov).innerHTML = `<div class="ho-quick">
+      <div class="ho-quick-head"><b>⚡ 바로 등록</b><small class="muted">이름만 적고 저장하면 돼요. 보호자·상담지는 고객 관리에서 나중에 채워요.</small></div>
+      ${qn.map((p, i) => {
+        const dup = nameCount(p.name) > 0;
+        return `<div class="ho-qrow" data-qi="${i}"><input data-q="name" placeholder="강아지 이름" value="${esc(p.name)}">
+          <input data-q="breed" class="${dup && !p.breed.trim() ? "must" : ""}" placeholder="${dup ? "견종 (동명 · 꼭)" : "견종 (선택)"}" value="${esc(p.breed)}">
+          ${qn.length > 1 ? `<button type="button" class="btn ghost mini" data-qrm="${i}">×</button>` : ""}
+          ${dup ? `<small class="ho-dup need">같은 이름 아이가 있어요 — 견종을 꼭 적어 주세요</small>` : ""}</div>`;
+      }).join("")}
+      <div class="row"><button type="button" class="btn ghost mini" id="bk-qadd">+ 아이 추가 (다견)</button><button type="button" class="btn ghost mini" id="bk-qback">검색으로 돌아가기</button></div></div>`;
+    $$(".ho-qrow", ov).forEach((r) => $$("[data-q]", r).forEach((el) => {
+      el.addEventListener("input", () => { qn[+r.dataset.qi][el.dataset.q] = el.value; if (el.dataset.q === "name") syncQuickLabel(); });
+      // 이름을 적는 대로 동명 아이인지 확인 (다시 그리지 않고 그 줄만 바꿈 → 입력 중인 칸이 그대로)
+      el.addEventListener("input", () => markQ(r));
+    }));
+    $$("[data-qrm]", ov).forEach((x) => x.addEventListener("click", () => { qn.splice(+x.dataset.qrm, 1); syncQuickLabel(); drawQuick(); }));
+    $("#bk-qadd", ov).addEventListener("click", () => { qn.push({ name: "", breed: "" }); drawQuick(); $$('.ho-qrow [data-q="name"]', ov).at(-1)?.focus(); });
+    $("#bk-qback", ov).addEventListener("click", () => { qn = null; $("#bk-label", ov).value = ""; drawFee(); drawCust(); });
+  };
+  function markQ(r) {
+    const p = qn[+r.dataset.qi], dup = nameCount(p.name) > 0, br = $('[data-q="breed"]', r);
+    br.classList.toggle("must", dup && !p.breed.trim());
+    br.placeholder = dup ? "견종 (동명 · 꼭)" : "견종 (선택)";
+    $(".ho-dup", r)?.remove();
+    if (dup) r.insertAdjacentHTML("beforeend", `<small class="ho-dup need">같은 이름 아이가 있어요 — 견종을 꼭 적어 주세요</small>`);
+  }
+  const startQuick = (name = "") => {
+    qn = String(name).split("/").map((x) => ({ name: x.trim(), breed: "" })).filter((x, i) => x.name || i === 0);
+    syncQuickLabel(); drawQuick();
+    const empty = $$('.ho-qrow [data-q]', ov).find((el) => el.classList.contains("must") || !el.value);
+    (empty || $('.ho-qrow [data-q="name"]', ov))?.focus();
+  };
+
   // 고객 고르기
   const drawCust = () => {
+    if (qn) return drawQuick();
     if (qd) {
-      $("#bk-cust", ov).innerHTML = `<div class="ho-picked">${kindTag("K")} <b>${esc(baseName(qd.name))}</b> <small class="muted">유치원 명단에서 불러옴 · 저장하면 호텔링 고객으로도 등록돼요</small></div>`;
+      $("#bk-cust", ov).innerHTML = `<div class="ho-picked">${kindTag("K")} <b>${esc(dogShow(qd))}</b> <small class="muted">유치원 명단에서 불러옴 · 저장하면 호텔링 고객으로도 등록돼요</small></div>`;
       return;
     }
     const c = custById(b.customer_id);
     $("#bk-sub", ov).textContent = c ? `${c.owner_name || ""} ${c.phone || ""}` : "";
     $("#bk-cust", ov).innerHTML = c
-      ? `<div class="ho-picked">${kindTag(c.kind)} <b>${esc(custLabel(c))}</b> <small class="muted">${esc(c.owner_name || "")} ${esc(c.phone || "")}</small><button type="button" class="btn ghost mini" id="bk-chg">바꾸기</button></div>`
+      ? `<div class="ho-picked">${kindTag(c.kind)} <b>${esc(custShow(c))}</b> <small class="muted">${esc(c.owner_name || "")} ${esc(c.phone || "")}</small><button type="button" class="btn ghost mini" id="bk-chg">바꾸기</button></div>`
       : `<div class="ho-csearch"><input id="bk-cq" type="search" placeholder="강아지·보호자 이름, 전화번호" autocomplete="off"><div id="bk-cres"></div></div>
-         <button type="button" class="btn ghost mini" id="bk-newc">+ 새 고객 등록</button>`;
+         <div class="row"><button type="button" class="btn primary mini" id="bk-quick">⚡ 명단에 없는 아이 바로 등록</button>
+         <button type="button" class="btn ghost mini" id="bk-newc">+ 상담지로 새 고객 등록</button></div>`;
+    $("#bk-quick", ov)?.addEventListener("click", () => startQuick($("#bk-cq", ov)?.value.trim() || ""));
     $("#bk-chg", ov)?.addEventListener("click", () => { b.customer_id = null; drawCust(); });
     $("#bk-newc", ov)?.addEventListener("click", () => { close(); openCustomerForm(null); });
     const q = $("#bk-cq", ov);
@@ -774,9 +855,11 @@ function openBooking(bk, preset = {}) {
       const res = s ? hs.customers.filter((c) => matches(c, s)).slice(0, 8) : [];
       const linkedIds = new Set(hs.pets.map((p) => p.dog_id).filter(Boolean));
       const roster = s ? C.dogs.filter((d) => !d.auto && !linkedIds.has(d.id) && nameHit(d.name, s)).slice(0, 6) : [];
-      $("#bk-cres", ov).innerHTML = res.map((c) => `<button type="button" data-pc="${c.id}">${kindTag(c.kind)} ${esc(custLabel(c))} <small>${esc(c.owner_name || "")} ${esc(c.phone || "")}</small></button>`).join("")
-        + roster.map((d) => `<button type="button" data-pd="${d.id}">${kindTag("K")} ${esc(d.name)} <small>유치원 명단</small></button>`).join("")
-        || (s ? `<p class="muted small">없어요. ‘새 고객 등록’을 눌러 주세요.</p>` : "");
+      $("#bk-cres", ov).innerHTML = res.map((c) => `<button type="button" data-pc="${c.id}">${kindTag(c.kind)} ${esc(custShow(c))} <small>${esc(c.owner_name || "")} ${esc(c.phone || "")}</small></button>`).join("")
+        + roster.map((d) => `<button type="button" data-pd="${d.id}">${kindTag("K")} ${esc(dogShow(d))} <small>유치원 명단</small></button>`).join("")
+        || (s ? `<p class="muted small">명단에 없어요.</p>` : "");
+      if (s) $("#bk-cres", ov).insertAdjacentHTML("beforeend", `<button type="button" class="ho-qgo" data-qgo>⚡ ‘${esc(s)}’ 바로 등록하고 예약 <small>보호자 정보는 나중에</small></button>`);
+      $("[data-qgo]", ov)?.addEventListener("click", () => startQuick(s));
       $$("[data-pd]", ov).forEach((x) => x.addEventListener("click", () => { close(); openBooking(null, { ...preset, quickDog: C.dogs.find((d) => d.id === x.dataset.pd), quick: true, check_in: b.check_in, check_out: b.check_out }); }));
       $$("[data-pc]", ov).forEach((x) => x.addEventListener("click", () => {
         const c = custById(x.dataset.pc);
@@ -874,10 +957,28 @@ function openBooking(bk, preset = {}) {
       else {
         const { data: cu, error } = await C.sb.from("hotel_customers").insert({ kind: "K" }).select().single();
         if (error) { toast("저장하지 못했어요"); return; }
-        const pr = await C.sb.from("hotel_pets").insert({ customer_id: cu.id, name: baseName(qd.name), breed: breedOf(qd.name) || null, dog_id: qd.id });
+        let breed = dogBreed(qd);
+        if (!breed && nameCount(qd.name, { dogId: qd.id }) > 0) {
+          breed = (prompt(`‘${baseName(qd.name)}’ 이름의 아이가 또 있어요. 견종을 적어 주세요`) || "").trim();
+          if (!breed) { await C.sb.from("hotel_customers").delete().eq("id", cu.id); toast("견종을 적어야 저장돼요"); return; }
+        }
+        const pr = await C.sb.from("hotel_pets").insert({ customer_id: cu.id, name: baseName(qd.name), breed, dog_id: qd.id });
         if (pr.error) { await C.sb.from("hotel_customers").delete().eq("id", cu.id); toast("저장하지 못했어요"); return; }
         b.customer_id = cu.id;
       }
+    }
+    if (qn && !b.customer_id) {
+      const list = qn.map((p) => ({ name: p.name.trim(), breed: p.breed.trim() })).filter((p) => p.name);
+      if (!list.length) { toast("강아지 이름을 적어 주세요"); $('.ho-qrow [data-q="name"]', ov)?.focus(); return; }
+      const nb = list.find((p) => !p.breed && nameCount(p.name) > 0);
+      if (nb) { drawQuick(); toast(`‘${nb.name}’ 이름의 아이가 또 있어요. 견종을 꼭 적어 주세요`, 4000); $(".ho-qrow input.must", ov)?.focus(); return; }
+      if (!b.check_in || !b.check_out || b.check_out < b.check_in) { toast("입실·퇴실 날짜를 확인해 주세요"); return; }
+      const { data: cu, error } = await C.sb.from("hotel_customers").insert({ kind: b.kind }).select().single();
+      if (error) { toast("저장하지 못했어요"); return; }
+      const pr = await C.sb.from("hotel_pets").insert(list.map((p, i) => ({ customer_id: cu.id, name: p.name, breed: p.breed || null, sort: i })));
+      if (pr.error) { await C.sb.from("hotel_customers").delete().eq("id", cu.id); toast("저장하지 못했어요"); return; }
+      b.customer_id = cu.id;
+      if (!b.label) b.label = list.map((p) => p.name).join("/");
     }
     if (!b.customer_id) { toast("고객을 골라 주세요"); return; }
     if (!b.label) { toast("강아지 이름을 적어 주세요"); return; }
