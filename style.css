@@ -1335,3 +1335,15 @@ input, select, textarea { max-width: 100%; min-width: 0; }
 .pk-fx { font-style:normal; font-size:11px; margin-left:2px; }
 .pk-fxtag { display:inline-block; font-size:11px; font-weight:800; color:var(--navy); background:#e8eef8; border-radius:999px; padding:0 8px; margin-left:4px; vertical-align:1px; }
 .pk-f > span small { display:block; font-weight:500; }
+
+/* 픽드랍 동선 */
+.pk-area { display:block; font-size:10px; font-weight:800; color:var(--muted); margin:6px 2px 2px; letter-spacing:-.02em; }
+.pk-area:first-child { margin-top:0; }
+.pk-rt-area { font-size:12px; font-weight:800; color:var(--navy); margin:14px 2px 6px; }
+.pk-rt-area:first-child { margin-top:0; }
+.pk-rt { display:flex; align-items:center; gap:8px; background:#faf8f3; border-radius:12px; padding:8px 10px; margin-bottom:5px; }
+.pk-rt em { font-style:normal; font-weight:800; color:var(--navy); width:22px; text-align:right; flex:none; }
+.pk-rt small { display:block; font-size:12px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+.pk-rt .grow { min-width:0; }
+.pk-rt-in { width:120px !important; flex:none; padding:6px 8px !important; font-size:13px; }
+@media (max-width:600px){ .pk-rt-in { width:84px !important; } }
