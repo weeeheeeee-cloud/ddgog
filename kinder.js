@@ -136,7 +136,7 @@ function drawMembers() {
     ${bdays.length ? `<div class="kd-bday">🎂 오늘 생일: ${bdays.map((m) => `<button data-open="${m.id}">${esc(m.name)}</button>`).join(", ")}</div>` : ""}
     <div class="kd-tools">
       <input id="kd-q" class="ho-search" type="search" placeholder="강아지 이름 · 보호자 이름 · 전화번호 · 견종" value="${esc(ks.q)}" autocomplete="off">
-      ${gone ? `<label class="kd-gone"><input type="checkbox" id="kd-showgone" ${ks.showGone ? "checked" : ""}> 그만 다니는·휴면 아이 ${gone}마리 보기</label>` : ""}
+      ${gone ? `<label class="kd-gone"><input type="checkbox" id="kd-showgone" ${ks.showGone ? "checked" : ""}> 그만 다니는·휴면 아이만 보기 (${gone}마리)</label>` : ""}
     </div>
     <div id="kd-list"></div>
   </div>`;
@@ -157,7 +157,7 @@ function matches(m, q) {
 
 async function drawList() {
   const box = $("#kd-list");
-  const pool = ks.members.filter((m) => live(m) || ks.showGone);
+  const pool = ks.members.filter((m) => (ks.showGone ? !live(m) : live(m))); // 체크하면 휴면·그만 다니는 아이만
   const list = pool.filter((m) => matches(m, ks.q));
   $("#kd-count").textContent = ks.q ? `${list.length} / ${pool.length}마리` : `${pool.length}마리`;
   if (!ks.members.length) {
