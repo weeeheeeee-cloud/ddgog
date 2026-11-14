@@ -293,7 +293,7 @@ async function save(w, days, memo, change) {
   $("#err").classList.remove("on");
   try {
     const r = await call({ action: "save", week_start: w.start, days, memo });
-    Object.assign(w, { saved: true, days: r.days, memo: r.memo || "", updated_at: new Date().toISOString() });
+    Object.assign(w, { saved: true, fixed: false, days: r.days, memo: r.memo || "", updated_at: new Date().toISOString() });
     delete w.draftMemo;
     pick = new Set(r.days);
     editing = false;
