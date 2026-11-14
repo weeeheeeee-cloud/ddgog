@@ -111,7 +111,8 @@ function draw() {
   }
   const answered = new Set(ps.reqs.map((r) => r.dog_id));
   const missing = ps.dogs.filter((d) => d.active && d.kind !== "occasional" && !answered.has(d.id)); // 가끔 오는 아이는 신청 안 해도 안 띄움
-  const occ = ps.dogs.filter((d) => d.active && d.kind === "occasional" && !answered.has(d.id)); // 가끔(1회성) 왔던 아이 — 아래 따로
+  const occ = ps.dogs.filter((d) => d.active && d.kind === "occasional"); // 가끔(1회성) 아이는 모두 아래에 따로 (이번 주 오는 아이는 요일 표시)
+  const occDays = (d) => (reqOf(d.id)?.days || []).map((x) => DOW[x]).join("·");
 
   root.innerHTML = `
     <div class="pk-head card">
@@ -135,7 +136,7 @@ function draw() {
         <div class="pk-col-h"><b>${DOW[d]}</b><small>${md(dt)}</small><em>${x.on.length}</em></div>
         <div class="pk-col-b">
           ${x.on.map(({ r, dog, added }, j) => `<button class="pk-n ${added ? "add" : ""} ${r.memo_changed_at ? "memo" : ""}" data-dog="${dog.id}" title="${added ? `${when(added)} 추가` : ""}">
-            <span>${esc(dog.name)}</span>${dog.kind === "occasional" ? `<i class="pk-oc" title="가끔 오는 아이">가끔</i>` : ""}${r.fixed ? `<i class="pk-fx" title="고정">📌</i>` : ""}${r.memo ? `<i class="pk-mi ${r.memo_changed_at ? "new" : ""}" data-memo="${dog.id}" aria-label="메모 보기">📝</i>` : ""}</button>`).join("")}
+            <span>${esc(dog.name)}</span>${modeTag((r.day_mode || {})[d])}${dog.kind === "occasional" ? `<i class="pk-oc" title="가끔 오는 아이">가끔</i>` : ""}${r.fixed ? `<i class="pk-fx" title="고정">📌</i>` : ""}${r.memo ? `<i class="pk-mi ${r.memo_changed_at ? "new" : ""}" data-memo="${dog.id}" aria-label="메모 보기">📝</i>` : ""}</button>`).join("")}
           ${x.cancelled.map(({ dog, at }) => `<button class="pk-n x" data-dog="${dog.id}" title="${when(at)} 취소"><span>${esc(dog.name)}</span></button>`).join("")}
         </div>
       </div>`;
@@ -147,8 +148,8 @@ function draw() {
       ${!ps.dogs.length ? `<p class="muted small">${C.owner ? "‘아이 관리’에서 픽드랍 이용하는 아이를 먼저 등록해 주세요." : "아직 등록된 아이가 없어요."}</p>`
         : missing.length ? `<div class="pk-chips">${missing.map((d) => `<button data-dog="${d.id}">${esc(d.name)}</button>`).join("")}</div>`
         : `<p class="muted small">모두 신청했어요 👍</p>`}
-      ${occ.length ? `<div class="pk-occ"><h3>가끔(1회성) 왔던 아이 <small class="muted">${occ.length}마리 · 이번에 오면 눌러서 요일을 넣어 주세요</small></h3>
-        <div class="pk-chips">${occ.map((d) => `<button data-dog="${d.id}">${esc(d.name)}</button>`).join("")}</div></div>` : ""}
+      ${occ.length ? `<div class="pk-occ"><h3>가끔(1회성) 왔던 아이 <small class="muted">${occ.length}마리 · 이번 주에 오면 눌러서 요일을 넣어 주세요</small></h3>
+        <div class="pk-chips">${occ.map((d) => `<button data-dog="${d.id}" class="${occDays(d) ? "on" : ""}">${esc(d.name)}${occDays(d) ? ` <small>${occDays(d)}</small>` : ""}</button>`).join("")}</div></div>` : ""}
     </section>
     <p class="small pk-legend"><b>월요일부터 바뀐 것</b> &nbsp;<em class="pk-tag add">초록 = 추가</em> <em class="pk-tag x">빨강 = 취소</em> <em class="pk-tag memo">보라 = 메모 바뀜</em> &nbsp;· 📝 메모 있음(누르면 보여요)</p>`;
 
@@ -226,6 +227,7 @@ function openDog(id) {
       <div class="pk-kindrow"><span>구분</span><div class="pk-seg" id="pk-kind">${kindBtns(dog.kind === "occasional" ? "occasional" : "regular")}</div><small class="muted pk-kind-msg"></small></div>
       <h3 class="pk-h3">요일 ${r?.fixed ? `<small class="muted">📌 고정 요일 (${fixedText(dog)})</small>` : r ? "" : `<small class="muted">아직 신청 안 함</small>`}</h3>
       <div class="pk-pick">${[1, 2, 3, 4, 5, 6, 7].map((d) => `<button data-p="${d}" class="${days.includes(d) ? "on" : ""} ${(r?.day_added || {})[d] ? "add" : ""}">${DOW[d]}</button>`).join("")}</div>
+      <div class="pk-modes" id="pk-modes"></div>
       <h3 class="pk-h3">메모</h3>
       <textarea id="pk-memo" maxlength="300" rows="3" placeholder="예) 9시 전에 와 주세요">${esc(r?.memo || "")}</textarea>
       ${r?.memo_changed_at ? `<p class="small"><em class="pk-tag memo">메모 바뀜 ${when(r.memo_changed_at)}</em></p>` : ""}
@@ -242,7 +244,10 @@ function openDog(id) {
       <button class="btn primary sm" data-save>요일·메모 저장</button>
     </div>`);
   const pick = new Set(days);
-  $$("[data-p]", ov).forEach((b) => b.addEventListener("click", () => { const d = +b.dataset.p; pick.has(d) ? pick.delete(d) : pick.add(d); b.classList.toggle("on", pick.has(d)); }));
+  const mode = { ...(r?.day_mode || {}) };
+  const drawModes = () => drawModeRows($("#pk-modes", ov), pick, mode);
+  drawModes();
+  $$("[data-p]", ov).forEach((b) => b.addEventListener("click", () => { const d = +b.dataset.p; pick.has(d) ? pick.delete(d) : pick.add(d); b.classList.toggle("on", pick.has(d)); drawModes(); }));
   $("[data-copy]", ov)?.addEventListener("click", () => copyInvite(dog));
   // 정기 / 가끔: 누르면 바로 저장
   $$("#pk-kind [data-kind]", ov).forEach((b) => b.addEventListener("click", async () => {
@@ -258,7 +263,7 @@ function openDog(id) {
   bindSend(ov);
   $("[data-save]", ov).addEventListener("click", async (e) => {
     e.target.disabled = true;
-    const { data, error } = await C.sb.functions.invoke("pd", { body: { action: "save", dog_id: dog.id, week_start: ps.week, days: [...pick], memo: $("#pk-memo", ov).value } });
+    const { data, error } = await C.sb.functions.invoke("pd", { body: { action: "save", dog_id: dog.id, week_start: ps.week, days: [...pick], memo: $("#pk-memo", ov).value, day_mode: Object.fromEntries([...pick].filter((d) => mode[d]).map((d) => [d, mode[d]])) } });
     if (error || data?.error) { toast(data?.error || "저장하지 못했어요"); e.target.disabled = false; return; }
     toast("저장했어요");
     close();
@@ -267,6 +272,14 @@ function openDog(id) {
 }
 
 /* ================= 정기 / 가끔 ================= */
+// 요일별 픽업만(p) / 드랍만(d) — 없으면 픽업·드랍 둘 다
+const MODE = { p: "픽업만", d: "드랍만" };
+const modeTag = (m) => (m ? `<i class="pk-md ${m}">${MODE[m]}</i>` : "");
+function drawModeRows(box, pick, mode) {
+  const ds = [...pick].sort((a, b) => a - b);
+  box.innerHTML = ds.length ? ds.map((d) => `<div class="pk-mode"><b>${DOW[d]}</b>${[["", "픽업·드랍"], ["p", "픽업만"], ["d", "드랍만"]].map(([v, l]) => `<button type="button" data-md="${d}" data-v="${v}" class="${(mode[d] || "") === v ? "on" : ""}">${l}</button>`).join("")}</div>`).join("") : "";
+  $$("[data-md]", box).forEach((b) => b.addEventListener("click", () => { const d = b.dataset.md; if (b.dataset.v) mode[d] = b.dataset.v; else delete mode[d]; drawModeRows(box, pick, mode); }));
+}
 const kindBtns = (k) => [["regular", "정기"], ["occasional", "가끔 (1회성)"]].map(([v, l]) => `<button type="button" data-kind="${v}" class="${k === v ? "on" : ""}">${l}</button>`).join("");
 const bindKind = (ov) => $$("[data-kind]", ov).forEach((b) => b.addEventListener("click", () => { $$("[data-kind]", ov).forEach((x) => x.classList.toggle("on", x === b)); }));
 

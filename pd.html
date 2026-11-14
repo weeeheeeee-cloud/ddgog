@@ -141,6 +141,19 @@
   body { overflow-x:clip; }
   input:not([type="checkbox"]):not([type="radio"]), select, textarea { font-size:16px !important; max-width:100%; min-width:0; }
   img, video, canvas { max-width:100%; }
+
+  /* 픽업만 / 드랍만 */
+  .modes { margin-top:12px; }
+  .modes-h { font-size:13px; font-weight:800; color:var(--navy); margin:0 0 6px; }
+  .modes-h small { font-weight:500; color:var(--muted); }
+  .mrow { display:flex; align-items:center; gap:6px; margin-bottom:6px; flex-wrap:wrap; }
+  .mrow b { width:26px; font-weight:900; color:var(--navy); }
+  .mrow button { border:1.5px solid #e6e1d6; background:#fff; border-radius:999px; padding:7px 12px; font-size:14px; font-weight:700; color:var(--muted); }
+  .mrow button.on { background:var(--navy); border-color:var(--navy); color:#fff; }
+  .mrow button.m-p.on { background:#2563eb; border-color:#2563eb; }
+  .mrow button.m-d.on { background:#7c3aed; border-color:#7c3aed; }
+  .conf-days em.md { display:block; font-style:normal; font-size:9.5px; font-weight:800; margin-top:2px; }
+  .ask-days span small { display:block; font-size:10px; font-weight:700; opacity:.85; }
 </style>
 </head>
 <body>
@@ -182,6 +195,9 @@ function showErr(m) { const e = $("#err"); e.textContent = m; e.classList.add("o
 let S = null;     // { dog, today, weeks }
 let wi = 0;       // 고른 주
 let pick = new Set();
+let pmode = {}; // 요일별 픽업만(p)/드랍만(d)
+const MODE = { p: "픽업만", d: "드랍만" };
+const dayModeList = (days, m) => days.map((d) => DOW[d] + (m?.[d] ? `(${MODE[m[d]]})` : "")).join("·");
 let editing = false; // 확정된 주를 고치는 중
 
 const datesOf = (w) => [1, 2, 3, 4, 5, 6, 7].map((d) => addDays(w.start, d - 1));
@@ -197,7 +213,7 @@ function render() {
   const w = S.weeks[wi];
   $("#body").className = "";
   if (w.saved && !editing) renderConfirmed(w); else renderEdit(w);
-  document.querySelectorAll("[data-w]").forEach((b) => b.onclick = () => { wi = +b.dataset.w; editing = false; pick = new Set(S.weeks[wi].days); $("#err").classList.remove("on"); render(); });
+  document.querySelectorAll("[data-w]").forEach((b) => b.onclick = () => { wi = +b.dataset.w; editing = false; pick = new Set(S.weeks[wi].days); pmode = { ...(S.weeks[wi].day_mode || {}) }; $("#err").classList.remove("on"); render(); });
 }
 
 // 확정된 주: 읽기 화면 + 변경 버튼
@@ -206,13 +222,13 @@ function renderConfirmed(w) {
   $("#body").innerHTML = `${weekTabs()}
     <div class="conf">
       <div class="conf-top"><i>✓</i><span>픽드랍 확정<small>${w.fixed ? "📌 매주 고정 요일이에요" : `${stamp(w.updated_at)} 확정`}</small></span></div>
-      <div class="conf-days">${dates.map((dt, i) => `<span class="${w.days.includes(i + 1) ? "on" : ""} ${i >= 5 ? "we" : ""}"><b>${DOW[i + 1]}</b><small>${md(dt)}</small></span>`).join("")}</div>
-      <p class="conf-sum">${w.days.length ? `<b>${dayList(w.days)}</b> 픽드랍해요` : "이 주는 픽드랍이 <b>없어요</b>"}</p>
+      <div class="conf-days">${dates.map((dt, i) => `<span class="${w.days.includes(i + 1) ? "on" : ""} ${i >= 5 ? "we" : ""}"><b>${DOW[i + 1]}</b><small>${md(dt)}</small>${w.days.includes(i + 1) && w.day_mode?.[i + 1] ? `<em class="md ${w.day_mode[i + 1]}">${MODE[w.day_mode[i + 1]]}</em>` : ""}</span>`).join("")}</div>
+      <p class="conf-sum">${w.days.length ? `<b>${dayModeList(w.days, w.day_mode)}</b> 픽드랍해요` : "이 주는 픽드랍이 <b>없어요</b>"}</p>
       ${w.memo ? `<p class="conf-memo">📝 ${esc(w.memo)}</p>` : ""}
     </div>
     <button id="edit" class="save ghost">요일 변경하기</button>
     <div class="kakao"><b>💬 변경이 생기면</b>이 링크에서 직접 바꾸실 수 있어요.<br>${KAKAO}</div>`;
-  $("#edit").onclick = () => { editing = true; pick = new Set(w.days); render(); };
+  $("#edit").onclick = () => { editing = true; pick = new Set(w.days); pmode = { ...(w.day_mode || {}) }; render(); };
 }
 
 // 고르기 화면 (처음 신청 / 변경)
@@ -228,13 +244,14 @@ function renderEdit(w) {
       const past = isThis && dt < S.today;
       return `<button class="d ${d >= 6 ? "we" : ""} ${pick.has(d) ? "on" : ""}" data-d="${d}" ${past ? "disabled" : ""}><b>${DOW[d]}</b><small>${md(dt)}</small></button>`;
     }).join("")}</div>
+    <div class="modes" id="modes"></div>
     <div class="quick">
       <button data-q="wk">월~금 모두</button>
       <button data-q="none">이번엔 필요 없어요</button>
     </div>
 
     <h2>메모 <small>필요할 때만</small></h2>
-    <textarea id="memo" maxlength="300" placeholder="예) 수요일은 9시 전에 와 주세요 / 금요일은 드랍만 해 주세요">${esc(change ? w.memo : (w.draftMemo ?? w.memo))}</textarea>
+    <textarea id="memo" maxlength="300" placeholder="예) 수요일은 9시 전에 와 주세요">${esc(change ? w.memo : (w.draftMemo ?? w.memo))}</textarea>
 
     <button id="save" class="save">${change ? "변경 확정하기" : "확정하기"}</button>
     ${change ? `<button id="cancel" class="link-btn">변경 안 하고 돌아가기</button>` : ""}
@@ -243,7 +260,13 @@ function renderEdit(w) {
     <p class="note">🐾 <b>매주 일요일 오후 6시까지</b> 다음 주 요일을 확정해 주세요.<br>확정한 뒤에도 이 링크에서 언제든 예약·수정할 수 있어요. 바꾸시면 <b>카톡으로도 꼭</b> 알려 주세요.</p>`;
 
   const pastSet = new Set(dates.map((dt, i) => (isThis && dt < S.today ? i + 1 : 0)).filter(Boolean));
-  const updSel = () => { $("#sel").textContent = pick.size ? `고른 요일: ${dayList([...pick].sort())}` : "고른 요일이 없어요 (픽드랍 안 함)"; };
+  const updSel = () => { $("#sel").textContent = pick.size ? `고른 요일: ${dayModeList([...pick].sort(), pmode)}` : "고른 요일이 없어요 (픽드랍 안 함)"; drawModes(); };
+  // 고른 요일마다 픽업·드랍 / 픽업만 / 드랍만
+  function drawModes() {
+    const ds = [...pick].sort((a, b) => a - b).filter((d) => !pastSet.has(d));
+    $("#modes").innerHTML = ds.length ? `<p class="modes-h">요일마다 고를 수 있어요 <small>(기본은 픽업·드랍 둘 다)</small></p>` + ds.map((d) => `<div class="mrow"><b>${DOW[d]}</b>${[["", "픽업·드랍"], ["p", "픽업만"], ["d", "드랍만"]].map(([v, l]) => `<button type="button" data-md="${d}" data-v="${v}" class="${(pmode[d] || "") === v ? "on" : ""} ${v ? "m-" + v : ""}">${l}</button>`).join("")}</div>`).join("") : "";
+    document.querySelectorAll("[data-md]").forEach((b) => b.onclick = () => { const d = b.dataset.md; if (b.dataset.v) pmode[d] = b.dataset.v; else delete pmode[d]; updSel(); });
+  }
   const keepMemo = () => { w.draftMemo = $("#memo").value; };
   updSel();
   document.querySelectorAll(".d").forEach((b) => b.onclick = () => {
@@ -255,7 +278,7 @@ function renderEdit(w) {
   document.querySelector('[data-q="wk"]').onclick = () => { keepMemo(); [1, 2, 3, 4, 5].forEach((d) => !pastSet.has(d) && pick.add(d)); renderEdit(w); };
   document.querySelector('[data-q="none"]').onclick = () => { keepMemo(); [...pick].forEach((d) => !pastSet.has(d) && pick.delete(d)); renderEdit(w); };
   $("#save").onclick = () => askConfirm(w, $("#memo").value);
-  $("#cancel")?.addEventListener("click", () => { editing = false; delete w.draftMemo; pick = new Set(w.days); render(); });
+  $("#cancel")?.addEventListener("click", () => { editing = false; delete w.draftMemo; pick = new Set(w.days); pmode = { ...(w.day_mode || {}) }; render(); });
 }
 
 // 확정 전 한 번 더 확인
@@ -265,13 +288,14 @@ function askConfirm(w, memo) {
   const added = days.filter((d) => !w.days.includes(d));
   const removed = w.days.filter((d) => !days.includes(d));
   const memoChanged = (w.memo || "") !== memo.trim();
-  if (change && !added.length && !removed.length && !memoChanged) { editing = false; render(); return; }
+  const modeChanged = days.some((d) => (w.day_mode?.[d] || "") !== (pmode[d] || ""));
+  if (change && !added.length && !removed.length && !memoChanged && !modeChanged) { editing = false; render(); return; }
   const ov = document.createElement("div");
   ov.className = "ask";
   ov.innerHTML = `<div class="ask-box">
     <h3>${change ? "이대로 변경할까요?" : "이대로 확정할까요?"}</h3>
     <p class="ask-week">${wi === 0 ? "이번 주" : "다음 주"} · ${md(w.start)} ~ ${md(addDays(w.start, 6))}</p>
-    <div class="ask-days">${days.length ? days.map((d) => `<span class="${added.includes(d) && change ? "add" : ""}">${DOW[d]}</span>`).join("") : `<em>픽드랍 없음</em>`}</div>
+    <div class="ask-days">${days.length ? days.map((d) => `<span class="${added.includes(d) && change ? "add" : ""}">${DOW[d]}${pmode[d] ? `<small>${MODE[pmode[d]]}</small>` : ""}</span>`).join("") : `<em>픽드랍 없음</em>`}</div>
     ${change && (added.length || removed.length) ? `<p class="ask-diff">${added.length ? `<span class="p">+ ${dayList(added)} 추가</span>` : ""}${removed.length ? `<span class="m">− ${dayList(removed)} 빠짐</span>` : ""}</p>` : ""}
     ${memo.trim() ? `<p class="ask-memo">📝 ${esc(memo.trim())}</p>` : ""}
     ${change ? `<div class="kakao"><b>💬 잊지 마세요</b>${KAKAO}</div>` : ""}
@@ -292,8 +316,9 @@ function askConfirm(w, memo) {
 async function save(w, days, memo, change) {
   $("#err").classList.remove("on");
   try {
-    const r = await call({ action: "save", week_start: w.start, days, memo });
-    Object.assign(w, { saved: true, fixed: false, days: r.days, memo: r.memo || "", updated_at: new Date().toISOString() });
+    const r = await call({ action: "save", week_start: w.start, days, memo, day_mode: Object.fromEntries(days.filter((d) => pmode[d]).map((d) => [d, pmode[d]])) });
+    Object.assign(w, { saved: true, fixed: false, days: r.days, memo: r.memo || "", day_mode: r.day_mode || {}, updated_at: new Date().toISOString() });
+    pmode = { ...(r.day_mode || {}) };
     delete w.draftMemo;
     pick = new Set(r.days);
     editing = false;
@@ -311,8 +336,8 @@ function showDone(w, change) {
   ov.innerHTML = `<div class="ask-box done-box">
     <div class="done-ic">✓</div>
     <h3>${change ? "변경했어요" : "확정했어요"}</h3>
-    <p class="ask-week">${wi === 0 ? "이번 주" : "다음 주"} 픽드랍: <b>${dayList(w.days)}</b></p>
-    ${change ? `<div class="kakao strong"><b>💬 지금 카톡으로 알려 주세요</b>바뀐 내용을 댕겨올개 카톡으로 꼭 메시지 남겨 주세요.<br>(예: “${esc(S.dog.name)} ${dayList(w.days)}로 변경했어요”)</div>`
+    <p class="ask-week">${wi === 0 ? "이번 주" : "다음 주"} 픽드랍: <b>${dayModeList(w.days, w.day_mode)}</b></p>
+    ${change ? `<div class="kakao strong"><b>💬 지금 카톡으로 알려 주세요</b>바뀐 내용을 댕겨올개 카톡으로 꼭 메시지 남겨 주세요.<br>(예: “${esc(S.dog.name)} ${dayModeList(w.days, w.day_mode)}로 변경했어요”)</div>`
       : `<p class="ask-memo">바뀌면 이 링크에서 다시 고치시고, 카톡으로도 알려 주세요.</p>`}
     <div class="ask-btns"><button class="yes">알겠어요</button></div>
   </div>`;
@@ -333,6 +358,7 @@ async function openDog(t) {
     wi = S.weeks.length > 1 ? 1 : 0; // 링크는 항상 다음 주부터 보여 줌 (이번 주는 위 탭에서 볼 수 있음)
     editing = false;
     pick = new Set(S.weeks[wi].days);
+    pmode = { ...(S.weeks[wi].day_mode || {}) };
     render();
     if (G) $("#body").insertAdjacentHTML("afterbegin", `<button class="back" id="back">‹ 다른 아이</button>`), $("#back").onclick = startGroup;
   } catch (e) {

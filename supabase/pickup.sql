@@ -87,3 +87,6 @@ alter table public.pd_dogs add column if not exists dormant boolean not null def
 
 -- 정기 / 가끔(1회성)
 alter table public.pd_dogs add column if not exists kind text not null default 'regular' check (kind in ('regular','occasional'));
+
+-- 요일별 픽업만(p) / 드랍만(d)
+alter table public.pd_requests add column if not exists day_mode jsonb not null default '{}'::jsonb;

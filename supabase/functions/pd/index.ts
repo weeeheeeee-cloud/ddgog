@@ -1,6 +1,7 @@
 // 픽드랍 신청 (보호자 링크 pd.html?k=열쇠 + 직원 화면)
 //  action "get"   { token }                                → { dog, today, weeks: [{ start, days, memo, fixed? }] }  (이번 주·다음 주, 고정 요일 아이는 신청 없어도 고정 요일로)
-//  action "save"  { token | dog_id(직원 로그인), week_start, days: [1..7], memo } → { ok, days }
+//  action "save"  { token | dog_id(직원 로그인), week_start, days: [1..7], memo, day_mode?: { "1": "p"|"d" } } → { ok, days, day_mode }
+//  day_mode: 요일별 픽업만(p) / 드랍만(d), 없으면 픽업·드랍 둘 다
 //  action "vapid" {}                                       → { key }  폰 알림 공개 열쇠
 //  action "test"  {} (직원 로그인)                          → 내 폰들로 시험 알림
 //  action "group" {} (직원 로그인)                          → { key }  모든 보호자에게 보내는 단체 링크 열쇠
@@ -133,15 +134,15 @@ Deno.serve(async (req) => {
     const fixedFor = (w: string) => fixed.length > 0 && w >= thisWeek;
 
     if (body.action === "get") {
-      const { data } = await admin.from("pd_requests").select("week_start, days, memo, updated_at").eq("dog_id", dog.id).in("week_start", weeks);
+      const { data } = await admin.from("pd_requests").select("week_start, days, memo, day_mode, updated_at").eq("dog_id", dog.id).in("week_start", weeks);
       const byW = new Map((data ?? []).map((r: { week_start: string }) => [r.week_start, r]));
       return json({
         dog: { name: dog.name },
         today,
         weeks: weeks.map((w) => {
-          const r = byW.get(w) as { days: number[]; memo: string | null; updated_at: string } | undefined;
-          if (!r && fixedFor(w)) return { start: w, saved: true, fixed: true, days: fixed, memo: "", updated_at: null };
-          return { start: w, saved: !!r, days: r?.days ?? [], memo: r?.memo ?? "", updated_at: r?.updated_at ?? null };
+          const r = byW.get(w) as { days: number[]; memo: string | null; day_mode: Record<string, string> | null; updated_at: string } | undefined;
+          if (!r && fixedFor(w)) return { start: w, saved: true, fixed: true, days: fixed, memo: "", day_mode: {}, updated_at: null };
+          return { start: w, saved: !!r, days: r?.days ?? [], memo: r?.memo ?? "", day_mode: r?.day_mode ?? {}, updated_at: r?.updated_at ?? null };
         }),
       });
     }
@@ -160,6 +161,17 @@ Deno.serve(async (req) => {
         days = [...days.filter((d) => !past(d)), ...[...oldDays].filter((d) => past(d))];
       }
       days = [...new Set(days)].sort((a, b) => a - b);
+      // 요일별 픽업만/드랍만 (보호자는 지난 요일 것은 못 바꿈)
+      const oldMode: Record<string, string> = { ...(old?.day_mode ?? {}) };
+      const inMode = (body.day_mode && typeof body.day_mode === "object") ? body.day_mode as Record<string, unknown> : null;
+      const dayMode: Record<string, string> = {};
+      for (const d of days) {
+        const pastD = !staff && addDays(w, d - 1) < today;
+        const v = pastD || !inMode ? oldMode[d] : inMode[d];
+        if (v === "p" || v === "d") dayMode[d] = v;
+      }
+      const MODE: Record<string, string> = { p: "픽업만", d: "드랍만" };
+      const modeChanged = days.filter((d) => oldDays.has(d) && (oldMode[d] ?? "") !== (dayMode[d] ?? ""));
       const now = new Date().toISOString();
       const added = days.filter((d) => !oldDays.has(d));
       const removed = [...oldDays].filter((d) => !days.includes(d)).sort((a, b) => a - b);
@@ -173,7 +185,7 @@ Deno.serve(async (req) => {
         for (const d of removed) { if (dayAdded[d]) delete dayAdded[d]; else dayRemoved[d] = now; }
       }
       const row = {
-        dog_id: dog.id, week_start: w, days, memo,
+        dog_id: dog.id, week_start: w, days, memo, day_mode: dayMode,
         day_added: dayAdded, day_removed: dayRemoved,
         memo_changed_at: mid && memoChanged ? now : (old?.memo_changed_at ?? null),
         by_staff: !!staff,
@@ -183,10 +195,11 @@ Deno.serve(async (req) => {
       const { error } = await admin.from("pd_requests").upsert(row, { onConflict: "dog_id,week_start" });
       if (error) throw error;
 
-      if (mid && (added.length || removed.length || memoChanged)) {
+      if (mid && (added.length || removed.length || memoChanged || modeChanged.length)) {
         await admin.from("pd_log").insert({ dog_id: dog.id, week_start: w, added, removed, memo_changed: memoChanged, by_staff: !!staff });
         const parts = [
-          added.length ? `${added.map((d) => DOW[d]).join("·")} 추가` : "",
+          added.length ? `${added.map((d) => DOW[d] + (dayMode[d] ? `(${MODE[dayMode[d]]})` : "")).join("·")} 추가` : "",
+          modeChanged.length ? modeChanged.map((d) => `${DOW[d]} ${dayMode[d] ? MODE[dayMode[d]] : "픽업·드랍 둘 다"}로`).join(" · ") : "",
           removed.length ? `${removed.map((d) => DOW[d]).join("·")} 취소` : "",
           memoChanged ? (memo ? `메모: ${memo.slice(0, 60)}` : "메모 지움") : "",
         ].filter(Boolean);
@@ -198,7 +211,7 @@ Deno.serve(async (req) => {
           tag: `pd-${dog.id}-${w}`,
         }, { exceptUser: staff?.id });
       }
-      return json({ ok: true, days, memo });
+      return json({ ok: true, days, memo, day_mode: dayMode });
     }
   } catch (e) {
     console.error(e);

@@ -1370,3 +1370,17 @@ input, select, textarea { max-width: 100%; min-width: 0; }
 .pk-kindrow { display:flex; align-items:center; gap:10px; flex-wrap:wrap; margin-bottom:4px; }
 .pk-kindrow > span { font-weight:800; color:var(--navy); font-size:14px; }
 .pk-kind-msg { color:#15803d !important; font-weight:700; }
+.pk-occ .pk-chips button.on { background:#fff3d6; border-color:#f0c56a; }
+.pk-occ .pk-chips button small { font-size:11px; font-weight:800; color:#b45309; margin-left:2px; }
+
+/* 픽업만 / 드랍만 */
+.pk-md { font-style:normal; font-size:10px; font-weight:800; border-radius:999px; padding:0 5px; margin-left:3px; color:#fff; }
+.pk-md.p { background:#2563eb; }
+.pk-md.d { background:#7c3aed; }
+.pk-modes { display:flex; flex-direction:column; gap:6px; margin-top:10px; }
+.pk-mode { display:flex; align-items:center; gap:6px; flex-wrap:wrap; }
+.pk-mode b { width:26px; color:var(--navy); }
+.pk-mode button { border:1.5px solid #e6e1d6; background:#fff; border-radius:999px; padding:5px 12px; font-size:13px; font-weight:700; color:var(--muted); cursor:pointer; }
+.pk-mode button.on { background:var(--navy); border-color:var(--navy); color:#fff; }
+.pk-mode button[data-v="p"].on { background:#2563eb; border-color:#2563eb; }
+.pk-mode button[data-v="d"].on { background:#7c3aed; border-color:#7c3aed; }
