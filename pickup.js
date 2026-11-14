@@ -255,19 +255,62 @@ function openRoute() {
   const { ov, close } = modal(`
     <div class="rc-head"><div class="grow"><b>🚗 픽드랍 동선 순서</b><small class="muted">유치원(동백죽전대로 217)에서 출발하는 순서 · 요일별 목록이 이 순서로 나와요</small></div>
       <button class="btn ghost sm" data-close>닫기</button></div>
-    <div class="rc-body"><div class="pk-route" id="pk-route"></div></div>
-    <div class="rc-foot"><span class="grow small muted">▲▼로 위아래로 옮긴 뒤 저장하세요</span><button class="btn primary sm" data-save>저장</button></div>`, "wide");
-  const drawR = () => {
-    $("#pk-route", ov).innerHTML = list.map((d, i) => `<div class="pk-rt" data-i="${i}"><em>${i + 1}</em><span class="grow"><b>${esc(d.name)}</b><small class="muted">${esc(d.address || "주소 없음")}</small></span>
-        <button class="btn ghost mini" data-up="${i}" ${i ? "" : "disabled"}>▲</button><button class="btn ghost mini" data-dn="${i}" ${i < list.length - 1 ? "" : "disabled"}>▼</button></div>`).join("")
-;
-    $$("[data-up]", ov).forEach((b) => b.addEventListener("click", () => { const i = +b.dataset.up; [list[i - 1], list[i]] = [list[i], list[i - 1]]; drawR(); }));
-    $$("[data-dn]", ov).forEach((b) => b.addEventListener("click", () => { const i = +b.dataset.dn; [list[i + 1], list[i]] = [list[i], list[i + 1]]; drawR(); }));
+    <div class="rc-body" id="pk-route-body"><div class="pk-route" id="pk-route"></div></div>
+    <div class="rc-foot"><span class="grow small muted">아이를 꾹 눌러서 위아래로 끌어 옮긴 뒤 저장하세요</span><button class="btn primary sm" data-save>저장</button></div>`, "wide");
+  const box = $("#pk-route", ov), body = $("#pk-route-body", ov);
+  box.innerHTML = list.map((d) => `<div class="pk-rt" data-id="${d.id}"><em></em><span class="grow"><b>${esc(d.name)}</b><small class="muted">${esc(d.address || "주소 없음")}</small></span><i class="pk-rt-h" aria-hidden="true">≡</i></div>`).join("");
+  const renum = () => $$(".pk-rt", box).forEach((r, k) => (r.querySelector("em").textContent = k + 1));
+  renum();
+
+  // 꾹 누르면(0.3초) 집어서 끌기 · 손잡이(≡)는 바로 끌기
+  let row = null, timer = null, dragging = false, sx = 0, sy = 0, lastY = 0, raf = null;
+  const start = (r) => { dragging = true; row = r; r.classList.add("drag"); box.classList.add("dragging"); navigator.vibrate?.(15); };
+  const moveTo = (y) => {
+    lastY = y;
+    const rows = $$(".pk-rt", box).filter((x) => x !== row);
+    let target = null;
+    for (const x of rows) { const b = x.getBoundingClientRect(); if (y < b.top + b.height / 2) { target = x; break; } }
+    if (target) { if (row.nextElementSibling !== target) box.insertBefore(row, target); }
+    else if (box.lastElementChild !== row) box.appendChild(row);
+    renum();
   };
-  drawR();
+  const edgeScroll = () => {
+    if (!dragging) return;
+    const b = body.getBoundingClientRect();
+    const dy = lastY < b.top + 50 ? -10 : lastY > b.bottom - 50 ? 10 : 0;
+    if (dy) { body.scrollTop += dy; moveTo(lastY); }
+    raf = requestAnimationFrame(edgeScroll);
+  };
+  const end = () => {
+    clearTimeout(timer); timer = null;
+    if (dragging) { row.classList.remove("drag"); box.classList.remove("dragging"); }
+    dragging = false; row = null; cancelAnimationFrame(raf);
+  };
+  const down = (x, y, target) => {
+    const r = target.closest(".pk-rt"); if (!r) return;
+    sx = x; sy = y; lastY = y;
+    if (target.closest(".pk-rt-h")) { start(r); edgeScroll(); return; }
+    timer = setTimeout(() => { start(r); edgeScroll(); }, 300);
+  };
+  const move = (x, y, e) => {
+    if (dragging) { e.preventDefault(); moveTo(y); return; }
+    if (timer && (Math.abs(x - sx) > 8 || Math.abs(y - sy) > 8)) { clearTimeout(timer); timer = null; } // 그냥 스크롤
+  };
+  // 터치
+  box.addEventListener("touchstart", (e) => { const t = e.touches[0]; down(t.clientX, t.clientY, e.target); }, { passive: true });
+  box.addEventListener("touchmove", (e) => { const t = e.touches[0]; move(t.clientX, t.clientY, e); }, { passive: false });
+  box.addEventListener("touchend", end); box.addEventListener("touchcancel", end);
+  box.addEventListener("contextmenu", (e) => e.preventDefault());
+  // 마우스
+  box.addEventListener("mousedown", (e) => { if (e.button) return; e.preventDefault(); down(e.clientX, e.clientY, e.target);
+    const mm = (ev) => move(ev.clientX, ev.clientY, ev);
+    const mu = () => { end(); removeEventListener("mousemove", mm); removeEventListener("mouseup", mu); };
+    addEventListener("mousemove", mm); addEventListener("mouseup", mu); });
+
   $("[data-save]", ov).addEventListener("click", async (e) => {
     e.target.disabled = true;
-    const res = await Promise.all(list.map((d, i) => C.sb.from("pd_dogs").update({ route_order: i + 1 }).eq("id", d.id)));
+    const ids = $$(".pk-rt", box).map((r) => r.dataset.id);
+    const res = await Promise.all(ids.map((id, k) => C.sb.from("pd_dogs").update({ route_order: k + 1 }).eq("id", id)));
     if (res.some((r) => r.error)) { toast("저장하지 못했어요"); e.target.disabled = false; return; }
     toast("동선 순서를 저장했어요"); close(); await load(); draw();
   });
