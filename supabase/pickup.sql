@@ -84,3 +84,6 @@ alter table public.pd_dogs add column if not exists fixed_days smallint[] not nu
 -- 휴면 (유치원 명단에서 설정: 지우지 않고 유치원 명단·픽드랍·사진 분류에서 숨김, 호텔링은 그대로)
 alter table public.kinder_members add column if not exists dormant boolean not null default false;
 alter table public.pd_dogs add column if not exists dormant boolean not null default false;
+
+-- 정기 / 가끔(1회성)
+alter table public.pd_dogs add column if not exists kind text not null default 'regular' check (kind in ('regular','occasional'));
