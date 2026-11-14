@@ -40,7 +40,16 @@ async function load() {
   ]);
   ps.dogs = dogs || [];
   ps.reqs = reqs || [];
+  // 고정 요일 아이: 이번 주부터, 신청서가 없으면 고정 요일로 간 것으로 봄
+  if (ps.week >= mondayOf(kstToday())) {
+    const has = new Set(ps.reqs.map((r) => r.dog_id));
+    for (const d of ps.dogs) {
+      if (d.active && (d.fixed_days || []).length && !has.has(d.id))
+        ps.reqs.push({ dog_id: d.id, days: [...d.fixed_days].sort(), memo: null, day_added: {}, day_removed: {}, fixed: true });
+    }
+  }
 }
+const fixedText = (dog) => ((dog?.fixed_days || []).length ? [...dog.fixed_days].sort().map((d) => DOW[d]).join("·") : "");
 const dogById = (id) => ps.dogs.find((d) => d.id === id);
 const reqOf = (id) => ps.reqs.find((r) => r.dog_id === id);
 
@@ -102,7 +111,7 @@ function draw() {
         <div class="pk-col-h"><b>${DOW[d]}</b><small>${md(dt)}</small><em>${x.on.length}</em></div>
         <div class="pk-col-b">
           ${x.on.map(({ r, dog, added }) => `<button class="pk-n ${added ? "add" : ""} ${r.memo_changed_at ? "memo" : ""}" data-dog="${dog.id}" title="${added ? `${when(added)} 추가` : ""}">
-            <span>${esc(dog.name)}</span>${r.memo ? `<i class="pk-mi ${r.memo_changed_at ? "new" : ""}" data-memo="${dog.id}" aria-label="메모 보기">📝</i>` : ""}</button>`).join("")}
+            <span>${esc(dog.name)}</span>${r.fixed ? `<i class="pk-fx" title="고정">📌</i>` : ""}${r.memo ? `<i class="pk-mi ${r.memo_changed_at ? "new" : ""}" data-memo="${dog.id}" aria-label="메모 보기">📝</i>` : ""}</button>`).join("")}
           ${x.cancelled.map(({ dog, at }) => `<button class="pk-n x" data-dog="${dog.id}" title="${when(at)} 취소"><span>${esc(dog.name)}</span></button>`).join("")}
         </div>
       </div>`;
@@ -186,7 +195,7 @@ function openDog(id) {
     <div class="rc-head"><div class="grow"><b class="ho-title">${esc(dog.name)}</b><small class="muted">${md(ps.week)} ~ ${md(addDays(ps.week, 6))} 픽드랍</small></div>
       <button class="btn ghost sm" data-close>닫기</button></div>
     <div class="rc-body">
-      <h3 class="pk-h3">요일 ${r ? "" : `<small class="muted">아직 신청 안 함</small>`}</h3>
+      <h3 class="pk-h3">요일 ${r?.fixed ? `<small class="muted">📌 고정 요일 (${fixedText(dog)})</small>` : r ? "" : `<small class="muted">아직 신청 안 함</small>`}</h3>
       <div class="pk-pick">${[1, 2, 3, 4, 5, 6, 7].map((d) => `<button data-p="${d}" class="${days.includes(d) ? "on" : ""} ${(r?.day_added || {})[d] ? "add" : ""}">${DOW[d]}</button>`).join("")}</div>
       <h3 class="pk-h3">메모</h3>
       <textarea id="pk-memo" maxlength="300" rows="3" placeholder="예) 9시 전에 와 주세요">${esc(r?.memo || "")}</textarea>
@@ -197,7 +206,7 @@ function openDog(id) {
       ${kv("주소", esc(dog.address))}
       ${kv("선생님 메모", esc(dog.note))}
       ${!dog.owner_name && !dog.phone && !dog.address && !dog.note ? `<p class="muted small">정보가 없어요${C.owner ? " (아이 관리에서 넣을 수 있어요)" : ""}</p>` : ""}
-      ${r ? `<p class="muted small">${r.by_staff ? "직원이 마지막으로 수정" : "보호자가 신청"} · ${when(r.updated_at)}</p>` : ""}
+      ${r && !r.fixed ? `<p class="muted small">${r.by_staff ? "직원이 마지막으로 수정" : "보호자가 신청"} · ${when(r.updated_at)}</p>` : ""}
     </div>
     <div class="rc-foot">
       ${C.owner ? `${sendBtns(dog)}<button class="btn ghost mini" data-copy>복사</button><span class="grow"></span>` : ""}
@@ -305,7 +314,7 @@ function openManage() {
       <p class="muted small">아이마다 보호자 전용 링크가 있어요. ‘카톡 보내기’나 ‘문자’로 보호자에게 보내 주세요. 매주 같은 링크라 한 번 받은 보호자는 그 링크로 계속 들어오면 돼요.</p>
       ${searchBox()}
       <div class="pk-manage">${ps.dogs.map((d) => `<div class="pk-mrow ${d.active ? "" : "off"}" data-q="${esc(qOf(d))}">
-        <span class="grow"><b>${esc(d.name)}</b>${d.active ? "" : ` <span class="tag off">꺼짐</span>`}<small class="muted">${esc([d.owner_name, d.phone].filter(Boolean).join(" · "))}</small></span>
+        <span class="grow"><b>${esc(d.name)}</b>${fixedText(d) ? ` <span class="pk-fxtag">📌 ${fixedText(d)}</span>` : ""}${d.active ? "" : ` <span class="tag off">꺼짐</span>`}<small class="muted">${esc([d.owner_name, d.phone].filter(Boolean).join(" · "))}</small></span>
         ${d.active ? sendBtns(d) : ""}
         <button class="btn ghost mini" data-ed="${d.id}">수정</button>
       </div>`).join("") || `<p class="muted small">아직 없어요.</p>`}<p class="muted small pk-none" hidden>찾는 아이가 없어요.</p></div>
@@ -331,16 +340,20 @@ function openDogForm(dog) {
       ${f("phone", "전화", "010-0000-0000")}
       ${f("address", "주소", "픽드랍 주소")}
       ${f("note", "선생님 메모", "공동현관 비번, 주차 위치 등 (보호자에겐 안 보여요)")}
+      <div class="pk-f"><span>고정 요일 <small class="muted">매주 같은 요일이면 골라 두세요. 신청 안 해도 이 요일로 들어가요 (그 주만 바꾸면 그 주만 바뀜)</small></span>
+        <div class="pk-pick" id="pk-fixed">${[1, 2, 3, 4, 5, 6, 7].map((d) => `<button type="button" data-fx="${d}" class="${(dog?.fixed_days || []).includes(d) ? "on" : ""}">${DOW[d]}</button>`).join("")}</div></div>
       ${dog ? `<label class="pk-check"><input type="checkbox" data-active ${dog.active ? "checked" : ""}> 링크 켜기 (끄면 보호자 링크가 막히고 목록에서 빠져요)</label>` : ""}
     </div>
     <div class="rc-foot">
       ${dog ? `<button class="btn ghost sm danger" data-del>삭제</button><span class="grow"></span>` : ""}
       <button class="btn primary sm" data-save>저장</button>
     </div>`);
+  $$("[data-fx]", ov).forEach((b) => b.addEventListener("click", () => b.classList.toggle("on")));
   $("[data-save]", ov).addEventListener("click", async () => {
     const row = {};
     $$("[data-f]", ov).forEach((i) => (row[i.dataset.f] = i.value.trim() || null));
     if (!row.name) { toast("이름을 넣어 주세요"); return; }
+    row.fixed_days = $$("[data-fx].on", ov).map((b) => +b.dataset.fx).sort();
     if (dog) row.active = $("[data-active]", ov).checked;
     const q = dog ? C.sb.from("pd_dogs").update(row).eq("id", dog.id).select().single() : C.sb.from("pd_dogs").insert(row).select().single();
     const { data, error } = await q;

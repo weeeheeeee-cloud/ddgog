@@ -205,7 +205,7 @@ function renderConfirmed(w) {
   const dates = datesOf(w);
   $("#body").innerHTML = `${weekTabs()}
     <div class="conf">
-      <div class="conf-top"><i>✓</i><span>픽드랍 확정<small>${stamp(w.updated_at)} 확정</small></span></div>
+      <div class="conf-top"><i>✓</i><span>픽드랍 확정<small>${w.fixed ? "📌 매주 고정 요일이에요" : `${stamp(w.updated_at)} 확정`}</small></span></div>
       <div class="conf-days">${dates.map((dt, i) => `<span class="${w.days.includes(i + 1) ? "on" : ""} ${i >= 5 ? "we" : ""}"><b>${DOW[i + 1]}</b><small>${md(dt)}</small></span>`).join("")}</div>
       <p class="conf-sum">${w.days.length ? `<b>${dayList(w.days)}</b> 픽드랍해요` : "이 주는 픽드랍이 <b>없어요</b>"}</p>
       ${w.memo ? `<p class="conf-memo">📝 ${esc(w.memo)}</p>` : ""}

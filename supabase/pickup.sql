@@ -77,3 +77,6 @@ create table if not exists public.kinder_members (
 );
 alter table public.kinder_members enable row level security;
 create policy "staff all kinder_members" on public.kinder_members for all to authenticated using (true) with check (true);
+
+-- 고정 요일 (매주 같은 요일 아이: 신청 안 해도 이 요일로 들어감)
+alter table public.pd_dogs add column if not exists fixed_days smallint[] not null default '{}';

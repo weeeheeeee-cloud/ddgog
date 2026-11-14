@@ -1330,3 +1330,8 @@ input, select, textarea { max-width: 100%; min-width: 0; }
 .ho-due.paid { color:var(--muted); font-size:14px; }
 .ho-due.paid small { color:#15803d; }
 .ho-due-sum { display:inline-block; margin-left:6px; font-size:12px; font-weight:800; color:#dc2626; background:#fff1f1; border-radius:999px; padding:1px 9px; vertical-align:1px; }
+
+/* 픽드랍 고정 요일 */
+.pk-fx { font-style:normal; font-size:11px; margin-left:2px; }
+.pk-fxtag { display:inline-block; font-size:11px; font-weight:800; color:var(--navy); background:#e8eef8; border-radius:999px; padding:0 8px; margin-left:4px; vertical-align:1px; }
+.pk-f > span small { display:block; font-weight:500; }

@@ -1,5 +1,5 @@
 // 픽드랍 신청 (보호자 링크 pd.html?k=열쇠 + 직원 화면)
-//  action "get"   { token }                                → { dog, today, weeks: [{ start, days, memo }] }  (이번 주·다음 주)
+//  action "get"   { token }                                → { dog, today, weeks: [{ start, days, memo, fixed? }] }  (이번 주·다음 주, 고정 요일 아이는 신청 없어도 고정 요일로)
 //  action "save"  { token | dog_id(직원 로그인), week_start, days: [1..7], memo } → { ok, days }
 //  action "vapid" {}                                       → { key }  폰 알림 공개 열쇠
 //  action "test"  {} (직원 로그인)                          → 내 폰들로 시험 알림
@@ -112,14 +112,14 @@ Deno.serve(async (req) => {
     }
 
     // 어떤 아이인지
-    let dog: { id: string; name: string; active: boolean } | null = null;
+    let dog: { id: string; name: string; active: boolean; fixed_days: number[] | null } | null = null;
     const token = String(body.token ?? "");
     if (token) {
-      const { data } = await admin.from("pd_dogs").select("id, name, active").eq("token", token).maybeSingle();
+      const { data } = await admin.from("pd_dogs").select("id, name, active, fixed_days").eq("token", token).maybeSingle();
       dog = data;
       if (!dog?.active) return json({ error: "링크가 맞지 않아요. 댕겨올개에 새 링크를 요청해 주세요." }, 403);
     } else if (staff && body.dog_id) {
-      const { data } = await admin.from("pd_dogs").select("id, name, active").eq("id", String(body.dog_id)).maybeSingle();
+      const { data } = await admin.from("pd_dogs").select("id, name, active, fixed_days").eq("id", String(body.dog_id)).maybeSingle();
       dog = data;
     }
     if (!dog) return json({ error: "링크가 맞지 않아요. 댕겨올개에 새 링크를 요청해 주세요." }, 403);
@@ -127,6 +127,9 @@ Deno.serve(async (req) => {
     const today = kstToday();
     const thisWeek = mondayOf(today);
     const weeks = [thisWeek, addDays(thisWeek, 7)];
+    // 고정 요일: 신청서가 없는 주(이번 주부터)는 고정 요일로 확정된 것으로 봄
+    const fixed = [...new Set((dog.fixed_days ?? []).map(Number))].sort((a, b) => a - b);
+    const fixedFor = (w: string) => fixed.length > 0 && w >= thisWeek;
 
     if (body.action === "get") {
       const { data } = await admin.from("pd_requests").select("week_start, days, memo, updated_at").eq("dog_id", dog.id).in("week_start", weeks);
@@ -136,6 +139,7 @@ Deno.serve(async (req) => {
         today,
         weeks: weeks.map((w) => {
           const r = byW.get(w) as { days: number[]; memo: string | null; updated_at: string } | undefined;
+          if (!r && fixedFor(w)) return { start: w, saved: true, fixed: true, days: fixed, memo: "", updated_at: null };
           return { start: w, saved: !!r, days: r?.days ?? [], memo: r?.memo ?? "", updated_at: r?.updated_at ?? null };
         }),
       });
@@ -148,7 +152,7 @@ Deno.serve(async (req) => {
       let days = [...new Set((Array.isArray(body.days) ? body.days : []).map(Number).filter((d) => d >= 1 && d <= 7))];
 
       const { data: old } = await admin.from("pd_requests").select("*").eq("dog_id", dog.id).eq("week_start", w).maybeSingle();
-      const oldDays = new Set<number>((old?.days ?? []) as number[]);
+      const oldDays = new Set<number>((old ? old.days : fixedFor(w) ? fixed : []) as number[]);
       // 보호자는 지난 요일을 바꿀 수 없음 (오늘은 바꿀 수 있음)
       if (!staff) {
         const past = (d: number) => addDays(w, d - 1) < today;
