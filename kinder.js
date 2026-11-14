@@ -275,9 +275,7 @@ function pdOf(m) {
   const byPhone = (ks.pd || []).filter((p) => phones.has(digits(p.phone)));
   const nm = nkey(m.name);
   if (byPhone.length === 1) return byPhone;
-  if (byPhone.length > 1) return byPhone.filter((p) => nkey(p.name).startsWith(nm) || nm.startsWith(nkey(p.name)));
-  const byName = (ks.pd || []).filter((p) => nkey(p.name) === nm);
-  return byName.length === 1 ? byName : [];
+  return byPhone.filter((p) => nkey(p.name).startsWith(nm) || nm.startsWith(nkey(p.name))); // 이름만 같은 다른 아이와 섞이지 않게 전화번호가 같을 때만
 }
 async function setDormant(m, on, close) {
   const now = new Date().toISOString();

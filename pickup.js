@@ -33,12 +33,32 @@ export async function pickupUnseen(sb) {
 function markSeen() { try { localStorage.setItem(SEEN_KEY, new Date().toISOString()); } catch { /* 괜찮음 */ } }
 
 /* ================= 데이터 ================= */
+// 유치원 명단에서 휴면·그만 다님인 아이는 픽드랍에서 뺌 (보호자 전화번호가 같고 이름이 맞는 아이로 찾음)
+const nkey = (s) => String(s || "").replace(/\(.*?\)/g, "").replace(/[\s·/]/g, "").toLowerCase();
+const pnum = (s) => String(s || "").replace(/\D/g, "");
+function restingIds(dogs, members) {
+  const byPhone = new Map();
+  for (const m of members) for (const ph of new Set([m.phone, ...(m.owners || []).map((o) => o.phone)].map(pnum).filter((x) => x.length >= 10))) {
+    if (!byPhone.has(ph)) byPhone.set(ph, []);
+    byPhone.get(ph).push(m);
+  }
+  const out = new Set();
+  for (const d of dogs) {
+    if (d.dormant) { out.add(d.id); continue; }
+    let ms = byPhone.get(pnum(d.phone)) || [];
+    if (ms.length > 1) { const k = nkey(d.name); ms = ms.filter((m) => { const n = nkey(m.name); return k.startsWith(n) || n.startsWith(k); }); }
+    if (ms.length && ms.every((m) => !m.active || m.dormant)) out.add(d.id);
+  }
+  return out;
+}
 async function load() {
-  const [{ data: dogs }, { data: reqs }] = await Promise.all([
+  const [{ data: dogs }, { data: reqs }, { data: mem }] = await Promise.all([
     C.sb.from("pd_dogs").select("*").order("name"),
     C.sb.from("pd_requests").select("*").eq("week_start", ps.week),
+    C.sb.from("kinder_members").select("name, phone, owners, active, dormant"),
   ]);
-  ps.dogs = (dogs || []).filter((d) => !d.dormant); // 휴면(유치원 명단에서 설정)은 안 보임
+  const rest = restingIds(dogs || [], mem || []);
+  ps.dogs = (dogs || []).filter((d) => !rest.has(d.id)); // 휴면·그만 다님은 안 보임
   ps.reqs = reqs || [];
   // 고정 요일 아이: 이번 주부터, 신청서가 없으면 고정 요일로 간 것으로 봄
   if (ps.week >= mondayOf(kstToday())) {
