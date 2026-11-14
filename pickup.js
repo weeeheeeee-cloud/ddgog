@@ -223,6 +223,7 @@ function openDog(id) {
     <div class="rc-head"><div class="grow"><b class="ho-title">${esc(dog.name)}</b><small class="muted">${md(ps.week)} ~ ${md(addDays(ps.week, 6))} 픽드랍</small></div>
       <button class="btn ghost sm" data-close>닫기</button></div>
     <div class="rc-body">
+      <div class="pk-kindrow"><span>구분</span><div class="pk-seg" id="pk-kind">${kindBtns(dog.kind === "occasional" ? "occasional" : "regular")}</div><small class="muted pk-kind-msg"></small></div>
       <h3 class="pk-h3">요일 ${r?.fixed ? `<small class="muted">📌 고정 요일 (${fixedText(dog)})</small>` : r ? "" : `<small class="muted">아직 신청 안 함</small>`}</h3>
       <div class="pk-pick">${[1, 2, 3, 4, 5, 6, 7].map((d) => `<button data-p="${d}" class="${days.includes(d) ? "on" : ""} ${(r?.day_added || {})[d] ? "add" : ""}">${DOW[d]}</button>`).join("")}</div>
       <h3 class="pk-h3">메모</h3>
@@ -243,6 +244,17 @@ function openDog(id) {
   const pick = new Set(days);
   $$("[data-p]", ov).forEach((b) => b.addEventListener("click", () => { const d = +b.dataset.p; pick.has(d) ? pick.delete(d) : pick.add(d); b.classList.toggle("on", pick.has(d)); }));
   $("[data-copy]", ov)?.addEventListener("click", () => copyInvite(dog));
+  // 정기 / 가끔: 누르면 바로 저장
+  $$("#pk-kind [data-kind]", ov).forEach((b) => b.addEventListener("click", async () => {
+    const kind = b.dataset.kind;
+    if (kind === (dog.kind === "occasional" ? "occasional" : "regular")) return;
+    $$("#pk-kind [data-kind]", ov).forEach((x) => x.classList.toggle("on", x === b));
+    const { error } = await C.sb.from("pd_dogs").update({ kind }).eq("id", dog.id);
+    if (error) { toast("바꾸지 못했어요"); return; }
+    dog.kind = kind;
+    $(".pk-kind-msg", ov).textContent = kind === "occasional" ? "가끔(1회성)으로 바꿨어요" : "정기로 바꿨어요";
+    draw();
+  }));
   bindSend(ov);
   $("[data-save]", ov).addEventListener("click", async (e) => {
     e.target.disabled = true;

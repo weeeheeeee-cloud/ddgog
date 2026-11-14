@@ -1367,3 +1367,6 @@ input, select, textarea { max-width: 100%; min-width: 0; }
 .pk-occ h3 { font-size:14px; font-weight:800; color:#b45309; margin:0 0 8px; }
 .pk-occ h3 small { font-weight:500; }
 .pk-occ .pk-chips button { background:#fffaf0; border-color:#f3dfb4; }
+.pk-kindrow { display:flex; align-items:center; gap:10px; flex-wrap:wrap; margin-bottom:4px; }
+.pk-kindrow > span { font-weight:800; color:var(--navy); font-size:14px; }
+.pk-kind-msg { color:#15803d !important; font-weight:700; }
