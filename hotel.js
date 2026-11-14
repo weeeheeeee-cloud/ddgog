@@ -33,6 +33,11 @@ const breedOf = (n) => (String(n || "").match(/\(([^)]+)\)\s*$/) || [])[1] || ""
 const STATUS = { booked: "예약 완료", in: "입실 · 투숙 중", out: "퇴실 완료", cancelled: "예약 취소" };
 const VAX = [["antibody", "항체검사"], ["corona", "코로나장염"], ["rabies", "광견병"], ["combo", "종합접종"], ["kennel", "켄넬코프"], ["flu", "신종 인플루엔자"]];
 const payTag = (b) => (b.prepaid ? `<em class="ho-paid">선결제</em>` : "");
+// 퇴실 때 받을 금액 (선결제면 받을 돈 없음)
+const dueTag = (b) => b.prepaid
+  ? `<span class="ho-due paid"><small>✓ 선결제 완료</small>${won(b.total || 0)}</span>`
+  : `<span class="ho-due"><small>받을 금액</small>${won(b.total || 0)}</span>`;
+const dueSum = (list) => list.filter((b) => !b.prepaid).reduce((a, b) => a + Number(b.total || 0), 0);
 const kindTag = (k) => `<b class="hk ${k === "K" ? "k" : "h"}">${k === "K" ? "K" : "H"}</b>`;
 function toast(m, ms) { C?.toast?.(m, ms); }
 
@@ -634,12 +639,12 @@ function openDay(d) {
   const sec = (title, list, cls) => list.length ? `<h3 class="ho-sub">${title} <small class="muted">${list.length}건</small></h3>${list.map((b) => {
     const c = custById(b.customer_id);
     return `<button class="ho-bk ${b.status} ${cls}" data-bk="${b.id}">${kindTag(b.kind)}<span class="grow"><b>${esc(labelShow(b))}</b> <small class="muted">${esc(c?.owner_name || "")}</small>
-      <br><small class="muted">${md(b.check_in)}${b.in_time ? " " + b.in_time : ""} → ${md(b.check_out)}${b.out_time ? " " + b.out_time : ""}${svcText(b) ? " · " + esc(svcText(b)) : ""}</small></span></button>`;
+      <br><small class="muted">${md(b.check_in)}${b.in_time ? " " + b.in_time : ""} → ${md(b.check_out)}${b.out_time ? " " + b.out_time : ""}${svcText(b) ? " · " + esc(svcText(b)) : ""}</small></span>${cls === "out" ? dueTag(b) : ""}</button>`;
   }).join("")}` : "";
   const { ov, close } = modal(`
     <div class="rc-head"><div class="grow"><b>${md(d)} 호텔링</b><small class="muted">이날 밤 투숙 ${x.night}마리</small></div><button class="btn ghost sm" data-close>닫기</button></div>
     <div class="rc-body">
-      ${sec("▸ 입실", x.ins, "in")}${sec("투숙 중", x.stays, "")}${sec("◂ 퇴실", x.outs, "out")}
+      ${sec("▸ 입실", x.ins, "in")}${sec("투숙 중", x.stays, "")}${sec(`◂ 퇴실${x.outs.length ? ` <span class="ho-due-sum">받을 금액 합계 ${won(dueSum(x.outs))}</span>` : ""}`, x.outs, "out")}
       ${x.live.length ? "" : `<p class="muted">이날 예약이 없어요.</p>`}
     </div>
     <div class="rc-foot"><span class="grow"></span><button class="btn primary sm" data-new>+ ${md(d)} 입실 예약</button></div>`);
@@ -747,11 +752,11 @@ function drawCalendar() {
 function openStatList(kind, list) {
   const title = { in: "오늘 입실", stay: "지금 투숙 중", out: "오늘 퇴실" }[kind];
   const { ov, close } = modal(`
-    <div class="rc-head"><b class="grow">${title} ${list.length}건</b><button class="btn ghost sm" data-close>닫기</button></div>
+    <div class="rc-head"><b class="grow">${title} ${list.length}건${kind === "out" && list.length ? ` <span class="ho-due-sum">받을 금액 합계 ${won(dueSum(list))}</span>` : ""}</b><button class="btn ghost sm" data-close>닫기</button></div>
     <div class="rc-body">${list.length ? list.map((b) => {
       const c = custById(b.customer_id);
       return `<button class="ho-bk ${b.status}" data-bk="${b.id}">${kindTag(b.kind)}<span class="grow"><b>${esc(labelShow(b))}</b> <small class="muted">${esc(c?.owner_name || "")} ${esc(c?.phone || "")}</small>
-        <br><small class="muted">${md(b.check_in)}${b.in_time ? " " + b.in_time : ""} → ${md(b.check_out)}${b.out_time ? " " + b.out_time : ""} · ${STATUS[b.status]}${svcText(b) ? " · " + svcText(b) : ""}</small></span></button>`;
+        <br><small class="muted">${md(b.check_in)}${b.in_time ? " " + b.in_time : ""} → ${md(b.check_out)}${b.out_time ? " " + b.out_time : ""} · ${STATUS[b.status]}${svcText(b) ? " · " + svcText(b) : ""}</small></span>${kind === "out" ? dueTag(b) : ""}</button>`;
     }).join("") : `<p class="muted">없어요</p>`}</div>`);
   $$("[data-bk]", ov).forEach((b) => b.addEventListener("click", () => { close(); openBooking(hs.bookings.find((x) => x.id === b.dataset.bk)); }));
 }

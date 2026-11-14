@@ -1323,3 +1323,10 @@ input, select, textarea { max-width: 100%; min-width: 0; }
 .rc-head > *, .rc-foot > * { min-width: 0; }
 /* 일부러 옆으로 넘기는 영역(탭·주간표 등)은 그 안에서만 움직이게 */
 .tabs, .teacher-pick, .pk-grid-wrap, .pk-board-wrap, .adm-nav, .sel-tray, .st-more { overscroll-behavior-x: contain; }
+
+/* 퇴실 목록: 받을 금액 */
+.ho-due { flex:none; display:flex; flex-direction:column; align-items:flex-end; font-weight:800; font-size:16px; color:var(--navy); white-space:nowrap; line-height:1.25; }
+.ho-due small { font-size:11px; font-weight:700; color:#dc2626; }
+.ho-due.paid { color:var(--muted); font-size:14px; }
+.ho-due.paid small { color:#15803d; }
+.ho-due-sum { display:inline-block; margin-left:6px; font-size:12px; font-weight:800; color:#dc2626; background:#fff1f1; border-radius:999px; padding:1px 9px; vertical-align:1px; }
