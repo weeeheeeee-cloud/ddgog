@@ -257,7 +257,7 @@ async function openMember(id) {
     if (error) { toast("바꾸지 못했어요"); return; }
     m.active = !m.active; close(); toast(m.active ? "다시 다니는 아이로 바꿨어요" : "그만 다니는 아이로 바꿨어요"); draw();
   });
-  $("[data-dorm]", ov).addEventListener("click", () => setDormant(m, !m.dormant, close));
+  $("[data-dorm]", ov).addEventListener("click", (e) => { e.currentTarget.disabled = true; e.currentTarget.textContent = "바꾸는 중…"; setDormant(m, !m.dormant, close); });
   $("[data-del]", ov)?.addEventListener("click", async () => {
     if (!confirm(`'${m.name}' 회원을 삭제할까요? 되돌릴 수 없어요.\n(사진함 명단은 그대로예요)`)) return;
     const { error } = await C.sb.from("kinder_members").delete().eq("id", m.id);
@@ -280,10 +280,9 @@ function pdOf(m) {
   return byName.length === 1 ? byName : [];
 }
 async function setDormant(m, on, close) {
-  if (on && !confirm(`'${m.name}'을(를) 휴면으로 바꿀까요?\n지워지지 않고, 유치원 명단·픽드랍 목록·사진 분류에서만 안 보여요.\n호텔링은 그대로예요. 언제든 ‘휴면 풀기’로 되돌릴 수 있어요.`)) return;
   const now = new Date().toISOString();
   const { error } = await C.sb.from("kinder_members").update({ dormant: on, updated_at: now }).eq("id", m.id);
-  if (error) { toast("바꾸지 못했어요"); return; }
+  if (error) { console.error(error); toast("바꾸지 못했어요"); close?.(); return; }
   m.dormant = on;
   const also = [];
   const dog = dogOf(m);
