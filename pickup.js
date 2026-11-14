@@ -111,6 +111,7 @@ function draw() {
   }
   const answered = new Set(ps.reqs.map((r) => r.dog_id));
   const missing = ps.dogs.filter((d) => d.active && d.kind !== "occasional" && !answered.has(d.id)); // 가끔 오는 아이는 신청 안 해도 안 띄움
+  const occ = ps.dogs.filter((d) => d.active && d.kind === "occasional" && !answered.has(d.id)); // 가끔(1회성) 왔던 아이 — 아래 따로
 
   root.innerHTML = `
     <div class="pk-head card">
@@ -141,11 +142,13 @@ function draw() {
     }).join("")}</div></section>
 
     <section class="card pk-miss">
-      <h2>${wLabel} 아직 신청 안 한 아이 <small class="muted">${missing.length}마리</small></h2>
+      <h2>${wLabel} 아직 신청 안 한 정기 아이 <small class="muted">${missing.length}마리</small></h2>
       ${C.owner && missing.length ? `<button class="btn primary sm pk-send-btn" id="pk-send-miss">📨 신청 안 한 ${missing.length}마리에게 링크 보내기</button>` : ""}
       ${!ps.dogs.length ? `<p class="muted small">${C.owner ? "‘아이 관리’에서 픽드랍 이용하는 아이를 먼저 등록해 주세요." : "아직 등록된 아이가 없어요."}</p>`
         : missing.length ? `<div class="pk-chips">${missing.map((d) => `<button data-dog="${d.id}">${esc(d.name)}</button>`).join("")}</div>`
         : `<p class="muted small">모두 신청했어요 👍</p>`}
+      ${occ.length ? `<div class="pk-occ"><h3>가끔(1회성) 왔던 아이 <small class="muted">${occ.length}마리 · 이번에 오면 눌러서 요일을 넣어 주세요</small></h3>
+        <div class="pk-chips">${occ.map((d) => `<button data-dog="${d.id}">${esc(d.name)}</button>`).join("")}</div></div>` : ""}
     </section>
     <p class="small pk-legend"><b>월요일부터 바뀐 것</b> &nbsp;<em class="pk-tag add">초록 = 추가</em> <em class="pk-tag x">빨강 = 취소</em> <em class="pk-tag memo">보라 = 메모 바뀜</em> &nbsp;· 📝 메모 있음(누르면 보여요)</p>`;
 

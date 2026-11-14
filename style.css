@@ -1363,3 +1363,7 @@ input, select, textarea { max-width: 100%; min-width: 0; }
 .pk-mh { font-size:13px; font-weight:800; color:var(--navy); margin:14px 2px 6px; }
 .pk-mh:first-child { margin-top:2px; }
 .pk-q-dup { background:#fff8e6; border-radius:10px; padding:8px 10px; margin:-4px 0 8px; line-height:1.9; }
+.pk-occ { margin-top:16px; padding-top:14px; border-top:1px dashed var(--line, #e6e1d6); }
+.pk-occ h3 { font-size:14px; font-weight:800; color:#b45309; margin:0 0 8px; }
+.pk-occ h3 small { font-weight:500; }
+.pk-occ .pk-chips button { background:#fffaf0; border-color:#f3dfb4; }
