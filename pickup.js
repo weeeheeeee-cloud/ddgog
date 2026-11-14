@@ -132,7 +132,7 @@ function draw() {
       return `<div class="pk-col ${dt === today ? "today" : ""} ${d >= 6 ? "we" : ""}" ${dt === today ? 'id="pk-today"' : ""}>
         <div class="pk-col-h"><b>${DOW[d]}</b><small>${md(dt)}</small><em>${x.on.length}</em></div>
         <div class="pk-col-b">
-          ${x.on.map(({ r, dog, added }, j) => `${dog.route_area && dog.route_area !== x.on[j - 1]?.dog.route_area ? `<small class="pk-area">${esc(dog.route_area)}</small>` : ""}<button class="pk-n ${added ? "add" : ""} ${r.memo_changed_at ? "memo" : ""}" data-dog="${dog.id}" title="${added ? `${when(added)} 추가` : ""}">
+          ${x.on.map(({ r, dog, added }, j) => `<button class="pk-n ${added ? "add" : ""} ${r.memo_changed_at ? "memo" : ""}" data-dog="${dog.id}" title="${added ? `${when(added)} 추가` : ""}">
             <span>${esc(dog.name)}</span>${r.fixed ? `<i class="pk-fx" title="고정">📌</i>` : ""}${r.memo ? `<i class="pk-mi ${r.memo_changed_at ? "new" : ""}" data-memo="${dog.id}" aria-label="메모 보기">📝</i>` : ""}</button>`).join("")}
           ${x.cancelled.map(({ dog, at }) => `<button class="pk-n x" data-dog="${dog.id}" title="${when(at)} 취소"><span>${esc(dog.name)}</span></button>`).join("")}
         </div>
@@ -249,28 +249,25 @@ function openDog(id) {
 }
 
 /* ================= 동선 순서 ================= */
-// 유치원(동백죽전대로 217)에서 출발해 도는 순서. ▲▼로 옮기고, 지역 이름을 고치면 같은 지역끼리 묶여 보임
+// 유치원(동백죽전대로 217)에서 출발해 도는 순서. ▲▼로 옮김
 function openRoute() {
   const list = ps.dogs.filter((d) => d.active).map((d) => ({ ...d })).sort((a, b) => byRoute({ dog: a }, { dog: b }));
   const { ov, close } = modal(`
     <div class="rc-head"><div class="grow"><b>🚗 픽드랍 동선 순서</b><small class="muted">유치원(동백죽전대로 217)에서 출발하는 순서 · 요일별 목록이 이 순서로 나와요</small></div>
       <button class="btn ghost sm" data-close>닫기</button></div>
     <div class="rc-body"><div class="pk-route" id="pk-route"></div></div>
-    <div class="rc-foot"><span class="grow small muted">▲▼로 순서를 옮기고, 지역 칸을 고치면 묶음이 바뀌어요</span><button class="btn primary sm" data-save>저장</button></div>`, "wide");
+    <div class="rc-foot"><span class="grow small muted">▲▼로 위아래로 옮긴 뒤 저장하세요</span><button class="btn primary sm" data-save>저장</button></div>`, "wide");
   const drawR = () => {
-    $("#pk-route", ov).innerHTML = list.map((d, i) => `${d.route_area !== list[i - 1]?.route_area ? `<div class="pk-rt-area">${esc(d.route_area || "지역 없음")}</div>` : ""}
-      <div class="pk-rt" data-i="${i}"><em>${i + 1}</em><span class="grow"><b>${esc(d.name)}</b><small class="muted">${esc(d.address || "주소 없음")}</small></span>
-        <input class="pk-rt-in" data-area="${i}" value="${esc(d.route_area || "")}" placeholder="지역" list="pk-areas">
+    $("#pk-route", ov).innerHTML = list.map((d, i) => `<div class="pk-rt" data-i="${i}"><em>${i + 1}</em><span class="grow"><b>${esc(d.name)}</b><small class="muted">${esc(d.address || "주소 없음")}</small></span>
         <button class="btn ghost mini" data-up="${i}" ${i ? "" : "disabled"}>▲</button><button class="btn ghost mini" data-dn="${i}" ${i < list.length - 1 ? "" : "disabled"}>▼</button></div>`).join("")
-      + `<datalist id="pk-areas">${[...new Set(list.map((d) => d.route_area).filter(Boolean))].map((a) => `<option value="${esc(a)}">`).join("")}</datalist>`;
+;
     $$("[data-up]", ov).forEach((b) => b.addEventListener("click", () => { const i = +b.dataset.up; [list[i - 1], list[i]] = [list[i], list[i - 1]]; drawR(); }));
     $$("[data-dn]", ov).forEach((b) => b.addEventListener("click", () => { const i = +b.dataset.dn; [list[i + 1], list[i]] = [list[i], list[i + 1]]; drawR(); }));
-    $$("[data-area]", ov).forEach((el) => el.addEventListener("change", () => { list[+el.dataset.area].route_area = el.value.trim() || null; drawR(); }));
   };
   drawR();
   $("[data-save]", ov).addEventListener("click", async (e) => {
     e.target.disabled = true;
-    const res = await Promise.all(list.map((d, i) => C.sb.from("pd_dogs").update({ route_order: i + 1, route_area: d.route_area || null }).eq("id", d.id)));
+    const res = await Promise.all(list.map((d, i) => C.sb.from("pd_dogs").update({ route_order: i + 1 }).eq("id", d.id)));
     if (res.some((r) => r.error)) { toast("저장하지 못했어요"); e.target.disabled = false; return; }
     toast("동선 순서를 저장했어요"); close(); await load(); draw();
   });
