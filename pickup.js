@@ -151,6 +151,7 @@ function draw() {
   $$("[data-wk]", root).forEach((b) => b.addEventListener("click", async () => { ps.week = addDays(ps.week, +b.dataset.wk); ps.day = ps.week === mondayOf(kstToday()) ? isoDow(kstToday()) : 1; await load(); draw(); }));
   $$("[data-dog]", root).forEach((b) => b.addEventListener("click", () => openDog(b.dataset.dog)));
   $$("[data-memo]", root).forEach((b) => b.addEventListener("click", (e) => { e.stopPropagation(); openMemo(b.dataset.memo); }));
+  $$(".pk-col-b", root).forEach((col) => makeSortable(col, ".pk-n:not(.x)", { onDrop: dropOnBoard }));
   $("#pk-manage", root)?.addEventListener("click", openManage);
   $("#pk-group", root)?.addEventListener("click", copyGroup);
   $("#pk-send-miss", root)?.addEventListener("click", () => openSender(missing, `${wLabel} 신청 링크 보내기`));
@@ -262,50 +263,7 @@ function openRoute() {
   const renum = () => $$(".pk-rt", box).forEach((r, k) => (r.querySelector("em").textContent = k + 1));
   renum();
 
-  // 꾹 누르면(0.3초) 집어서 끌기 · 손잡이(≡)는 바로 끌기
-  let row = null, timer = null, dragging = false, sx = 0, sy = 0, lastY = 0, raf = null;
-  const start = (r) => { dragging = true; row = r; r.classList.add("drag"); box.classList.add("dragging"); navigator.vibrate?.(15); };
-  const moveTo = (y) => {
-    lastY = y;
-    const rows = $$(".pk-rt", box).filter((x) => x !== row);
-    let target = null;
-    for (const x of rows) { const b = x.getBoundingClientRect(); if (y < b.top + b.height / 2) { target = x; break; } }
-    if (target) { if (row.nextElementSibling !== target) box.insertBefore(row, target); }
-    else if (box.lastElementChild !== row) box.appendChild(row);
-    renum();
-  };
-  const edgeScroll = () => {
-    if (!dragging) return;
-    const b = body.getBoundingClientRect();
-    const dy = lastY < b.top + 50 ? -10 : lastY > b.bottom - 50 ? 10 : 0;
-    if (dy) { body.scrollTop += dy; moveTo(lastY); }
-    raf = requestAnimationFrame(edgeScroll);
-  };
-  const end = () => {
-    clearTimeout(timer); timer = null;
-    if (dragging) { row.classList.remove("drag"); box.classList.remove("dragging"); }
-    dragging = false; row = null; cancelAnimationFrame(raf);
-  };
-  const down = (x, y, target) => {
-    const r = target.closest(".pk-rt"); if (!r) return;
-    sx = x; sy = y; lastY = y;
-    if (target.closest(".pk-rt-h")) { start(r); edgeScroll(); return; }
-    timer = setTimeout(() => { start(r); edgeScroll(); }, 300);
-  };
-  const move = (x, y, e) => {
-    if (dragging) { e.preventDefault(); moveTo(y); return; }
-    if (timer && (Math.abs(x - sx) > 8 || Math.abs(y - sy) > 8)) { clearTimeout(timer); timer = null; } // 그냥 스크롤
-  };
-  // 터치
-  box.addEventListener("touchstart", (e) => { const t = e.touches[0]; down(t.clientX, t.clientY, e.target); }, { passive: true });
-  box.addEventListener("touchmove", (e) => { const t = e.touches[0]; move(t.clientX, t.clientY, e); }, { passive: false });
-  box.addEventListener("touchend", end); box.addEventListener("touchcancel", end);
-  box.addEventListener("contextmenu", (e) => e.preventDefault());
-  // 마우스
-  box.addEventListener("mousedown", (e) => { if (e.button) return; e.preventDefault(); down(e.clientX, e.clientY, e.target);
-    const mm = (ev) => move(ev.clientX, ev.clientY, ev);
-    const mu = () => { end(); removeEventListener("mousemove", mm); removeEventListener("mouseup", mu); };
-    addEventListener("mousemove", mm); addEventListener("mouseup", mu); });
+  makeSortable(box, ".pk-rt", { scroller: body, handle: ".pk-rt-h", onMove: renum });
 
   $("[data-save]", ov).addEventListener("click", async (e) => {
     e.target.disabled = true;
@@ -314,6 +272,80 @@ function openRoute() {
     if (res.some((r) => r.error)) { toast("저장하지 못했어요"); e.target.disabled = false; return; }
     toast("동선 순서를 저장했어요"); close(); await load(); draw();
   });
+}
+
+/* ================= 꾹 눌러 끌어서 순서 바꾸기 (손가락·마우스) ================= */
+// box 안의 itemSel 들을 0.3초 꾹 누르면 집어서 위아래로 옮김. handle 은 바로 집힘. 끈 뒤에는 click 이 안 눌리게 막음
+function makeSortable(box, itemSel, { scroller = null, handle = null, onMove = null, onDrop = null } = {}) {
+  let row = null, timer = null, dragging = false, moved = false, sx = 0, sy = 0, lastY = 0, raf = null;
+  const items = () => $$(itemSel, box);
+  const start = (r) => { dragging = true; moved = false; row = r; r.classList.add("drag"); box.classList.add("dragging"); navigator.vibrate?.(15); edgeScroll(); };
+  const moveTo = (y) => {
+    lastY = y;
+    let target = null;
+    for (const x of items()) { if (x === row) continue; const b = x.getBoundingClientRect(); if (y < b.top + b.height / 2) { target = x; break; } }
+    const before = row.nextElementSibling;
+    if (target) { if (row.nextElementSibling !== target) box.insertBefore(row, target); }
+    else { const last = items().filter((x) => x !== row).pop(); if (last && last.nextElementSibling !== row) last.after(row); }
+    if (row.nextElementSibling !== before) { moved = true; onMove?.(); }
+  };
+  const edgeScroll = () => {
+    if (!dragging) return;
+    const sc = scroller || document.scrollingElement;
+    const b = scroller ? scroller.getBoundingClientRect() : { top: 0, bottom: innerHeight };
+    const dy = lastY < b.top + 50 ? -10 : lastY > b.bottom - 50 ? 10 : 0;
+    if (dy) { sc.scrollTop += dy; moveTo(lastY); }
+    raf = requestAnimationFrame(edgeScroll);
+  };
+  const end = () => {
+    clearTimeout(timer); timer = null;
+    cancelAnimationFrame(raf);
+    if (!dragging) return;
+    const r = row; dragging = false; row = null;
+    r.classList.remove("drag"); box.classList.remove("dragging");
+    // 끈 직후 click(아이 열기)이 같이 눌리지 않게
+    const stop = (e) => { e.stopPropagation(); e.preventDefault(); };
+    r.addEventListener("click", stop, { capture: true, once: true });
+    setTimeout(() => r.removeEventListener("click", stop, { capture: true }), 400);
+    if (moved) onDrop?.(r);
+  };
+  const down = (x, y, target) => {
+    const r = target.closest(itemSel); if (!r || !box.contains(r)) return;
+    sx = x; sy = y; lastY = y;
+    if (handle && target.closest(handle)) { start(r); return; }
+    timer = setTimeout(() => start(r), 300);
+  };
+  const move = (x, y, e) => {
+    if (dragging) { e.preventDefault(); moveTo(y); return; }
+    if (timer && (Math.abs(x - sx) > 8 || Math.abs(y - sy) > 8)) { clearTimeout(timer); timer = null; } // 그냥 스크롤
+  };
+  box.addEventListener("touchstart", (e) => { const t = e.touches[0]; down(t.clientX, t.clientY, e.target); }, { passive: true });
+  box.addEventListener("touchmove", (e) => { const t = e.touches[0]; move(t.clientX, t.clientY, e); }, { passive: false });
+  box.addEventListener("touchend", end); box.addEventListener("touchcancel", end);
+  box.addEventListener("contextmenu", (e) => { if (e.target.closest(itemSel)) e.preventDefault(); });
+  box.addEventListener("mousedown", (e) => {
+    if (e.button || !e.target.closest(itemSel)) return;
+    down(e.clientX, e.clientY, e.target);
+    const mm = (ev) => { if (dragging) ev.preventDefault(); move(ev.clientX, ev.clientY, ev); };
+    const mu = () => { end(); removeEventListener("mousemove", mm); removeEventListener("mouseup", mu); };
+    addEventListener("mousemove", mm); addEventListener("mouseup", mu);
+  });
+}
+
+// 요일 칸에서 옮기면 전체 동선 순서에 반영: 바로 위 아이 다음(맨 위면 바로 아래 아이 앞)으로
+async function dropOnBoard(el) {
+  const id = el.dataset.dog;
+  const prev = el.previousElementSibling?.closest?.(".pk-n:not(.x)") ? el.previousElementSibling.dataset.dog : null;
+  let next = null; for (let n = el.nextElementSibling; n; n = n.nextElementSibling) if (n.matches(".pk-n:not(.x)")) { next = n.dataset.dog; break; }
+  const order = ps.dogs.filter((d) => d.active).sort((a, b) => byRoute({ dog: a }, { dog: b })).map((d) => d.id).filter((x) => x !== id);
+  let at = prev ? order.indexOf(prev) + 1 : next ? order.indexOf(next) : order.length;
+  if (at < 0) at = order.length;
+  order.splice(at, 0, id);
+  const changed = order.map((d, k) => [d, k + 1]).filter(([d, k]) => dogById(d)?.route_order !== k);
+  changed.forEach(([d, k]) => (dogById(d).route_order = k));
+  draw();
+  const res = await Promise.all(changed.map(([d, k]) => C.sb.from("pd_dogs").update({ route_order: k }).eq("id", d)));
+  toast(res.some((r) => r.error) ? "순서를 저장하지 못했어요" : "동선 순서를 바꿨어요");
 }
 
 async function copyText(text, msg) {
