@@ -80,3 +80,7 @@ create policy "staff all kinder_members" on public.kinder_members for all to aut
 
 -- 고정 요일 (매주 같은 요일 아이: 신청 안 해도 이 요일로 들어감)
 alter table public.pd_dogs add column if not exists fixed_days smallint[] not null default '{}';
+
+-- 휴면 (유치원 명단에서 설정: 지우지 않고 유치원 명단·픽드랍·사진 분류에서 숨김, 호텔링은 그대로)
+alter table public.kinder_members add column if not exists dormant boolean not null default false;
+alter table public.pd_dogs add column if not exists dormant boolean not null default false;

@@ -104,7 +104,7 @@ Deno.serve(async (req) => {
       if (!body.g || String(body.g) !== await groupKey(admin)) return json({ error: "링크가 맞지 않아요. 댕겨올개에서 받은 최신 링크로 열어 주세요." }, 403);
       const num = String(body.phone ?? "").replace(/\D/g, "");
       if (!/^01\d{8,9}$/.test(num)) return json({ error: "전화번호를 정확히 입력해 주세요. (예: 010-1234-5678)" }, 400);
-      const { data } = await admin.from("pd_dogs").select("name, token, phone, note").eq("active", true);
+      const { data } = await admin.from("pd_dogs").select("name, token, phone, note").eq("active", true).eq("dormant", false);
       const hits = (data ?? []).filter((d: { phone: string | null; note: string | null }) =>
         [...String(`${d.phone ?? ""} ${d.note ?? ""}`).matchAll(/01[016789][-\s.]?\d{3,4}[-\s.]?\d{4}/g)].some((m) => m[0].replace(/\D/g, "") === num));
       if (!hits.length) return json({ error: "등록된 번호가 아니에요. 댕겨올개에 등록한 보호자 번호로 입력해 주시거나, 댕겨올개에 문의해 주세요." }, 404);
@@ -112,11 +112,12 @@ Deno.serve(async (req) => {
     }
 
     // 어떤 아이인지
-    let dog: { id: string; name: string; active: boolean; fixed_days: number[] | null } | null = null;
+    let dog: { id: string; name: string; active: boolean; dormant?: boolean; fixed_days: number[] | null } | null = null;
     const token = String(body.token ?? "");
     if (token) {
-      const { data } = await admin.from("pd_dogs").select("id, name, active, fixed_days").eq("token", token).maybeSingle();
+      const { data } = await admin.from("pd_dogs").select("id, name, active, dormant, fixed_days").eq("token", token).maybeSingle();
       dog = data;
+      if (dog?.active && dog.dormant) return json({ error: "지금은 쉬는 중으로 되어 있어요. 다시 다니시려면 댕겨올개에 말씀해 주세요." }, 403);
       if (!dog?.active) return json({ error: "링크가 맞지 않아요. 댕겨올개에 새 링크를 요청해 주세요." }, 403);
     } else if (staff && body.dog_id) {
       const { data } = await admin.from("pd_dogs").select("id, name, active, fixed_days").eq("id", String(body.dog_id)).maybeSingle();

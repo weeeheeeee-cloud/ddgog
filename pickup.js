@@ -38,7 +38,7 @@ async function load() {
     C.sb.from("pd_dogs").select("*").order("name"),
     C.sb.from("pd_requests").select("*").eq("week_start", ps.week),
   ]);
-  ps.dogs = dogs || [];
+  ps.dogs = (dogs || []).filter((d) => !d.dormant); // 휴면(유치원 명단에서 설정)은 안 보임
   ps.reqs = reqs || [];
   // 고정 요일 아이: 이번 주부터, 신청서가 없으면 고정 요일로 간 것으로 봄
   if (ps.week >= mondayOf(kstToday())) {

@@ -73,7 +73,7 @@ async function load() {
   const [m, hp, pd, tt] = await Promise.all([
     C.sb.from("kinder_members").select("*").order("name"),
     C.sb.from("hotel_pets").select("dog_id"),
-    C.sb.from("pd_dogs").select("phone"),
+    C.sb.from("pd_dogs").select("id, name, phone, dormant"),
     C.sb.from("kinder_ticket_types").select("*"),
   ]);
   if (m.error) throw m.error;
@@ -86,8 +86,11 @@ async function load() {
     if (!data || data.length < 1000) break;
   }
   ks.hotelDogIds = new Set((hp.data || []).map((x) => x.dog_id).filter(Boolean));
-  ks.pickupPhones = new Set((pd.data || []).map((x) => digits(x.phone)).filter(Boolean));
+  ks.pd = pd.data || [];
+  ks.pickupPhones = new Set(ks.pd.map((x) => digits(x.phone)).filter(Boolean));
 }
+const live = (m) => m.active && !m.dormant; // 다니는 아이 (그만 다님·휴면 빼고)
+const goneText = (m) => (m.dormant ? " · 💤 휴면" : m.active ? "" : " · 그만 다님");
 const dogOf = (m) => (m.dog_id ? C.dogs.find((d) => d.id === m.dog_id) : null);
 
 export async function renderKinder(ctx) {
@@ -117,7 +120,7 @@ function draw() {
 }
 function drawMembers() {
   const root = $("#kd-main");
-  const act = ks.members.filter((m) => m.active);
+  const act = ks.members.filter(live);
   const gone = ks.members.length - act.length;
   const synced = ks.members.map((m) => m.synced_at).filter(Boolean).sort().pop();
   const bdays = act.filter((m) => isBirthday(m.birthday));
@@ -133,7 +136,7 @@ function drawMembers() {
     ${bdays.length ? `<div class="kd-bday">🎂 오늘 생일: ${bdays.map((m) => `<button data-open="${m.id}">${esc(m.name)}</button>`).join(", ")}</div>` : ""}
     <div class="kd-tools">
       <input id="kd-q" class="ho-search" type="search" placeholder="강아지 이름 · 보호자 이름 · 전화번호 · 견종" value="${esc(ks.q)}" autocomplete="off">
-      ${gone ? `<label class="kd-gone"><input type="checkbox" id="kd-showgone" ${ks.showGone ? "checked" : ""}> 그만 다니는 아이 ${gone}마리 보기</label>` : ""}
+      ${gone ? `<label class="kd-gone"><input type="checkbox" id="kd-showgone" ${ks.showGone ? "checked" : ""}> 그만 다니는·휴면 아이 ${gone}마리 보기</label>` : ""}
     </div>
     <div id="kd-list"></div>
   </div>`;
@@ -154,7 +157,7 @@ function matches(m, q) {
 
 async function drawList() {
   const box = $("#kd-list");
-  const pool = ks.members.filter((m) => m.active || ks.showGone);
+  const pool = ks.members.filter((m) => live(m) || ks.showGone);
   const list = pool.filter((m) => matches(m, ks.q));
   $("#kd-count").textContent = ks.q ? `${list.length} / ${pool.length}마리` : `${pool.length}마리`;
   if (!ks.members.length) {
@@ -169,9 +172,9 @@ async function drawList() {
     ${list.map((m) => {
       const dog = dogOf(m);
       const memo = [m.notes, m.dd_memo].filter(Boolean).join(" · ");
-      return `<button class="ho-tr ${m.active ? "" : "gone"}" data-m="${m.id}">
+      return `<button class="ho-tr ${live(m) ? "" : "gone"}" data-m="${m.id}">
         <span>${dog?.ref_path ? `<img class="kd-av" src="${ref(dog.ref_path)}" alt="">` : `<i class="kd-av none">🐶</i>`}</span>
-        <span class="kd-name"><b>${esc(m.name)}${isBirthday(m.birthday) ? " 🎂" : ""}</b><small>${esc([m.breed, GENDER[m.gender]].filter(Boolean).join(" · "))}${m.active ? "" : " · 그만 다님"}</small></span>
+        <span class="kd-name"><b>${esc(m.name)}${isBirthday(m.birthday) ? " 🎂" : ""}</b><small>${esc([m.breed, GENDER[m.gender]].filter(Boolean).join(" · "))}${goneText(m)}</small></span>
         <span>${esc(m.owner_name || "")}</span>
         <span class="ho-phone">${esc(m.phone || "")}</span>
         <span>${ticketCell(m)}</span>
@@ -208,7 +211,7 @@ async function openMember(id) {
   ].filter(Boolean).join(" ");
   const { ov, close } = modal(`
     <div class="rc-head"><div class="grow"><b class="ho-title"><b class="hk k">K</b> ${esc(m.name)}${isBirthday(m.birthday) ? " 🎂" : ""}</b>
-      <small class="muted">${esc([m.breed, m.owner_name && `보호자 ${m.owner_name}`].filter(Boolean).join(" · "))}${m.active ? "" : " · 그만 다님"}</small></div>
+      <small class="muted">${esc([m.breed, m.owner_name && `보호자 ${m.owner_name}`].filter(Boolean).join(" · "))}${goneText(m)}</small></div>
       <button class="btn ghost sm" data-close>닫기</button></div>
     <div class="rc-body">
       <div class="kd-links">${links}</div>
@@ -234,6 +237,7 @@ async function openMember(id) {
       ${m.synced_at ? `<p class="small muted">다이얼독에서 ${ago(m.synced_at)} 불러온 정보예요</p>` : ""}
     </div>
     <div class="rc-foot">
+      <button class="btn ghost sm" data-dorm>${m.dormant ? "💤 휴면 풀기" : "💤 휴면으로"}</button>
       ${m.dd_pet_id ? `<button class="btn ghost sm" data-gone>${m.active ? "그만 다님으로" : "다시 다님으로"}</button>` : `<button class="btn ghost sm danger" data-del>회원 삭제</button>`}
       <span class="grow"></span>
       <button class="btn ghost sm" data-edit>정보 수정</button>
@@ -253,12 +257,48 @@ async function openMember(id) {
     if (error) { toast("바꾸지 못했어요"); return; }
     m.active = !m.active; close(); toast(m.active ? "다시 다니는 아이로 바꿨어요" : "그만 다니는 아이로 바꿨어요"); draw();
   });
+  $("[data-dorm]", ov).addEventListener("click", () => setDormant(m, !m.dormant, close));
   $("[data-del]", ov)?.addEventListener("click", async () => {
     if (!confirm(`'${m.name}' 회원을 삭제할까요? 되돌릴 수 없어요.\n(사진함 명단은 그대로예요)`)) return;
     const { error } = await C.sb.from("kinder_members").delete().eq("id", m.id);
     if (error) { toast("삭제하지 못했어요"); return; }
     ks.members = ks.members.filter((x) => x.id !== m.id); close(); toast("삭제했어요"); draw();
   });
+}
+
+/* ---------- 휴면 ----------
+// 휴면: 지우지 않고 숨김. 유치원 명단·이용권 현황·픽드랍 목록에서 빠지고, 사진 분류 대표사진 대조에서도 빠짐
+// 호텔링은 그대로 (호텔 고객 정보·예약은 건드리지 않음)
+const nkey = (s) => String(s || "").replace(/\(.*?\)/g, "").replace(/[\s·/]/g, "").toLowerCase();
+function pdOf(m) {
+  const phones = new Set([m.phone, ...(m.owners || []).map((o) => o.phone)].map(digits).filter((p) => p.length >= 10));
+  const byPhone = (ks.pd || []).filter((p) => phones.has(digits(p.phone)));
+  const nm = nkey(m.name);
+  if (byPhone.length === 1) return byPhone;
+  if (byPhone.length > 1) return byPhone.filter((p) => nkey(p.name).startsWith(nm) || nm.startsWith(nkey(p.name)));
+  const byName = (ks.pd || []).filter((p) => nkey(p.name) === nm);
+  return byName.length === 1 ? byName : [];
+}
+async function setDormant(m, on, close) {
+  if (on && !confirm(`'${m.name}'을(를) 휴면으로 바꿀까요?\n지워지지 않고, 유치원 명단·픽드랍 목록·사진 분류에서만 안 보여요.\n호텔링은 그대로예요. 언제든 ‘휴면 풀기’로 되돌릴 수 있어요.`)) return;
+  const now = new Date().toISOString();
+  const { error } = await C.sb.from("kinder_members").update({ dormant: on, updated_at: now }).eq("id", m.id);
+  if (error) { toast("바꾸지 못했어요"); return; }
+  m.dormant = on;
+  const also = [];
+  const dog = dogOf(m);
+  if (dog) {
+    const r = await C.sb.from("dogs").update({ active: !on }).eq("id", dog.id);
+    if (!r.error) { dog.active = !on; also.push("사진 분류"); }
+  }
+  const pds = pdOf(m);
+  if (pds.length) {
+    const r = await C.sb.from("pd_dogs").update({ dormant: on }).in("id", pds.map((p) => p.id));
+    if (!r.error) { pds.forEach((p) => (p.dormant = on)); also.push(`픽드랍(${pds.map((p) => p.name).join(", ")})`); }
+  }
+  close?.();
+  toast(on ? `💤 휴면으로 바꿨어요${also.length ? ` · ${also.join(" · ")}에서도 숨김` : ""}` : `휴면을 풀었어요${also.length ? ` · ${also.join(" · ")}에도 다시 보여요` : ""}`, 4000);
+  draw();
 }
 
 /* ---------- 아이별 이용권 + 차감 내역 ---------- */
@@ -297,7 +337,7 @@ async function drawTickets(m, box) {
 /* ---------- 이용권 현황 ---------- */
 function drawStatus() {
   const main = $("#kd-main");
-  const act = ks.members.filter((m) => m.active && m.dd_pet_id);
+  const act = ks.members.filter((m) => live(m) && m.dd_pet_id);
   const rows = act.map((m) => ({ m, cur: currentOf(m) }));
   const using = rows.filter((r) => r.cur.some((t) => t.status === "inUse"));
   const before = rows.filter((r) => r.cur.length && !r.cur.some((t) => t.status === "inUse"));
