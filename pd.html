@@ -330,8 +330,7 @@ async function openDog(t) {
     rememberDog(t, S.dog.name);
     $("#title").innerHTML = `${esc(S.dog.name)}<br><em>픽드랍</em> 신청`;
     document.title = `${S.dog.name} 픽드랍 신청 · 댕겨올개`;
-    const sunday = new Date(S.today + "T00:00:00Z").getUTCDay() === 0;
-    wi = sunday ? 1 : 0; // 일요일엔 다음 주부터
+    wi = S.weeks.length > 1 ? 1 : 0; // 링크는 항상 다음 주부터 보여 줌 (이번 주는 위 탭에서 볼 수 있음)
     editing = false;
     pick = new Set(S.weeks[wi].days);
     render();

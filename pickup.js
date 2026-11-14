@@ -49,7 +49,7 @@ export async function renderPickup(ctx) {
   C = ctx;
   const today = kstToday();
   if (!ps.week) {
-    ps.week = isoDow(today) === 7 ? addDays(mondayOf(today), 7) : mondayOf(today); // 일요일엔 다음 주부터
+    ps.week = isoDow(today) >= 6 ? addDays(mondayOf(today), 7) : mondayOf(today); // 토·일엔 다음 주부터 (링크 보내는 날)
     ps.day = ps.week === mondayOf(today) ? isoDow(today) : 1;
   }
   await load();
