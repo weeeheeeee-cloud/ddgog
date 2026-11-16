@@ -136,7 +136,7 @@ function draw() {
         <div class="pk-col-h"><b>${DOW[d]}</b><small>${md(dt)}</small><em>${x.on.length}</em></div>
         <div class="pk-col-b">
           ${x.on.map(({ r, dog, added }, j) => `<button class="pk-n ${added ? "add" : ""} ${r.memo_changed_at ? "memo" : ""}" data-dog="${dog.id}" title="${added ? `${when(added)} 추가` : ""}">
-            <span>${esc(dog.name)}</span>${modeTag((r.day_mode || {})[d])}${dog.kind === "occasional" ? `<i class="pk-oc" title="가끔 오는 아이">가끔</i>` : ""}${r.fixed ? `<i class="pk-fx" title="고정">📌</i>` : ""}${r.memo ? `<i class="pk-mi ${r.memo_changed_at ? "new" : ""}" data-memo="${dog.id}" aria-label="메모 보기">📝</i>` : ""}</button>`).join("")}
+            <span>${esc(dog.name)}</span>${modeTag((r.day_mode || {})[d])}${r.fixed ? `<i class="pk-fx" title="고정">📌</i>` : ""}${r.memo ? `<i class="pk-mi ${r.memo_changed_at ? "new" : ""}" data-memo="${dog.id}" aria-label="메모 보기">📝</i>` : ""}</button>`).join("")}
           ${x.cancelled.map(({ dog, at }) => `<button class="pk-n x" data-dog="${dog.id}" title="${when(at)} 취소"><span>${esc(dog.name)}</span></button>`).join("")}
         </div>
       </div>`;
