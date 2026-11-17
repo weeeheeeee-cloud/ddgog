@@ -3176,7 +3176,10 @@ async function renderRoster() {
   const q = norm($("#roster-search").value);
   const named = state.dogs.filter((d) => !d.auto && (!q || norm(d.name).includes(q)));
   const autos = state.dogs.filter((d) => d.auto && d.active && !q);
-  const paths = state.dogs.flatMap((d) => (d.dog_refs || []).map((r) => r.path).concat(d.ref_path || []));
+  // 휴면(숨김) 아이는 대표 사진을 불러오지 않음 (얼굴 사진 하나만) — '사진 보기'를 누를 때만
+  state.showOff = state.showOff || new Set();
+  const showRefs = (d) => d.active || state.showOff.has(d.id);
+  const paths = state.dogs.flatMap((d) => (showRefs(d) ? (d.dog_refs || []).map((r) => r.path) : []).concat(d.ref_path || []));
   const ref = await signed("refs", paths);
 
   const card = (d) => {
@@ -3199,15 +3202,16 @@ async function renderRoster() {
           <button class="btn ${d.auto ? "primary" : "ghost"} mini" data-edit>${d.auto ? "이름" : "수정"}</button>
           ${d.auto ? "" : `<button class="btn ghost mini" data-fix>학습 정정</button>`}
           <button class="btn ghost mini" data-merge>합치기</button>
-          ${d.auto ? `<button class="btn ghost mini danger" data-delete-dog>삭제</button>` : ""}
           <button class="btn ghost mini" data-toggle>${d.active ? "숨기기" : "표시"}</button>
+          <button class="btn ghost mini danger" data-delete-dog>삭제</button>
         </div>
       </div>
+      ${!showRefs(d) ? `<p class="ref-hint off">💤 휴면·숨김이라 대표 사진 ${refs.length}장을 빼 두었어요 (AI 분류에도 안 써요) <button class="btn ghost mini" data-show-off>사진 보기</button></p>` : `
       <div class="ref-strip">
         ${refs.map((r, i) => `<span class="ref-thumb ${r.path.includes("-learn-") ? "learned" : ""}"><img src="${ref(r.path)}" alt="" data-view-ref="${i}" title="크게 보기">${r.path.includes("-learn-") ? `<i class="lb">학습</i>` : ""}${r.id ? `<b class="x" data-del-ref="${r.id}" title="이 아이가 아니면 빼기">×</b>` : ""}</span>`).join("")}
         <button class="ref-add" data-add-ref>＋<small>사진</small></button>
       </div>
-      <p class="ref-hint ${refs.length >= 3 ? "ok" : ""}">대표 사진 ${refs.length}장${refs.length < 3 ? " · 여러 각도로 많이 올릴수록 정확해요" : refs.length > 10 ? " ✓ (AI는 매번 이 중 최대 10장을 골고루 골라 참고해요)" : " ✓ 더 올려도 돼요"}</p>
+      <p class="ref-hint ${refs.length >= 3 ? "ok" : ""}">대표 사진 ${refs.length}장${refs.length < 3 ? " · 여러 각도로 많이 올릴수록 정확해요" : refs.length > 10 ? " ✓ (AI는 매번 이 중 최대 10장을 골고루 골라 참고해요)" : " ✓ 더 올려도 돼요"}</p>`}
       <div class="fix-box hidden"></div>
       <div class="merge-box hidden">
         <span class="small">이 강아지를</span>
@@ -3253,7 +3257,7 @@ async function renderRoster() {
 
   $$(".dog-card").forEach((row) => {
     const dog = dogById(row.dataset.id);
-    $("[data-add-ref]", row).addEventListener("click", () => { refTarget = dog.id; $("#roster-file").click(); });
+    $("[data-add-ref]", row)?.addEventListener("click", () => { refTarget = dog.id; $("#roster-file").click(); });
     $$("[data-view-ref]", row).forEach((im) => im.addEventListener("click", () => openRefView(dog, +im.dataset.viewRef)));
     $$("[data-del-ref]", row).forEach((x) => x.addEventListener("click", async () => {
       const r = dog.dog_refs.find((y) => y.id === x.dataset.delRef);
@@ -3303,8 +3307,19 @@ async function renderRoster() {
     });
     const box = $(".merge-box", row);
     $("[data-merge]", row).addEventListener("click", () => box.classList.toggle("hidden"));
+    $("[data-show-off]", row)?.addEventListener("click", () => { state.showOff.add(dog.id); renderRoster(); });
     $("[data-delete-dog]", row)?.addEventListener("click", async () => {
-      if (!confirm(`'${dog.name}' 그룹을 삭제할까요?\n이 그룹의 사진은 지워지지 않고 '분류 안 된 사진'으로 돌아가요.`)) return;
+      if (dog.auto) {
+        if (!confirm(`'${dog.name}' 그룹을 삭제할까요?\n이 그룹의 사진은 지워지지 않고 '분류 안 된 사진'으로 돌아가요.`)) return;
+      } else {
+        const n = (dog.dog_refs || []).length;
+        if (!confirm(`'${dog.name}'${dog.breed ? ` (${dog.breed})` : ""}을(를) DB에서 완전히 지울까요?\n\n· 대표 사진 ${n}장, AI가 배운 내용, 실수 기록이 모두 지워져요\n· 지난 날짜 사진은 남고, 이 아이 표시만 빠져요\n· 되돌릴 수 없어요\n\n잠깐 안 오는 아이면 '숨기기'(휴면)를 쓰세요.`)) return;
+        if (prompt(`정말 지우려면 이름 '${dog.name}'을(를) 그대로 적어 주세요`) !== dog.name) { toast("이름이 달라서 지우지 않았어요"); return; }
+        // 실수 기록 사진(저장소)도 같이 정리
+        const { data: les } = await sb.from("lessons").select("path").or(`wrong_dog.eq.${dog.id},right_dog.eq.${dog.id}`);
+        const lp = (les || []).map((l) => l.path).filter(Boolean);
+        for (let i = 0; i < lp.length; i += 100) await sb.storage.from("refs").remove(lp.slice(i, i + 100));
+      }
       await deleteDogs([dog.id]);
     });
     $("[data-merge-cancel]", row).addEventListener("click", () => box.classList.add("hidden"));

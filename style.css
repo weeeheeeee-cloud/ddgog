@@ -1394,3 +1394,6 @@ input, select, textarea { max-width: 100%; min-width: 0; }
 .same-name.newname{border-color:#86efac;background:#f0fdf4}
 .same-name.newname small.muted{display:block;margin-top:2px}
 .same-name.newname .same-opt{padding:6px 12px}
+
+/* DB: 휴면·숨김 아이는 대표 사진 접어 둠 */
+.ref-hint.off{color:var(--muted,#6b7280);display:flex;align-items:center;gap:8px;flex-wrap:wrap}
