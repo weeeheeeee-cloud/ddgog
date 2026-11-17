@@ -201,6 +201,8 @@ async function openMember(id) {
   if (!m) return;
   const dog = dogOf(m);
   const ref = await C.signed("refs", dog?.ref_path ? [dog.ref_path] : []);
+  const { data: forms } = await C.sb.from("kinder_forms").select("*").eq("member_id", m.id).order("created_at");
+  const formUrl = await C.signed(FORM_BUCKET, (forms || []).map((f) => f.path));
   const row = (k, v) => (v ? `<div class="ho-kv"><span>${k}</span><b>${v}</b></div>` : "");
   const others = (m.owners || []).filter((o) => !o.main && (o.name || o.phone));
   const links = [
@@ -228,6 +230,7 @@ async function openMember(id) {
             <b>${esc(m.name)}</b><br><small class="muted">${[m.breed, GENDER[m.gender], NEUT[m.neutered], m.birthday ? `${ageOf(m.birthday)} (${m.birthday})` : "", m.weight ? `${m.weight}kg` : ""].filter(Boolean).map(esc).join(" · ") || "정보 없음"}</small></div></div>
         </section>
       </div>
+      ${(forms || []).length ? `<section><h3>상담지 원본</h3><div class="ho-forms">${forms.map((f) => `<a href="${formUrl(f.path)}" target="_blank" rel="noopener"><img src="${formUrl(f.path)}" alt="상담지"></a>`).join("")}</div></section>` : ""}
       ${m.dd_pet_id ? `<section><h3>이용권 · 차감 내역</h3><div id="kd-tix"><p class="muted small">불러오는 중…</p></div></section>` : ""}
       ${m.dd_memo ? `<section><h3>다이얼독 메모</h3><p class="ho-pre">${esc(m.dd_memo)}</p></section>` : ""}
       <section><h3>우리 메모 <small class="muted">다이얼독에서 불러와도 지워지지 않아요</small></h3>
@@ -262,6 +265,7 @@ async function openMember(id) {
     if (!confirm(`'${m.name}' 회원을 삭제할까요? 되돌릴 수 없어요.\n(사진함 명단은 그대로예요)`)) return;
     const { error } = await C.sb.from("kinder_members").delete().eq("id", m.id);
     if (error) { toast("삭제하지 못했어요"); return; }
+    if ((forms || []).length) await C.sb.storage.from(FORM_BUCKET).remove(forms.map((f) => f.path));
     ks.members = ks.members.filter((x) => x.id !== m.id); close(); toast("삭제했어요"); draw();
   });
 }
@@ -392,14 +396,34 @@ function drawPrices() {
   $("#kd-sync", main).addEventListener("click", openSync);
 }
 
-/* ---------- 등록·수정 ---------- */
+/* ---------- 등록·수정 (상담지 사진 · AI 자동 입력) ---------- */
+// 상담지는 호텔링과 같은 종이(호텔 / 데이케어 입실 상담지)라서 같은 AI(hotel-form)로 읽고, 사진은 hotel-forms 버킷 kinder/ 아래에 둠
+const FORM_BUCKET = "hotel-forms";
+async function resizeToJpeg(file, max = 1800, q = 0.85) {
+  const bmp = await createImageBitmap(file, { imageOrientation: "from-image" });
+  const s = Math.min(1, max / Math.max(bmp.width, bmp.height));
+  const c = document.createElement("canvas");
+  c.width = Math.round(bmp.width * s); c.height = Math.round(bmp.height * s);
+  c.getContext("2d").drawImage(bmp, 0, 0, c.width, c.height);
+  bmp.close?.();
+  return await new Promise((r) => c.toBlob(r, "image/jpeg", q));
+}
+const blobToB64 = (b) => new Promise((r) => { const fr = new FileReader(); fr.onload = () => r(String(fr.result).split(",")[1]); fr.readAsDataURL(b); });
+
 function openForm(m) {
   const v = m || {};
   const { ov, close } = modal(`
     <div class="rc-head"><div class="grow"><b>${m ? `${esc(m.name)} 정보 수정` : "신규 유치원 회원"}</b>
       ${m?.dd_pet_id ? `<small class="muted">다이얼독 회원이라 다음에 불러오면 다이얼독 정보로 바뀌어요. 바꿀 건 다이얼독에서도 고쳐 주세요 (우리 메모는 그대로)</small>` : ""}</div>
       <button class="btn ghost sm" data-close>닫기</button></div>
-    <div class="rc-body">
+    <div class="rc-body ho-form">
+      <section class="ho-ai">
+        <div class="ho-ai-head"><b>📄 상담지 사진</b><small class="muted">찍거나 골라서 올리면 AI가 칸을 채워 줘요. 여러 장도 돼요. 사진은 회원 정보에 같이 저장돼요.</small></div>
+        <div class="ho-ai-row"><div id="kf-forms" class="ho-forms"></div>
+          <label class="btn ghost sm">사진 추가<input id="kf-file" type="file" accept="image/*" multiple hidden></label>
+          <button class="btn primary sm" id="kf-ai" type="button" disabled>AI로 채우기</button></div>
+        <p id="kf-ai-msg" class="small muted"></p>
+      </section>
       <h3>강아지</h3>
       <div class="ho-grid">
         <label>이름<input id="kf-name" value="${esc(v.name || "")}"></label>
@@ -418,7 +442,45 @@ function openForm(m) {
       </div>
     </div>
     <div class="rc-foot"><button class="btn ghost sm" data-close>취소</button><button class="btn primary sm" id="kf-save">저장</button></div>`, "wide");
-  $("#kf-name", ov).focus();
+  if (m) $("#kf-name", ov).focus();
+
+  const newForms = []; // { blob, url }
+  const drawForms = () => {
+    $("#kf-forms", ov).innerHTML = newForms.map((f, i) => `<span class="ho-fthumb"><img src="${f.url}" alt=""><button type="button" data-frm="${i}">×</button></span>`).join("");
+    $$("[data-frm]", ov).forEach((b) => b.addEventListener("click", () => { const [f] = newForms.splice(+b.dataset.frm, 1); URL.revokeObjectURL(f.url); drawForms(); }));
+    $("#kf-ai", ov).disabled = !newForms.length;
+  };
+  $("#kf-file", ov).addEventListener("change", async (e) => {
+    for (const file of [...e.target.files]) {
+      try { const blob = await resizeToJpeg(file); newForms.push({ blob, url: URL.createObjectURL(blob) }); } catch { toast("사진을 열지 못했어요"); }
+    }
+    e.target.value = "";
+    drawForms();
+  });
+  const setIf = (sel, val) => { const el = $(sel, ov); if (val != null && val !== "" && el && !el.value) { el.value = val; el.classList.add("ai-filled"); } };
+  $("#kf-ai", ov).addEventListener("click", async () => {
+    const btn = $("#kf-ai", ov), msg = $("#kf-ai-msg", ov);
+    btn.disabled = true; btn.textContent = "읽는 중…"; msg.textContent = "AI가 상담지를 읽고 있어요. 10~30초 걸려요.";
+    try {
+      const images = await Promise.all(newForms.map((f) => blobToB64(f.blob)));
+      const { data, error } = await C.sb.functions.invoke("hotel-form", { body: { images } });
+      if (error) { let t = "읽지 못했어요"; try { t = (await error.context.json()).error || t; } catch { /* 무시 */ } throw new Error(t); }
+      const f = data.form || {}, p = (f.pets || []).find((x) => x && x.name) || {};
+      setIf("#kf-name", p.name); setIf("#kf-breed", p.breed);
+      setIf("#kf-gender", p.sex === "M" || p.sex === "F" ? p.sex : "");
+      setIf("#kf-neut", p.neutered === "yes" ? "neutered" : p.neutered === "no" ? "unneutered" : "");
+      const w = parseFloat(String(p.weight ?? "").replace(/[^\d.]/g, "")); setIf("#kf-w", Number.isFinite(w) && w > 0 ? String(w) : "");
+      setIf("#kf-owner", f.owner_name); setIf("#kf-phone", f.phone ? fmtPhone(f.phone) : ""); setIf("#kf-addr", f.address);
+      // 나이·건강·행동·요청 사항은 '우리 메모'에 (생일 칸은 정확한 날짜를 알 때만 직접 넣어 주세요)
+      const extra = [p.age && `나이: ${p.age}`, f.health && `건강: ${f.health}`, f.behavior && `행동: ${f.behavior}`, f.requests && `요청: ${f.requests}`,
+        f.vaccines?.hospital && `접종병원: ${f.vaccines.hospital}`].filter(Boolean).join("\n");
+      setIf("#kf-notes", extra);
+      const more = (f.pets || []).filter((x) => x && x.name).length > 1 ? " 상담지에 아이가 여러 마리 있어요. 첫째 아이만 넣었으니 다른 아이는 따로 등록해 주세요." : "";
+      msg.innerHTML = `✅ 다 읽었어요. <b>노란 칸</b>이 AI가 채운 곳이에요. 확인하고 고쳐 주세요.${(f.unsure || []).length ? ` 확실하지 않은 칸: ${esc(f.unsure.join(", "))}` : ""}${more}`;
+    } catch (err) { msg.textContent = `⚠️ ${err.message}`; }
+    btn.disabled = !newForms.length; btn.textContent = "AI로 채우기";
+  });
+
   $("#kf-save", ov).addEventListener("click", async () => {
     const name = $("#kf-name", ov).value.trim();
     if (!name) { toast("이름을 넣어 주세요"); return; }
@@ -437,9 +499,18 @@ function openForm(m) {
       if (same.length === 1) row.dog_id = same[0].id;
     }
     const btn = $("#kf-save", ov); btn.disabled = true;
-    const q = m ? C.sb.from("kinder_members").update(row).eq("id", m.id) : C.sb.from("kinder_members").insert(row);
-    const { error } = await q;
+    const q = m ? C.sb.from("kinder_members").update(row).eq("id", m.id).select("id") : C.sb.from("kinder_members").insert(row).select("id");
+    const { data: saved, error } = await q;
     if (error) { toast("저장하지 못했어요"); btn.disabled = false; return; }
+    const id = m?.id || saved?.[0]?.id;
+    let failed = 0;
+    for (const f of newForms) {
+      const path = `kinder/${id}/${crypto.randomUUID()}.jpg`;
+      const up = await C.sb.storage.from(FORM_BUCKET).upload(path, f.blob, { contentType: "image/jpeg" });
+      const ins = up.error ? up : await C.sb.from("kinder_forms").insert({ member_id: id, path });
+      if (ins.error) failed++;
+    }
+    if (failed) toast(`상담지 사진 ${failed}장을 저장하지 못했어요`, 4000);
     close(); toast(m ? "고쳤어요" : "회원을 넣었어요");
     await load(); draw();
   });
