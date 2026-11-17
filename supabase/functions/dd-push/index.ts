@@ -6,6 +6,7 @@
 //  action "members": { token, pets } → 다이얼독 회원 명단을 유치원 탭(kinder_members)에 넣기/갱신
 //  action "tickets": { token, types, tickets, pet_ids } → 이용권 가격표·아이별 이용권
 //  action "usage": { token, ticket_ids, rows } → 이용권별 차감(예약·출석·취소) 내역
+//  action "link": { token, dog_id, pet_id } → 다이얼독과 연결 안 된 사진함 아이를 다이얼독 반려견에 연결
 //  list 응답에는 note(저장된 글), 아이별 hotel(그날 H 표시), others(다이얼독에 연결 안 된 아이)도 들어 있음
 // 관리 탭에서 만든 dd_push_links 열쇠가 켜져 있어야만 동작
 
@@ -38,7 +39,10 @@ Deno.serve(async (req) => {
     if (body.action === "list") {
       const day = typeof body.day === "string" && /^\d{4}-\d{2}-\d{2}$/.test(body.day) ? body.day : kstToday();
       const { data: dogs } = await admin.from("dogs").select("id, name, dd_pet_id, auto").eq("auto", false);
-      const byDog = new Map((dogs ?? []).filter((d) => d.dd_pet_id).map((d) => [d.id, d]));
+      // 사진함 아이에 다이얼독 번호가 없어도, 유치원 회원 명단에서 이 아이와 연결돼 있으면 그 번호로 보냄
+      const { data: kms } = await admin.from("kinder_members").select("dog_id, dd_pet_id").not("dog_id", "is", null).not("dd_pet_id", "is", null);
+      const kmPet = new Map((kms ?? []).map((k) => [k.dog_id, k.dd_pet_id]));
+      const byDog = new Map((dogs ?? []).map((d) => ({ ...d, dd_pet_id: d.dd_pet_id || kmPet.get(d.id) || null })).filter((d) => d.dd_pet_id).map((d) => [d.id, d]));
       const nameOf = new Map((dogs ?? []).map((d) => [d.id, d.name]));
       // 그날 H(호텔링) 표시된 아이
       // (D 데이케어 손님도 다이얼독 유치원생이 아니라서 같이 뺌)
@@ -52,19 +56,25 @@ Deno.serve(async (req) => {
         photos.push(...(data ?? []));
         if (!data || data.length < 1000) break;
       }
-      const { data: done } = await admin.from("dd_pushed").select("photo_id, pet_id").in("photo_id", photos.map((p) => p.id).slice(0, 5000));
-      const pushed = new Set((done ?? []).map((x) => `${x.photo_id}|${x.pet_id}`));
+      // 이미 넣은 사진 (200장씩 나눠서 — 한 번에 묻으면 주소가 길어지거나 1,000줄에서 잘려서 빠짐)
+      const pushed = new Set<string>();
+      const ids = photos.map((p) => p.id);
+      for (let i = 0; i < ids.length; i += 200) {
+        const { data: done, error } = await admin.from("dd_pushed").select("photo_id, pet_id").in("photo_id", ids.slice(i, i + 200)).limit(5000);
+        if (error) return json({ error: `보낸 기록을 읽지 못했어요: ${error.message}` }, 500);
+        (done ?? []).forEach((x) => pushed.add(`${x.photo_id}|${x.pet_id}`));
+      }
       // 사진함에서 정한 순서(맨 앞 = 대표 사진)
       const { data: orders } = await admin.from("photo_order").select("dog_id, ids").eq("day", day);
       const orderOf = new Map((orders ?? []).map((o: { dog_id: string; ids: string[] }) => [o.dog_id, new Map((o.ids ?? []).map((id, i) => [id, i]))]));
       const out = new Map<string, { petId: string; name: string; dogId: string; photos: { id: string; path: string; rotation: number; pushed: boolean; t: string }[] }>();
-      const others = new Map<string, { name: string; hotel: boolean; n: number }>(); // 사진은 있는데 다이얼독에 연결 안 된 아이
+      const others = new Map<string, { id: string; name: string; hotel: boolean; n: number }>(); // 사진은 있는데 다이얼독에 연결 안 된 아이
       for (const p of photos) {
         for (const id of p.dog_ids ?? []) {
           const d = byDog.get(id);
           if (!d) {
             if (!nameOf.has(id)) continue;
-            const o = others.get(id) ?? { name: nameOf.get(id)!, hotel: hotelIds.has(id), n: 0 };
+            const o = others.get(id) ?? { id, name: nameOf.get(id)!, hotel: hotelIds.has(id), n: 0 };
             o.n++; others.set(id, o);
             continue;
           }
@@ -197,6 +207,16 @@ Deno.serve(async (req) => {
         if (error) return json({ error: `차감 내역 저장 실패: ${error.message}` }, 500);
       }
       return json({ ok: true, rows: rows.length });
+    }
+    if (body.action === "link") {
+      const dogId = String(body.dog_id ?? ""), petId = String(body.pet_id ?? "");
+      if (!dogId || !petId) return json({ error: "bad request" }, 400);
+      const { data: taken } = await admin.from("dogs").select("name").eq("dd_pet_id", petId).neq("id", dogId).limit(1);
+      if (taken?.length) return json({ error: `다이얼독의 이 아이는 이미 사진함 '${taken[0].name}'에 연결돼 있어요` }, 409);
+      const { error } = await admin.from("dogs").update({ dd_pet_id: petId }).eq("id", dogId).is("dd_pet_id", null);
+      if (error) return json({ error: error.message }, 500);
+      await admin.from("kinder_members").update({ dog_id: dogId }).eq("dd_pet_id", petId).is("dog_id", null);
+      return json({ ok: true });
     }
     if (body.action === "note") {
       const text = String(body.text ?? "").slice(0, 1000);

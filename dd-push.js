@@ -160,26 +160,29 @@
 
   /* ---------- 목록 ---------- */
   if (!TOKEN) return fail("북마크에 열쇠가 없어요. 댕겨올개 관리자 탭에서 북마크를 다시 만들어 주세요.");
-  let daycare, unsent, drafts, mine;
-  try {
+  let daycare, unsent, drafts, mine, rows, missing, unlinked, noteText = null;
+  async function loadAll() {
     [daycare, unsent, drafts, mine] = await Promise.all([
       dd("reports/pets?daycare=true&hotel=false&unsent=false"),
       dd("reports/pets?daycare=true&hotel=false&unsent=true"),
       dd("reports/drafts").catch(() => []),
       fn({ action: "list" }),
     ]);
-  } catch (e) { return fail(e.message); }
   const unsentIds = new Set((unsent || []).map((p) => String(p.id)));
   const draftText = JSON.stringify(drafts || []);
   const photosOf = new Map((mine.dogs || []).map((d) => [String(d.petId), d]));
-  let noteText = mine.note || "";
+  if (noteText === null) noteText = mine.note || "";
   const rollIds = new Set((daycare || []).map((p) => String(p.id)));
   // 사진은 분류됐는데 다이얼독 오늘 출석부에 없는 아이 (H 호텔링은 원래 안 넣으니 빼고)
-  const missing = [
-    ...(mine.dogs || []).filter((d) => !rollIds.has(String(d.petId)) && !d.hotel && d.photos.some((x) => !x.pushed)).map((d) => d.name),
-    ...(mine.others || []).filter((o) => !o.hotel).map((o) => o.name),
-  ].sort((a, b) => a.localeCompare(b, "ko"));
-  const rows = (daycare || []).map((p) => {
+  missing = (mine.dogs || []).filter((d) => !rollIds.has(String(d.petId)) && !d.hotel && d.photos.some((x) => !x.pushed)).map((d) => d.name)
+    .sort((a, b) => a.localeCompare(b, "ko"));
+  // 사진은 있는데 다이얼독 회원과 연결이 안 된 아이 → 출석부에 이름이 같은(비슷한) 아이가 있으면 연결 후보로
+  const nk = (x) => String(x || "").replace(/\(.*?\)/g, "").replace(/[\s·/]/g, "").replace(/이$/, "");
+  const withPhotos = new Set((mine.dogs || []).map((d) => String(d.petId)));
+  unlinked = (mine.others || []).filter((o) => !o.hotel).map((o) => ({
+    ...o, cands: (daycare || []).filter((p) => !withPhotos.has(String(p.id)) && nk(p.name) && nk(o.name) && (nk(p.name) === nk(o.name) || nk(p.name).includes(nk(o.name)) || nk(o.name).includes(nk(p.name)))),
+  })).sort((a, b) => a.name.localeCompare(b.name, "ko"));
+  rows = (daycare || []).map((p) => {
     const d = photosOf.get(String(p.id));
     const fresh = (d?.photos || []).filter((x) => !x.pushed);
     let state = "ready", note = "";
@@ -191,13 +194,21 @@
     return { pet: p, photos: fresh.slice(0, MAX), state, note, on: state === "ready" };
   }).sort((a, b) => (a.state === "ready" ? 0 : 1) - (b.state === "ready" ? 0 : 1) || a.pet.name.localeCompare(b.pet.name, "ko"));
 
+  }
+  try { await loadAll(); } catch (e) { return fail(e.message); }
+
+  const linkHtml = () => unlinked.length
+    ? `<div class="miss"><b>🔗 다이얼독과 연결 안 된 아이 ${unlinked.length}마리</b><small>사진은 분류됐는데 다이얼독 회원과 짝이 안 지어져서 못 넣어요. 출석부에 같은 아이가 있으면 눌러서 연결해 주세요.</small>
+      ${unlinked.map((o) => `<div style="margin-top:6px"><b style="display:inline">${esc(o.name)}</b> <small style="display:inline">사진 ${o.n}장</small> ${o.cands.length
+        ? o.cands.map((p) => `<button class="sub" style="padding:4px 10px;margin:2px" data-link="${esc(o.id)}" data-pet="${esc(p.id)}" data-nm="${esc(o.name)}" data-pnm="${esc(p.name)}">→ 출석부 ${esc(p.name)}</button>`).join("")
+        : `<small style="display:inline">· 출석부에 비슷한 이름이 없어요 (다이얼독 예약 확인)</small>`}</div>`).join("")}</div>` : "";
   const missHtml = () => missing.length
     ? `<div class="miss"><b>⚠️ 출석부에 없어서 못 넣는 아이 ${missing.length}마리</b>${missing.map(esc).join(", ")}<br><small>다이얼독 오늘 출석부에 없어요. 예약을 넣거나 직접 알림장을 써 주세요.</small></div>` : "";
   function drawList() {
     const ready = rows.filter((r) => r.on);
     $bd.innerHTML = `<p class="msg">${+mine.day.slice(5, 7)}월 ${+mine.day.slice(8, 10)}일 출석부 ${rows.length}마리 · 분류된 사진과 아래 글을 아이별 알림장으로 <b>보호자에게 바로 전송</b>해요.</p>`
       + `<div class="note"><b>✍️ 알림장 글 (모든 아이 똑같이 들어가요)</b><textarea id="ddg-note" maxlength="1000" placeholder="글 없음 — 사진만 넣어요">${esc(noteText)}</textarea><small>댕겨올개 사이트의 📮 다이얼독 알림장 버튼에서 붙여 넣은 글이에요 · 여기서 고쳐도 돼요</small></div>`
-      + missHtml()
+      + linkHtml() + missHtml()
       + `<div class="sec">출석부 아이</div>`
       + (rows.length ? rows.map((r, i) => `<label class="row ${r.state === "ready" ? "" : "off"}">
           <input type="checkbox" data-i="${i}" ${r.on ? "checked" : ""} ${r.state === "ready" ? "" : "disabled"}>
@@ -209,6 +220,12 @@
     $ft.querySelector(".go").onclick = run;
     $bd.querySelector("#ddg-note").oninput = (e) => { noteText = e.target.value; };
     $bd.querySelectorAll("input[data-i]").forEach((el) => (el.onchange = () => { rows[+el.dataset.i].on = el.checked; drawList(); }));
+    $bd.querySelectorAll("[data-link]").forEach((b) => (b.onclick = async () => {
+      if (!confirm(`사진함 '${b.dataset.nm}'을(를) 다이얼독 '${b.dataset.pnm}'(으)로 연결할까요?\n다음부터는 자동으로 이 아이 알림장에 들어가요.`)) return;
+      b.disabled = true; b.textContent = "연결 중…";
+      try { await fn({ action: "link", dog_id: b.dataset.link, pet_id: b.dataset.pet }); await loadAll(); drawList(); }
+      catch (e) { alert(e.message); b.disabled = false; b.textContent = `→ 출석부 ${b.dataset.pnm}`; }
+    }));
   }
   drawList();
 
@@ -247,9 +264,12 @@
     }
     // 전송 끝 → 그날 사진 다시 학습하고 대표 사진 정리 (서버에서 뒤로)
     if (donePets.length && anyPhoto) await fn({ action: "finish", pet_ids: donePets, photo_id: anyPhoto }).catch(() => {});
+    const skipped = rows.filter((r) => !todo.includes(r) && r.state !== "hotel")
+      .map((r) => `${r.pet.name} — ${r.state === "ready" ? "체크를 뺐어요" : r.note}`);
     $bd.innerHTML = `<p class="${errs.length ? "err" : "ok"}">${okDogs}건을 보호자에게 보냈어요${errs.length ? ` · ${errs.length}건 실패` : ""}</p>`
       + (errs.length ? `<p class="msg">${errs.map(esc).join("<br>")}</p>` : "")
-      + missHtml()
+      + (skipped.length ? `<div class="note"><b>이번에 안 보낸 출석부 아이 ${skipped.length}마리</b><small>${skipped.map(esc).join("<br>")}</small></div>` : "")
+      + linkHtml() + missHtml()
       + `<p class="msg">알림장 목록에서 보낸 알림장을 볼 수 있어요.${donePets.length ? "<br>오늘 사진으로 아이들 모습을 다시 학습하는 중이에요 (몇 분 걸려요, 창 닫아도 돼요)." : ""}</p>`;
     $ft.innerHTML = `<button class="sub">닫기</button><button class="go">알림장 목록 보기</button>`;
     $ft.querySelector(".sub").onclick = () => panel.remove();
