@@ -2610,8 +2610,16 @@ $("#sheet-ref").addEventListener("click", async (e) => {
     let blob = await fetch(url(p.path)).then((r) => r.blob());
     if (p.rotation) blob = await rotateBlob(blob, p.rotation);
     const n = await addRefs(dog, [blob]);
-    toast(n ? `${dog.name} 대표 사진에 넣었어요 ⭐ (분류는 ‘분류 저장’으로)` : "저장하지 못했어요");
-    if (n) queueRescan();
+    if (!n) { toast("저장하지 못했어요"); }
+    else {
+      queueRescan();
+      // 고른 아이로 분류까지 바로 저장 → 사진 화면·명단(대표 사진 장수)에 바로 반영
+      btn.disabled = false; btn.textContent = "⭐ 대표 사진";
+      $("#sheet-save").click();
+      setTimeout(() => toast(`${dog.name} 대표 사진에 넣고 분류도 저장했어요 ⭐`), 50);
+      if (!$("#tab-roster")?.classList.contains("hidden")) renderRoster();
+      return;
+    }
   } catch (err) { console.error(err); toast("저장하지 못했어요"); }
   btn.disabled = false; btn.textContent = "⭐ 대표 사진";
 });
