@@ -552,6 +552,14 @@ function sortForDog(dogId, list) {
   return [...list].sort((a, b) => (rank.has(a.id) ? rank.get(a.id) : 1e9) - (rank.has(b.id) ? rank.get(b.id) : 1e9) || t(a) - t(b));
 }
 const coverOf = (dogId) => (state.order.get(dogId) || [])[0] || null;
+// 이 사진을 그 아이 폴더의 대표 사진(맨 앞)으로 — '순서·대표' 창의 ⭐와 같음
+async function setCover(dogId, photoId) {
+  const list = state.photos.filter((p) => p.status === "done" && (p.dog_ids.includes(dogId) || p.id === photoId));
+  const ids = [photoId, ...sortForDog(dogId, list).map((p) => p.id).filter((id) => id !== photoId)];
+  const { error } = await sb.from("photo_order").upsert({ day: state.day, dog_id: dogId, ids, updated_at: new Date().toISOString() }, { onConflict: "day,dog_id" });
+  if (error) throw error;
+  state.order.set(dogId, ids);
+}
 
 // 지문이 없는 예전 사진은 썸네일로 계산해서 채워 둠 (한 번만)
 let backfilling = false;
@@ -2618,31 +2626,32 @@ $("#sheet-ref").addEventListener("click", async (e) => {
   const btn = e.currentTarget;
   let dog = dogById(ids[0]);
   if (ids.length > 1) {
-    // 여러 마리를 골랐으면 버튼 위에 아이 이름 버튼을 띄워서 고르게 (번호 입력 창 대신)
+    // 여러 마리를 골랐으면 버튼 위에 아이 이름 버튼을 띄워서 고르게
     dog = await pickRefDog(btn, ids.map(dogById).filter(Boolean));
     if (!dog) return;
   }
   btn.disabled = true; btn.textContent = "저장 중…";
   try {
-    const url = await signed("photos", [p.path]);
-    let blob = await fetch(url(p.path)).then((r) => r.blob());
-    if (p.rotation) blob = await rotateBlob(blob, p.rotation);
-    const n = await addRefs(dog, [blob]);
-    if (!n) { toast("저장하지 못했어요"); }
-    else {
-      queueRescan();
-      // 고른 아이로 분류까지 바로 저장 → 사진 화면·명단(대표 사진 장수)에 바로 반영
-      btn.disabled = false; btn.textContent = "⭐ 대표 사진";
-      sheetStay = true;               // 분류 저장은 하되 다음 사진으로 넘어가지 않음 (저장된 걸 눈으로 확인)
-      $("#sheet-save").click();
-      setTimeout(() => {
-        toast(`⭐ ${dog.name} 대표 사진에 넣었어요 (지금 ${(dog.dog_refs || []).length}장) · 분류도 저장`);
-        btn.textContent = `✓ ${dog.name} 대표 사진`; btn.classList.add("done");
-        setTimeout(() => { btn.textContent = "⭐ 대표 사진"; btn.classList.remove("done"); }, 2500);
-      }, 50);
-      if (!$("#tab-roster")?.classList.contains("hidden")) renderRoster();
-      return;
+    // 1) 분류 저장 (그 사진에 머묾) → 2) 이 아이 폴더의 대표 사진(맨 앞)으로
+    sheetStay = true;
+    $("#sheet-save").click();
+    await new Promise((r) => setTimeout(r, 400));
+    await setCover(dog.id, p.id);
+    // 3) 한 마리만 나온 사진이면 AI가 알아보는 대표 사진에도 넣음 (여러 마리 사진은 헷갈려서 안 넣음)
+    let learned = 0;
+    if (ids.length === 1) {
+      const url = await signed("photos", [p.path]);
+      let blob = await fetch(url(p.path)).then((r) => r.blob());
+      if (p.rotation) blob = await rotateBlob(blob, p.rotation);
+      learned = await addRefs(dog, [blob]);
+      if (learned) queueRescan();
     }
+    renderPhotos();
+    if (!$("#tab-roster")?.classList.contains("hidden")) renderRoster();
+    toast(`⭐ ${dog.name} 폴더 대표 사진(맨 앞)으로 정했어요${learned ? " · AI 대표 사진에도 넣었어요" : ""}`);
+    btn.disabled = false; btn.textContent = `✓ ${dog.name} 대표`; btn.classList.add("done");
+    setTimeout(() => { btn.textContent = "⭐ 대표 사진"; btn.classList.remove("done"); }, 2500);
+    return;
   } catch (err) { console.error(err); toast("저장하지 못했어요"); }
   btn.disabled = false; btn.textContent = "⭐ 대표 사진";
 });
