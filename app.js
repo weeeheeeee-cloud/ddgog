@@ -2632,23 +2632,14 @@ $("#sheet-ref").addEventListener("click", async (e) => {
   }
   btn.disabled = true; btn.textContent = "저장 중…";
   try {
-    // 1) 분류 저장 (그 사진에 머묾) → 2) 이 아이 폴더의 대표 사진(맨 앞)으로
+    // 1) 분류 저장 (그 사진에 머묾) → 2) 그날 이 아이 사진 맨 앞(= 다이얼독 알림장 첫 장)으로
     sheetStay = true;
     $("#sheet-save").click();
     await new Promise((r) => setTimeout(r, 400));
     await setCover(dog.id, p.id);
-    // 3) 한 마리만 나온 사진이면 AI가 알아보는 대표 사진에도 넣음 (여러 마리 사진은 헷갈려서 안 넣음)
-    let learned = 0;
-    if (ids.length === 1) {
-      const url = await signed("photos", [p.path]);
-      let blob = await fetch(url(p.path)).then((r) => r.blob());
-      if (p.rotation) blob = await rotateBlob(blob, p.rotation);
-      learned = await addRefs(dog, [blob]);
-      if (learned) queueRescan();
-    }
     renderPhotos();
     if (!$("#tab-roster")?.classList.contains("hidden")) renderRoster();
-    toast(`⭐ ${dog.name} 폴더 대표 사진(맨 앞)으로 정했어요${learned ? " · AI 대표 사진에도 넣었어요" : ""}`);
+    toast(`⭐ ${dog.name} 대표 사진(알림장 첫 장)으로 정했어요`);
     btn.disabled = false; btn.textContent = `✓ ${dog.name} 대표`; btn.classList.add("done");
     setTimeout(() => { btn.textContent = "⭐ 대표 사진"; btn.classList.remove("done"); }, 2500);
     return;
