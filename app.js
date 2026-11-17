@@ -2589,21 +2589,39 @@ $("#sheet-rot").addEventListener("click", async () => {
 
 // 툴바의 돌리기 = 사진 위 ↻ 버튼과 같음
 $("#sheet-rot2").addEventListener("click", () => $("#sheet-rot").click());
-// 이 사진을 고른 아이의 대표 사진으로 추가 (여러 마리를 골랐으면 번호로 물어봄)
+// 대표 사진: 여러 마리 중 누구 것인지 버튼으로 고르기
+let sheetStay = false;
+function pickRefDog(anchor, list) {
+  return new Promise((resolve) => {
+    document.querySelector(".ref-pick")?.remove();
+    const box = document.createElement("div");
+    box.className = "ref-pick";
+    box.innerHTML = `<b>누구의 대표 사진으로 넣을까요?</b><small>다른 아이가 같이 나온 사진은 그 아이를 헷갈리게 할 수 있어요. 한 마리만 잘 나온 사진이 가장 좋아요.</small>
+      <div class="ref-pick-opts">${list.map((d) => `<button type="button" data-id="${d.id}">${esc(d.name)}${d.breed && dupName(d) ? ` <small>${esc(d.breed)}</small>` : ""}</button>`).join("")}
+      <button type="button" class="ghost" data-id="">취소</button></div>`;
+    document.body.appendChild(box);
+    const r = anchor.getBoundingClientRect();
+    box.style.left = `${Math.max(8, Math.min(window.innerWidth - box.offsetWidth - 8, r.left + r.width / 2 - box.offsetWidth / 2))}px`;
+    box.style.top = `${Math.max(8, r.top - box.offsetHeight - 10)}px`;
+    const done = (d) => { box.remove(); document.removeEventListener("mousedown", out, true); resolve(d); };
+    const out = (e) => { if (!box.contains(e.target)) done(null); };
+    setTimeout(() => document.addEventListener("mousedown", out, true), 0);
+    box.querySelectorAll("button").forEach((b) => b.addEventListener("click", () => done(b.dataset.id ? dogById(b.dataset.id) : null)));
+  });
+}
+// 이 사진을 고른 아이의 대표 사진으로 추가 (여러 마리를 골랐으면 버튼으로 고름)
 $("#sheet-ref").addEventListener("click", async (e) => {
   const p = sheetPhoto;
   if (!p) return;
   const ids = $$("#sheet-chips button.on").map((b) => b.dataset.dog);
   if (!ids.length) { toast("어느 아이의 대표 사진인지 먼저 아이를 골라 주세요"); return; }
+  const btn = e.currentTarget;
   let dog = dogById(ids[0]);
   if (ids.length > 1) {
-    const list = ids.map(dogById).filter(Boolean);
-    const a = prompt(`어느 아이의 대표 사진으로 넣을까요?\n${list.map((d, i) => `${i + 1}. ${d.name}${d.breed && dupName(d) ? ` ${d.breed}` : ""}`).join("\n")}\n\n번호를 적어 주세요`, "1");
-    if (a === null) return;
-    dog = list[(+a || 0) - 1];
-    if (!dog) { toast("번호를 다시 확인해 주세요"); return; }
+    // 여러 마리를 골랐으면 버튼 위에 아이 이름 버튼을 띄워서 고르게 (번호 입력 창 대신)
+    dog = await pickRefDog(btn, ids.map(dogById).filter(Boolean));
+    if (!dog) return;
   }
-  const btn = e.currentTarget;
   btn.disabled = true; btn.textContent = "저장 중…";
   try {
     const url = await signed("photos", [p.path]);
@@ -2615,8 +2633,13 @@ $("#sheet-ref").addEventListener("click", async (e) => {
       queueRescan();
       // 고른 아이로 분류까지 바로 저장 → 사진 화면·명단(대표 사진 장수)에 바로 반영
       btn.disabled = false; btn.textContent = "⭐ 대표 사진";
+      sheetStay = true;               // 분류 저장은 하되 다음 사진으로 넘어가지 않음 (저장된 걸 눈으로 확인)
       $("#sheet-save").click();
-      setTimeout(() => toast(`${dog.name} 대표 사진에 넣고 분류도 저장했어요 ⭐`), 50);
+      setTimeout(() => {
+        toast(`⭐ ${dog.name} 대표 사진에 넣었어요 (지금 ${(dog.dog_refs || []).length}장) · 분류도 저장`);
+        btn.textContent = `✓ ${dog.name} 대표 사진`; btn.classList.add("done");
+        setTimeout(() => { btn.textContent = "⭐ 대표 사진"; btn.classList.remove("done"); }, 2500);
+      }, 50);
       if (!$("#tab-roster")?.classList.contains("hidden")) renderRoster();
       return;
     }
@@ -2689,6 +2712,7 @@ $("#sheet-save").addEventListener("click", async () => {
     extra.forEach((id) => state.attendance.add(id));
   }
   Object.assign(sheetPhoto, { dog_ids: ids, status: "done" });
+  if (sheetStay) { sheetStay = false; renderPhotos(); return; }
   toast("분류를 저장했어요");
   const i = sheetList.indexOf(sheetPhoto.id);
   if (sheetList[i + 1]) openSheet(sheetList[i + 1]); else closeSheet();

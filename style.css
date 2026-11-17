@@ -1397,3 +1397,13 @@ input, select, textarea { max-width: 100%; min-width: 0; }
 
 /* DB: 휴면·숨김 아이는 대표 사진 접어 둠 */
 .ref-hint.off{color:var(--muted,#6b7280);display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+
+/* 사진 보기: 대표 사진 누구 것인지 고르기 */
+.ref-pick{position:fixed;z-index:9999;background:#fff;border:2px solid var(--navy,#003B89);border-radius:14px;padding:12px 14px;box-shadow:0 8px 28px rgba(0,0,0,.22);max-width:360px}
+.ref-pick b{display:block;font-size:15px}
+.ref-pick small{display:block;color:#6b7280;font-size:12px;margin:2px 0 8px}
+.ref-pick-opts{display:flex;flex-wrap:wrap;gap:6px}
+.ref-pick-opts button{border:2px solid var(--yellow,#FCCC00);background:#fffbe6;border-radius:999px;padding:6px 14px;font:inherit;font-weight:700;cursor:pointer}
+.ref-pick-opts button small{display:inline;margin:0;color:#6b7280}
+.ref-pick-opts button.ghost{border-color:#ddd;background:#fff;font-weight:400}
+#sheet-ref.done{background:#e5f4e4;border-color:#22c55e}
