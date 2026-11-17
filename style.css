@@ -1389,3 +1389,8 @@ input, select, textarea { max-width: 100%; min-width: 0; }
 .pk-n { flex-wrap: wrap; row-gap: 2px; }
 .pk-n span { flex: none; white-space: nowrap; }
 .pk-n .pk-md { flex: none; }
+
+/* 명단 확정: 명단에 없는 이름 확인 */
+.same-name.newname{border-color:#86efac;background:#f0fdf4}
+.same-name.newname small.muted{display:block;margin-top:2px}
+.same-name.newname .same-opt{padding:6px 12px}
