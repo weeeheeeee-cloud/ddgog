@@ -1450,3 +1450,14 @@ input, select, textarea { max-width: 100%; min-width: 0; }
 .tk-group h3 { font-size: 18px; color: var(--ink); margin: 10px 2px 6px; }
 .tk-group h3 em { font-size: 13px; padding: 2px 10px; }
 @media (max-width: 760px) { .tk-group h3 { font-size: 17px; } }
+
+/* 보드: 칸 제목 더 강조 — 색 띠 + 굵은 글씨 */
+.tk-group h3 { font-size: 20px; font-weight: 900; color: var(--navy); background: #e8eefb; margin: 6px -6px 6px; padding: 10px 12px; border-radius: 12px; border-left: 6px solid var(--navy); letter-spacing: -.01em; }
+.tk-group.in h3 { color: #166534; background: #dcfce7; border-left-color: #16a34a; }
+.tk-group.out h3 { color: #003B89; background: #e8eefb; border-left-color: #003B89; }
+.tk-group.pay h3 { color: #991b1b; background: #fee2e2; border-left-color: #ef4444; }
+.tk-group.care h3 { color: #166534; background: #ecfdf3; border-left-color: #16a34a; }
+.tk-group.manual h3 { color: #6b5200; background: #fff4c2; border-left-color: #FCCC00; }
+.tk-group.manual h3 em { background: #6b5200; }
+.tk-group h3 em { font-size: 15px; padding: 3px 12px; }
+@media (max-width: 760px) { .tk-group h3 { font-size: 19px; } }
