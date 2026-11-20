@@ -1445,3 +1445,8 @@ input, select, textarea { max-width: 100%; min-width: 0; }
 /* 보드: 호텔링 입실 */
 .tk-group.in h3 em { background: #16a34a; }
 .tk-group.in .tk-box { border-color: #93d9ad; }
+
+/* 보드: 칸 제목(호텔링 입실 · 할 일 등) 크게 */
+.tk-group h3 { font-size: 18px; color: var(--ink); margin: 10px 2px 6px; }
+.tk-group h3 em { font-size: 13px; padding: 2px 10px; }
+@media (max-width: 760px) { .tk-group h3 { font-size: 17px; } }
