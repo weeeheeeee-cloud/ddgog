@@ -1441,3 +1441,7 @@ input, select, textarea { max-width: 100%; min-width: 0; }
   .ho-dp-head .btn { margin-left:auto; }
 }
 @media (max-width: 760px) { .ho-week.sum .ho-occ i { display:inline; font-size:9px; } }
+
+/* 보드: 호텔링 입실 */
+.tk-group.in h3 em { background: #16a34a; }
+.tk-group.in .tk-box { border-color: #93d9ad; }

@@ -1,5 +1,5 @@
 // 오늘 할 일 보드 (알림장 탭 맨 위 — 모든 직원이 처음 보는 화면)
-//  · 자동 할 일: 그날 호텔링 퇴실(금액), 결제 받기(선결제 안 된 예약), 목욕·미용
+//  · 자동 할 일: 그날 호텔링 입실(시간·추가 서비스), 퇴실(금액), 결제 받기(선결제 안 된 예약), 목욕·미용
 //  · 직접 넣는 할 일: 누구나 추가 / 체크 / 삭제 → 다른 직원 화면에도 바로 반영
 // 체크 상태는 daily_tasks 에 저장 (자동 할 일은 ref 로, 직접 넣은 할 일은 행 하나씩)
 
@@ -27,6 +27,14 @@ async function whoAmI() {
   return myName;
 }
 
+const SVC_N = [["bath", "목욕"], ["hygiene", "위생미용"], ["grooming", "미용"], ["pickup", "픽업"], ["drop", "드랍"], ["daycare", "추가데이케어"]];
+const svcOf = (b) => SVC_N.filter(([k]) => (k === "pickup" ? !!b.pickup : k === "drop" ? !!b.drop_off : !!(b.services || {})[k])).map(([, n]) => n).join("·");
+// 호텔링 입실: 그날 들어오는 아이 (입실 시간 순)
+function inItems(bookings) {
+  return bookings.filter((b) => b.status !== "cancelled")
+    .sort((a, b) => (a.in_time || "99").localeCompare(b.in_time || "99") || a.label.localeCompare(b.label, "ko"))
+    .map((b) => ({ ref: `in:${b.id}`, icon: "🐾", title: `입실 · ${b.label}`, sub: [b.kind === "K" ? "K 유치원생" : "H 호텔링", b.in_time, svcOf(b)].filter(Boolean).join(" · "), cls: "in" }));
+}
 // 그날 자동 할 일
 function autoItems(bookings) {
   // 호텔링: 퇴실하는 날, 아이 이름 + 결제 금액만
@@ -44,11 +52,13 @@ export async function renderTasks(ctx) {
   const day = boardDay;
   C.day = day;
   const ws = addDays(day, -3), we = addDays(day, 3);
-  const [{ data: rows }, { data: bks }, { data: wRows }, { data: wBks }] = await Promise.all([
+  const [{ data: rows }, { data: bks }, { data: wRows }, { data: wBks }, { data: inBks }, { data: wIns }] = await Promise.all([
     C.sb.from("daily_tasks").select("*").eq("day", day).order("created_at"),
     C.sb.from("hotel_bookings").select("id, label, kind, check_out, out_time, total, prepaid, status, services").eq("check_out", day),
     C.sb.from("daily_tasks").select("day, ref, done").gte("day", ws).lte("day", we),
     C.sb.from("hotel_bookings").select("id, check_out, prepaid, status, services").gte("check_out", ws).lte("check_out", we),
+    C.sb.from("hotel_bookings").select("*").eq("check_in", day),
+    C.sb.from("hotel_bookings").select("id, check_in, check_out, status").gte("check_in", ws).lte("check_in", we),
   ]);
   // 날짜 줄: 그날 남은 할 일 수 (미리 써 둔 것 포함)
   const leftOn = (d) => {
@@ -58,11 +68,15 @@ export async function renderTasks(ctx) {
       const refs = [`out:${b.id}`];
       n += refs.filter((r) => !doneRefs.has(r)).length;
     }
+    for (const b of (wIns || []).filter((b) => b.check_in === d && b.status !== "cancelled")) {
+      if (!doneRefs.has(`in:${b.id}`)) n++;
+    }
     return n;
   };
   const strip = Array.from({ length: 7 }, (_, i) => addDays(ws, i));
   const byRef = new Map((rows || []).filter((r) => r.ref).map((r) => [r.ref, r]));
   const items = [
+    ...inItems(inBks || []).map((a) => ({ ...a, auto: true, row: byRef.get(a.ref) })),
     ...autoItems(bks || []).map((a) => ({ ...a, auto: true, row: byRef.get(a.ref) })),
     ...(rows || []).filter((r) => !r.ref).map((r) => ({ id: r.id, icon: "📌", title: r.title, sub: r.created_by ? `${r.created_by}` : "", row: r, cls: "manual" })),
   ];
@@ -70,6 +84,7 @@ export async function renderTasks(ctx) {
   const isToday = day === kstToday();
   const left = items.filter((it) => !isDone(it)).length;
   const groups = [
+    { key: "in", title: "호텔링 입실", icon: "🐾", list: items.filter((it) => it.cls === "in") },
     { key: "out", title: "호텔링 퇴실 · 결제", icon: "🏨", list: items.filter((it) => it.cls === "out") },
     { key: "pay", title: "결제 받기", icon: "💳", list: items.filter((it) => it.cls === "pay") },
     { key: "care", title: "목욕 · 미용", icon: "🛁", list: items.filter((it) => it.cls === "care") },
