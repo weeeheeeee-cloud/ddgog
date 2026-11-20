@@ -1407,3 +1407,37 @@ input, select, textarea { max-width: 100%; min-width: 0; }
 .ref-pick-opts button small{display:inline;margin:0;color:#6b7280}
 .ref-pick-opts button.ghost{border-color:#ddd;background:#fff;font-weight:400}
 #sheet-ref.done{background:#e5f4e4;border-color:#22c55e}
+
+/* 호텔링 월간 요약: 칸에는 숫자만, 이름은 캘린더 밑 '그날 요약'에서 (2026-11) */
+.ho-week.sum > .ho-day { min-height:84px; gap:4px; }
+.ho-week.sum .ho-io { flex-direction:column; align-items:flex-start; gap:3px; }
+.ho-week.sum .ho-io span { font-size:12px; line-height:19px; padding:0 7px; border-radius:6px; }
+.ho-week.sum .ho-occ { align-self:flex-start; margin-top:auto; }
+.ho-day.sel { background:#fff4c2 !important; box-shadow:inset 0 0 0 2px var(--yellow); }
+.ho-daypanel { margin:14px 0 6px; padding:14px 16px 16px; border:1px solid var(--line); border-radius:16px; background:#fff; scroll-margin-top:90px; }
+.ho-dp-head { display:flex; align-items:center; gap:10px; flex-wrap:wrap; }
+.ho-dp-head h3 { margin:0; font-size:18px; color:var(--navy); }
+.ho-dp-today { font-size:12px; font-weight:800; background:var(--yellow); color:var(--navy); border-radius:999px; padding:1px 8px; vertical-align:middle; }
+.ho-dp-cnt { display:flex; gap:5px; flex:1; flex-wrap:wrap; }
+.ho-dp-cnt span { font-size:12px; font-weight:800; border-radius:6px; padding:2px 8px; }
+.ho-dp-cnt .in { background:#dcfce7; color:#166534; }
+.ho-dp-cnt .out { background:#fee2e2; color:#991b1b; }
+.ho-dp-cnt .occ { background:#e8eefb; color:var(--navy); }
+.ho-dp-sub { margin:14px 0 6px; font-size:14px; display:flex; align-items:center; gap:6px; }
+.ho-dp-sub small { color:var(--muted); font-weight:600; }
+.ho-dp-sub.in { color:#166534; }
+.ho-dp-sub.out { color:#991b1b; }
+.ho-dp-sub .ho-due-sum { margin-left:auto; }
+.ho-daypanel .ho-bk { margin-bottom:6px; }
+.ho-dp-none { margin:2px 0 4px; }
+.ho-tm { color:var(--ink); }
+.ho-dp-stays { display:flex; flex-wrap:wrap; gap:5px; }
+.ho-dp-stays .ho-nm { font-size:13px; padding:5px 9px; overflow:visible; }
+.ho-dp-stays .ho-nm small { font-weight:600; opacity:.7; }
+@media (max-width: 760px) {
+  .ho-week.sum > .ho-day { min-height:70px; padding:3px 2px 4px; }
+  .ho-week.sum .ho-io span { font-size:11px; line-height:17px; padding:0 5px; }
+  .ho-daypanel { padding:12px; }
+  .ho-dp-head .btn { margin-left:auto; }
+}
+@media (max-width: 760px) { .ho-week.sum .ho-occ i { display:inline; font-size:9px; } }
