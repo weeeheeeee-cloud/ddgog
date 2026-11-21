@@ -256,9 +256,9 @@ Deno.serve(async (req) => {
       }
     }
   }
-  // ---- 비용 줄이기: 명단 아이가 많으면 지문이 가장 비슷한 8마리만 AI에게 보여 줌 (아이당 대표 사진 4장)
-  //  실제 사진으로 확인해 보니 정답 아이는 거의 항상 지문 8등 안에 있음. 그 밖이면 '모르는 아이'로 감
-  const FP_K = 8;
+  // ---- 비용 줄이기: 명단 아이가 많으면 지문이 가장 비슷한 6마리만 AI에게 보여 줌 (아이당 대표 사진 4장)
+  //  (fp_match 가 5마리만 돌려줘서 그동안 실제로는 5마리였음 → 6마리로. 대표 사진은 20장→24장으로 비용 거의 그대로)
+  const FP_K = 6;
   let narrowed = false;
   const namedCount = refs.filter((d) => !d.auto).length;
   if (fpRank.length && namedCount > FP_K) {
