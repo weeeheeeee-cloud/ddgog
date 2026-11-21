@@ -1982,15 +1982,12 @@ async function confirmRoll() {
         if (todayNew) { dog = todayNew; ids.push(dog.id); if (isHotelName(state.draft, name)) hotelIds.add(dog.id); if (isDaycareName(state.draft, name)) daycareIds.add(dog.id); continue; }
         const dayGuest = isDaycareName(state.draft, name) && !isKinderName(state.draft, name) && !isHotelName(state.draft, name);
         const guest = (isHotelName(state.draft, name) || dayGuest) && !isKinderName(state.draft, name);
-        // 같은 이름 아이가 이미 있어도 이름은 그대로 두고(뽀송2·뽀송 비숑처럼 바꾸지 않음) 견종으로 구분
-        let breed = null;
-        const sameNamed = state.dogs.filter((x) => !x.auto && norm(x.name) === norm(nm));
-        if (!guest && sameNamed.length) {
-          const v = prompt(`'${name}' 이름의 아이가 이미 있어요 (${sameNamed.map((x) => x.breed || "견종 없음").join(", ")}).\n이름은 그대로 두고 견종으로 구분해요. 처음 오는 아이의 견종을 적어 주세요 (예: 비숑 프리제)`, "");
+        if (!guest && state.dogs.some((x) => !x.auto && norm(x.name) === norm(nm))) {
+          const v = prompt(`'${name}' 이름의 아이가 이미 명단에 있어요.\n처음 오는 아이를 구분할 이름을 적어 주세요 (예: ${name} 푸들)`, `${name} `);
           if (v === null || !v.trim()) throw new Error("cancel");
-          breed = v.trim();
+          nm = v.trim();
         }
-        const { data, error } = await sb.from("dogs").insert({ name: nm, auto: false, active: true, ...(guest ? { breed: dayGuest ? "데이케어 손님" : "호텔 손님" } : breed ? { breed } : {}) }).select().single();
+        const { data, error } = await sb.from("dogs").insert({ name: nm, auto: false, active: true, ...(guest ? { breed: dayGuest ? "데이케어 손님" : "호텔 손님" } : {}) }).select().single();
         if (error) throw error;
         dog = data;
         state.dogs.push(dog);
@@ -3523,18 +3520,14 @@ $("#new-dog").addEventListener("submit", async (e) => {
   const name = $("#new-dog-name").value.trim();
   const files = [...$("#new-dog-files").files];
   if (!name) return;
-  // 같은 이름 아이가 있으면: 같은 아이면 사진 추가, 다른 아이면 이름은 그대로 두고 견종으로 구분
-  let breed = null;
-  const sameNamed = state.dogs.filter((d) => !d.auto && norm(d.name) === norm(name));
-  if (sameNamed.length) {
-    const v = prompt(`'${name}' 이름의 아이가 이미 있어요 (${sameNamed.map((d) => d.breed || "견종 없음").join(", ")}).\n같은 아이면 취소하고 아래에서 사진을 추가하세요.\n다른 아이면 견종을 적어 주세요 — 이름은 그대로 두고 견종으로 구분해요 (예: 비숑 프리제)`, "");
-    if (v === null || !v.trim()) return;
-    breed = v.trim();
+  if (state.dogs.some((d) => !d.auto && norm(d.name) === norm(name))) {
+    toast(`'${name}'은(는) 이미 명단에 있어요. 아래에서 사진을 추가하세요.`);
+    return;
   }
   const btn = $("button[type=submit]", e.target);
   btn.disabled = true;
   const { data: dog, error } = await sb.from("dogs")
-    .insert({ name, note: $("#new-dog-note").value.trim() || null, auto: false, ...(breed ? { breed } : {}) }).select().single();
+    .insert({ name, note: $("#new-dog-note").value.trim() || null, auto: false }).select().single();
   if (error) { toast("등록하지 못했어요"); btn.disabled = false; return; }
   dog.dog_refs = [];
   state.dogs.push(dog);
