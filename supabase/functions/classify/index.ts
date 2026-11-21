@@ -20,15 +20,18 @@ You may also get "past mistakes": photos that were matched to the wrong dog befo
 Study them: the same look-alike dogs come every day, so do not repeat those mistakes.
 You get numbered known dogs, each with one or more reference photos taken from different angles
 (front, side, back, lying down…), possibly none yet. Some dogs also have
-"today's look": a photo of the same dog taken TODAY, showing what it looks like today.
+"today's look": a photo of the same dog taken TODAY and confirmed by staff, showing what it looks like today.
 Then you get ONE new photo, also taken today. Decide which known dogs appear in it.
 
 How to recognize a dog — the face is NOT required. Use every clue together:
 - Coat: color, pattern, patches and their positions, coat length and texture, grooming cut.
 - Body: size, build, leg length, tail shape and how it is carried, ear shape and set.
 - Clothes and accessories (outfit, harness, collar, bandana, hair clip): dogs wear the same
-  ones all day, so a match with "today's look" is a STRONG clue. The older reference photo
+  ones all day, so a match with "today's look" is a useful clue. The older reference photo
   may show different clothes, so an outfit difference from it does not rule a dog out.
+  BUT many dogs here wear similar outfits (pink harnesses, padded vests, knit sweaters). For WHITE dogs,
+  clothes alone NEVER decide: the dog's own body (head shape, ears, nose, tear stains, size, legs, tail)
+  must also fit. If the clothes point to one white dog but the body points to another, trust the body.
 - A dog seen from the back or side, or with its face hidden, can still be matched when
   coat, body and clothes clearly fit one known dog and no other.
 Several dogs can share the same name (e.g. two "쿠키": a Pomeranian and a Jack Russell). They are told apart by the
@@ -350,14 +353,20 @@ Deno.serve(async (req) => {
     // 오늘 모습: 오늘 이미 분류된 사진 중 강아지별 가장 최근 1장 (옷·미용 상태가 그날 그대로라 큰 단서)
     if (refs.length) {
       const { data: today } = await supa.from("photos")
-        .select("id, thumb_path, dog_ids").eq("day", photo.day).eq("status", "done").eq("practice", photo.practice === true)
+        .select("id, thumb_path, dog_ids, confidence, ai_note").eq("day", photo.day).eq("status", "done").eq("practice", photo.practice === true)
+        .in("confidence", ["manual", "high"])
         .neq("id", photoId).order("created_at", { ascending: false }).limit(400);
+      // 믿을 수 있는 사진만 '오늘 모습'으로: 직원이 확인한 사진 > 지문으로 확실히 맞힌 사진
+      //  (AI가 잘못 넣은 사진이 '오늘 모습'이 되면 같은 옷 입은 다른 흰 아이들이 줄줄이 그 아이로 들어갔음)
       const latest = new Map<string, string>();
+      const fpLook = new Map<string, string>();
       for (const p of today ?? []) {
         if (p.dog_ids.length !== 1) continue; // 한 마리만 나온 사진만 써야 헷갈리지 않음
         const d = p.dog_ids[0];
-        if (!latest.has(d)) latest.set(d, p.thumb_path);
+        if (p.confidence === "manual") { if (!latest.has(d)) latest.set(d, p.thumb_path); }
+        else if (/^지문: (?!같은 장면)/.test(p.ai_note ?? "") && !fpLook.has(d)) fpLook.set(d, p.thumb_path);
       }
+      for (const [d, path] of fpLook) if (!latest.has(d)) latest.set(d, path);
       const looks = refs.map((d, i) => ({ n: i + 1, name: `${d.name}${d.breed ? ` (${d.breed})` : ""}`, path: latest.get(d.id) })).filter((x) => x.path);
       if (looks.length) {
         content.push({ type: "text", text: "Today's look (same dogs, photographed today):" });
