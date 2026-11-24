@@ -29,11 +29,11 @@ async function notify(r) {
   if (!r.added && !r.left) return;
   // 화면을 보고 있으면 알림 대신 화면에 표시
   const wins = await self.clients.matchAll({ type: "window" });
-  if (wins.some((w) => w.visibilityState === "visible" && w.url.includes("up.html"))) return;
+  if (wins.some((w) => w.visibilityState === "visible")) return;
   if (self.Notification?.permission !== "granted") return;
   const left = (await qAll()).length;
   await self.registration.showNotification(left ? "사진을 다 올리지 못했어요" : "사진 올리기 끝", {
-    body: left ? `${left}장이 남았어요. 사진 올리기 링크를 다시 열면 이어서 올려요.` : `${r.added}장을 올렸어요${r.skipped ? ` (똑같은 사진 ${r.skipped}장은 건너뜀)` : ""}`,
+    body: left ? `${left}장이 남았어요. 댕겨올개나 사진 올리기 링크를 다시 열면 이어서 올려요.` : `${r.added}장을 올렸어요${r.skipped ? ` (똑같은 사진 ${r.skipped}장은 건너뜀)` : ""}`,
     icon: "logo-180.png",
     badge: "logo-180.png",
     tag: "ddg-upload",

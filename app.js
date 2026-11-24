@@ -1,6 +1,7 @@
 import { createClient } from "https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/+esm";
 import { SUPABASE_URL, SUPABASE_ANON_KEY } from "./config.js";
 import { loadFingerprint, fingerprint } from "./fp.js";
+import { qPut, qAll, drain, SYNC_TAG, CHANNEL } from "./upq.js";
 
 const sb = createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 const $ = (s, el = document) => el.querySelector(s);
@@ -2080,8 +2081,9 @@ function progress(title, n, total, detail = "") {
 const sofarKey = (day) => `main-mem:${day}`;
 function sofarGet(day) {
   try { const m = JSON.parse(localStorage.getItem(sofarKey(day)) || "null"); if (m) return m; } catch { /* 없음 */ }
-  return { n: 0, first: null, last: null };
+  return { n: 0, keys: [], first: null, last: null };
 }
+const sofarFileKey = (f, taken) => taken ? `${taken}|${f.size}` : `${f.name}|${f.size}|${f.lastModified}`;
 function sofarSet(day, m) {
   try {
     localStorage.setItem(sofarKey(day), JSON.stringify(m));
@@ -2105,10 +2107,11 @@ const sofarTime = (iso) => {
   return `${h < 12 ? "오전" : "오후"} ${h % 12 || 12}:${mi}`;
 };
 let sofarChain = Promise.resolve();
-function sofarRemember(day, taken, small) { // 여러 장이 동시에 끝나도 기록이 꼬이지 않게 한 장씩
+function sofarRemember(day, taken, small, key) { // 여러 장이 동시에 끝나도 기록이 꼬이지 않게 한 장씩
   sofarChain = sofarChain.then(async () => {
     const m = sofarGet(day);
     m.n++;
+    if (key) (m.keys ||= []).push(key);
     if (taken) {
       if (!m.first || taken < m.first.t) m.first = { t: taken, thumb: await sofarThumb(small) };
       if (!m.last || taken > m.last.t) m.last = { t: taken, thumb: await sofarThumb(small) };
@@ -2129,10 +2132,139 @@ function drawSofar() {
   box.classList.add("on");
 }
 
+/* ---------- 선생님 업로드 링크와 같은 방식으로 올리기 ----------
+   고른 사진을 먼저 이 기기에 저장해 두고 차례로 올림
+   - 안드로이드: 화면을 닫거나 다른 앱을 써도 백그라운드에서 계속 올림
+   - 아이폰: 화면을 벗어나면 잠시 멈추고, 돌아오거나 사이트를 다시 열면 이어서 올림
+   - 오늘 이 기기에서 이미 올린 사진을 다시 고르면 알아서 뺌
+   오늘 날짜이고 '특정 아이만 찾기'가 아닐 때만 (켜진 업로드 링크가 하나도 없으면 예전 방식) */
+const qrun = { total: 0, done: 0, added: 0, skipped: 0, failed: 0, dupLocal: 0, prepping: 0, active: false };
+let qwake = null;
+const canBgSync = "serviceWorker" in navigator && "SyncManager" in window;
+async function queueToken() {
+  try {
+    const { data } = await sb.from("upload_links").select("token").eq("active", true).order("created_at", { ascending: true }).limit(1);
+    return data?.[0]?.token || null;
+  } catch { return null; }
+}
+async function bgSync() {
+  try { const reg = await navigator.serviceWorker?.ready; if (reg?.sync) { await reg.sync.register(SYNC_TAG); return true; } } catch { /* 지원 안 함 */ }
+  return false;
+}
+async function keepAwake() {
+  try { if ("wakeLock" in navigator && !qwake && document.visibilityState === "visible") { qwake = await navigator.wakeLock.request("screen"); qwake.addEventListener("release", () => (qwake = null)); } } catch { /* 지원 안 함 */ }
+}
+function qtally(b) {
+  qrun.added += b.added || 0; qrun.skipped += b.skipped || 0; qrun.failed += b.failed || 0;
+  qrun.done += (b.added || 0) + (b.skipped || 0) + (b.failed || 0);
+}
+function qdraw() {
+  if (!qrun.total) return;
+  const sub = qrun.prepping ? "사진 준비 중이에요. 이 단계만 화면을 켜 두세요"
+    : canBgSync ? "이제 화면을 닫거나 다른 앱을 써도 계속 올라가요" : "다른 앱을 봐도 돼요. 돌아오면 이어서 올려요";
+  progress(qrun.prepping ? "사진 준비 중…" : "사진 올리는 중…", Math.min(qrun.done, qrun.total), qrun.total, sub + (qrun.failed ? ` · 실패 ${qrun.failed}장` : ""));
+}
+async function qfinish() {
+  const msg = `${qrun.added}장 올렸어요`
+    + (qrun.skipped + qrun.dupLocal ? ` · 이미 올린 사진 ${qrun.skipped + qrun.dupLocal}장은 뺐어요` : "")
+    + (qrun.failed ? ` · ${qrun.failed}장은 올리지 못했어요. 그 사진만 다시 골라 올려 주세요` : "");
+  Object.assign(qrun, { total: 0, done: 0, added: 0, skipped: 0, failed: 0, dupLocal: 0 });
+  qwake?.release?.(); qwake = null;
+  state.busy = false;
+  toast(msg);
+  drawSofar();
+  await loadPhotos();
+  await classifyPending();
+}
+async function qcheck() {
+  const left = (await qAll()).length;
+  if (!left && !qrun.prepping && qrun.total) await qfinish();
+  else if (left && !qrun.prepping) { qrun.done = Math.max(qrun.done, qrun.total - left); qdraw(); }
+}
+async function qupload() {
+  if (qrun.active) return;
+  if (document.hidden) { bgSync(); return; }
+  qrun.active = true;
+  try {
+    const r = await drain({ stop: () => document.hidden, onBatch: (b) => { qtally(b); qdraw(); } });
+    if (r.busy) qdraw(); // 백그라운드가 올리는 중 → 결과는 채널로 받음
+  } catch {
+    if (qrun.total) progress("잠시 연결이 끊겼어요", Math.min(qrun.done, qrun.total), qrun.total, "연결되면 이어서 올려요. 올릴 사진은 이 기기에 저장돼 있어요");
+  } finally {
+    qrun.active = false;
+  }
+  const left = (await qAll()).length;
+  if (!left && !qrun.prepping && qrun.total) await qfinish();
+  else if (left) {
+    if (document.hidden) bgSync();
+    else if (navigator.onLine) setTimeout(qupload, 4000);
+    else bgSync();
+  }
+}
+try {
+  const ch = new BroadcastChannel(CHANNEL);
+  ch.onmessage = (e) => {
+    const m = e.data || {};
+    if (m.type === "batch") { qtally(m); qdraw(); }
+    if (m.type === "end") qcheck();
+  };
+} catch { /* 지원 안 함 */ }
+document.addEventListener("visibilitychange", async () => {
+  if (document.hidden) { if ((await qAll().catch(() => [])).length) bgSync(); }
+  else if (qrun.total) { keepAwake(); await qcheck(); qupload(); }
+});
+addEventListener("online", () => { if (qrun.total) qupload(); });
+// 사이트를 다시 열었을 때 다 못 올린 사진이 있으면 이어서
+qAll().then((left) => {
+  if (!left.length) return;
+  state.busy = true;
+  qrun.total = left.length;
+  progress(`지난번에 다 못 올린 사진 ${left.length}장을 이어서 올릴게요`, 0, left.length);
+  qupload();
+}).catch(() => {});
+
+async function queueFiles(picked, token) {
+  const day = state.day;
+  state.busy = true;
+  // 오늘 이 기기에서 이미 올린 사진(찍은 시각·크기가 같은 것)은 빼기
+  const known = new Set(sofarGet(day).keys || []), times = new Map();
+  await pool(picked, 6, async (f) => { times.set(f, await exifTime(f).catch(() => null)); });
+  const seenNow = new Set();
+  const files = picked.filter((f) => { const k = sofarFileKey(f, times.get(f)); if (known.has(k) || seenNow.has(k)) return false; seenNow.add(k); return true; });
+  const dup = picked.length - files.length;
+  if (!files.length) {
+    if (!qrun.total) state.busy = false;
+    toast(`고른 ${picked.length}장 모두 오늘 이 기기에서 이미 올린 사진이에요. 그 다음 사진을 골라 주세요`);
+    return;
+  }
+  qrun.dupLocal += dup;
+  qrun.total += files.length; qrun.prepping += files.length;
+  keepAwake(); qdraw();
+  if (canBgSync && "Notification" in window && Notification.permission === "default") Notification.requestPermission().catch(() => {});
+  await pool(files, 3, async (file) => {
+    try {
+      const taken = times.get(file) ?? null;
+      const [full, small] = await Promise.all([resize(file, 1600, 0.85), resize(file, 640, 0.8)]);
+      const st = await imageStats(small).catch(() => ({}));
+      const vec = await fingerprint(small).catch(() => null);
+      await qPut({ id: crypto.randomUUID(), token, full, small, taken_at: taken, vec, phash: st.phash, sharp: st.sharp, tries: 0, at: Date.now() });
+      await sofarRemember(day, taken, small, sofarFileKey(file, taken)); drawSofar();
+    } catch (err) { console.error(err); qrun.failed++; qrun.done++; }
+    qrun.prepping--; qdraw();
+    qupload(); // 준비되는 대로 바로 올리기 시작
+  });
+  if (document.hidden) bgSync();
+  else await qcheck();
+}
+
 $("#file").addEventListener("change", async (e) => {
   const files = [...e.target.files];
   e.target.value = "";
   if (!files.length) return;
+  if (!qrun.total && !state.find.length && !state.practice && state.day === kstToday() && !state.busy) {
+    const token = await queueToken();
+    if (token) { await queueFiles(files, token); return; }
+  }
   if (state.busy) { toast("지금 진행 중인 작업이 끝나면 다시 올려 주세요"); return; }
   state.busy = true;
   const day = state.day;
