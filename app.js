@@ -2128,15 +2128,16 @@ async function classifyOne(photoId, recheck = false) {
     const { error } = res;
     if (!error) return true;
     const status = error.context?.status;
-    if (status === 503 || status === 429 || status === 504 || status === 546) { await sleep(2000 * 2 ** attempt); continue; }
+    // !status: 인터넷이 잠깐 끊김(데이터↔와이파이 전환, 화면 꺼짐 등) → 기다렸다 다시 시도
+    if (!status || status === 503 || status === 429 || status === 504 || status === 546) { await sleep(2000 * 2 ** attempt); continue; }
     let detail = "";
     try { detail = (await error.context.json()).error || ""; } catch { /* 무시 */ }
-    lastError = status === 404 || !status
+    lastError = status === 404
       ? "분류 함수(classify)를 찾을 수 없어요. Supabase에 함수가 배포됐는지 확인해 주세요."
       : `분류 오류 (${status}) ${detail}`.trim();
     return false;
   }
-  lastError = "AI가 바빠서 분류하지 못했어요. 잠시 후 다시 시도해 주세요.";
+  lastError = "인터넷 연결이 불안정하거나 AI가 바빠서 분류를 멈췄어요. 와이파이를 확인하고 다시 시도해 주세요. 올린 사진은 그대로 있어요.";
   return false;
 }
 
