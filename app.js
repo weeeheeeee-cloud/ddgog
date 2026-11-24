@@ -596,6 +596,7 @@ $$(".tabs button").forEach((b) => b.addEventListener("click", () => { state.tab 
 
 const HOTEL_V = Date.now();
 async function render() {
+  drawSofar();
   $$(".tabs button").forEach((b) => b.classList.toggle("on", b.dataset.tab === state.tab));
   document.querySelector(".layout")?.classList.toggle("wide", state.tab === "hotel" || state.tab === "kinder" || state.tab === "pickup" || state.tab === "admin");
   $("#app")?.classList.toggle("tab-admin", state.tab === "admin");
@@ -2074,6 +2075,60 @@ function progress(title, n, total, detail = "") {
   $("#pg-detail").textContent = detail;
 }
 
+/* ---------- 오늘 이 기기에서 올린 첫·마지막 사진 ----------
+   폰 갤러리에는 표시를 못 해서, 여기서 어디까지 올렸는지(가장 먼저·나중에 찍은 사진)를 보여 줌 */
+const sofarKey = (day) => `main-mem:${day}`;
+function sofarGet(day) {
+  try { const m = JSON.parse(localStorage.getItem(sofarKey(day)) || "null"); if (m) return m; } catch { /* 없음 */ }
+  return { n: 0, first: null, last: null };
+}
+function sofarSet(day, m) {
+  try {
+    localStorage.setItem(sofarKey(day), JSON.stringify(m));
+    // 일주일 지난 기록은 지움
+    const old = new Date(Date.now() - 7 * 864e5).toISOString().slice(0, 10);
+    for (let i = localStorage.length - 1; i >= 0; i--) { const k = localStorage.key(i); if (k?.startsWith("main-mem:") && k.slice(9) < old) localStorage.removeItem(k); }
+  } catch { /* 저장 공간 없음 */ }
+}
+async function sofarThumb(blob) {
+  try {
+    const b = await createImageBitmap(blob);
+    const s = 112 / Math.max(b.width, b.height), c = document.createElement("canvas");
+    c.width = Math.round(b.width * s); c.height = Math.round(b.height * s);
+    c.getContext("2d").drawImage(b, 0, 0, c.width, c.height); b.close?.();
+    return c.toDataURL("image/jpeg", 0.6);
+  } catch { return null; }
+}
+const sofarTime = (iso) => {
+  if (!iso) return "시간 모름";
+  const d = new Date(iso), h = d.getHours(), mi = String(d.getMinutes()).padStart(2, "0");
+  return `${h < 12 ? "오전" : "오후"} ${h % 12 || 12}:${mi}`;
+};
+let sofarChain = Promise.resolve();
+function sofarRemember(day, taken, small) { // 여러 장이 동시에 끝나도 기록이 꼬이지 않게 한 장씩
+  sofarChain = sofarChain.then(async () => {
+    const m = sofarGet(day);
+    m.n++;
+    if (taken) {
+      if (!m.first || taken < m.first.t) m.first = { t: taken, thumb: await sofarThumb(small) };
+      if (!m.last || taken > m.last.t) m.last = { t: taken, thumb: await sofarThumb(small) };
+    }
+    sofarSet(day, m);
+  }).catch(() => {});
+  return sofarChain;
+}
+function drawSofar() {
+  const box = $("#sofar");
+  if (!box) return;
+  const m = state.practice ? { n: 0 } : sofarGet(state.day);
+  if (!m.n) { box.classList.remove("on"); box.innerHTML = ""; return; }
+  const end = (lab, x) => `<div class="end">${x?.thumb ? `<img src="${x.thumb}" alt="">` : "<img alt=\"\">"}<div><b>${lab}</b><span>${sofarTime(x?.t)}</span></div></div>`;
+  box.innerHTML = `<h3>📌 이 기기에서 올린 사진 <small>${m.n}장</small></h3>
+    <div class="ends">${end("첫 사진", m.first)}${end("마지막 사진", m.last)}</div>
+    ${m.last?.t ? `<p>갤러리에서 <b>${sofarTime(m.last.t)}</b> 사진 다음부터 고르면 돼요. 겹쳐서 골라도 똑같은 사진은 알아서 빼요.</p>` : ""}`;
+  box.classList.add("on");
+}
+
 $("#file").addEventListener("change", async (e) => {
   const files = [...e.target.files];
   e.target.value = "";
@@ -2106,6 +2161,7 @@ $("#file").addEventListener("change", async (e) => {
       if (a.error || b.error) throw a.error || b.error;
       const ins = await sb.from("photos").insert({ id, day, path, thumb_path: thumbPath, taken_at: taken, practice: !!state.practice, find_dogs: state.find, ...st });
       if (ins.error) throw ins.error;
+      if (!state.practice) { await sofarRemember(day, taken, small); drawSofar(); }
     } catch (err) {
       console.error(err);
       failed++;
