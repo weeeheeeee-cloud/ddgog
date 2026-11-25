@@ -1466,7 +1466,15 @@ function similarDogs(n, excludeId = null) {
 }
 // 명단에 전혀 없는 이름 (비슷한 이름도 없음) → 처음 오는 아이인지 물어봄 (N을 켜거나 명단 아이를 고르면 끝)
 const plainNew = (n, d) => { const m = matchDog(n, d); return !m.dog && !m.choices && !m.similar && !m.hotelAsk && !m.isNew; };
-const unresolved = (n, d) => { const m = matchDog(n, d); return !!(m.choices || m.similar || m.hotelAsk) || plainNew(n, d); };
+const unresolved = (n, d) => { if ((d.unsure || []).includes(n)) return true; const m = matchDog(n, d); return !!(m.choices || m.similar || m.hotelAsk) || plainNew(n, d); };
+// 명단 이름 바꾸기: H·K·D 표시와 고른 아이도 새 이름으로 옮김
+function renameDraft(d, i, v) {
+  const old = d.names[i];
+  d.unsure = (d.unsure || []).filter((u) => u !== old);
+  if (!v) { d.names.splice(i, 1); return; }
+  d.names[i] = v;
+  for (const k of ["hotel", "kinder", "daycare"]) if (Array.isArray(d[k])) d[k] = d[k].map((x) => (norm(x) === norm(old) ? v : x));
+}
 // 프롬프트로 고르기: 비슷한 이름이 있으면 번호, 0이면 새 아이
 function askSimilar(name, list) {
   const v = prompt(`'${name}'와(과) 이름이 비슷한 아이가 있어요. 같은 아이면 번호를, 다른 아이면 0을 눌러 주세요\n` +
@@ -1487,14 +1495,31 @@ async function renderRoll() {
   // ① 보드에서 읽은 명단 확인·수정
   if (state.draft) {
     const d = state.draft;
-    count.textContent = `${d.names.length}마리 읽음`;
+    count.textContent = d.boardCount ? `보드 ${d.boardCount}마리 · 읽은 이름 ${d.names.length}개` : `${d.names.length}마리 읽음`;
+    const countGap = d.boardCount && d.boardCount !== d.names.length && !d.countOk;
+    const unsureList = d.names.map((n, i) => ({ n, i })).filter(({ n }) => (d.unsure || []).includes(n));
     // N(처음 오는 아이)으로 켠 이름은 같은 이름 고르기에서 뺌
     const amb = d.names.map((n, i) => ({ n, i, c: matchDog(n, d, false).choices })).filter((x) => x.c && d.pick?.[norm(x.n)] !== NEW_DOG && !d.split?.has(norm(x.n)));
     const sims = d.names.map((n, i) => ({ n, i, c: matchDog(n, d, false).similar })).filter((x) => x.c);
-    const news = d.names.map((n, i) => ({ n, i })).filter(({ n }) => plainNew(n, d));
+    const news = d.names.map((n, i) => ({ n, i })).filter(({ n }) => plainNew(n, d) && !(d.unsure || []).includes(n));
     const ambRef = amb.length || sims.length
       ? await signed("refs", [...amb, ...sims].flatMap((x) => x.c.map((c) => c.ref_path).filter(Boolean))) : null;
     body.innerHTML = `
+      ${countGap ? `<div class="same-name similar">
+        <b>보드에는 ${d.boardCount}마리로 보이는데 이름은 ${d.names.length}개 읽었어요</b>
+        <small class="muted">빠지거나 두 번 읽힌 이름이 없는지 아래 사진과 비교해 주세요. 빵이뚱이처럼 두 마리를 한 이름으로 쓴 아이는 1마리로 세요. 빠진 이름은 아래 '빠진 이름 추가'로 넣어 주세요.</small>
+        <div class="same-opts"><button class="same-opt" id="count-ok"><span>확인했어요, 이대로 맞아요</span></button></div>
+      </div>` : ""}
+      ${unsureList.length ? `<div class="same-name newname">
+        <b>글씨를 정확히 못 읽었어요 — 맞는 이름을 골라 주세요</b>
+        <small class="muted">보드 사진을 보고 맞는 이름을 누르거나, 없으면 '직접 쓰기'로 고쳐 주세요.</small>
+        ${unsureList.map(({ n, i }) => `<div class="same-row"><span class="same-label">${esc(n)}${isHotelName(d, n) ? ` <i class="tag-h">H</i>` : ""}</span>
+          <div class="same-opts">
+            ${n.includes("?") ? "" : `<button class="same-opt" data-uok="${i}"><span>'${esc(n)}' 맞아요</span></button>`}
+            ${((d.unsureOpts || {})[n] || []).map((o) => `<button class="same-opt" data-uopt="${i}" data-v="${esc(o)}"><span>${esc(o)}</span></button>`).join("")}
+            <button class="same-opt" data-uedit="${i}"><span>✏️ 직접 쓰기</span></button>
+            <button class="same-opt new" data-del="${i}"><span>이름 아님 (빼기)</span></button></div></div>`).join("")}
+      </div>` : ""}
       ${amb.length ? `<div class="same-name">
         <b>이름이 같은 아이가 있어요 — 오늘 온 아이를 눌러 주세요</b>
         ${amb.map(({ n, i, c }) => `<div class="same-row"><span class="same-label">${esc(n)}${d.guessed?.has(norm(n)) && d.pick?.[norm(n)] ? ` <small class="muted">(최근 자주 온 아이로 골라 둠)</small>` : ""}</span>
@@ -1550,11 +1575,21 @@ async function renderRoll() {
       const i = +el.dataset.edit;
       const v = prompt("이름 고치기", d.names[i]);
       if (v === null) return;
-      if (!v.trim()) d.names.splice(i, 1);
-      else { d.unsure = d.unsure.filter((u) => u !== d.names[i]); d.names[i] = v.trim(); }
+      renameDraft(d, i, v.trim());
       renderRoll();
     }));
-    $$("[data-del]", body).forEach((el) => el.addEventListener("click", () => { d.names.splice(+el.dataset.del, 1); renderRoll(); }));
+    $$("[data-del]", body).forEach((el) => el.addEventListener("click", () => { renameDraft(d, +el.dataset.del, ""); renderRoll(); }));
+    // 글씨 애매한 이름: 맞아요 / 다른 후보 / 직접 쓰기
+    $$("[data-uok]", body).forEach((el) => el.addEventListener("click", () => { const i = +el.dataset.uok; renameDraft(d, i, d.names[i]); renderRoll(); }));
+    $$("[data-uopt]", body).forEach((el) => el.addEventListener("click", () => { renameDraft(d, +el.dataset.uopt, el.dataset.v); renderRoll(); }));
+    $$("[data-uedit]", body).forEach((el) => el.addEventListener("click", () => {
+      const i = +el.dataset.uedit;
+      const v = prompt("보드에 적힌 이름을 써 주세요", d.names[i].replace(/\?/g, ""));
+      if (v === null) return;
+      renameDraft(d, i, v.trim());
+      renderRoll();
+    }));
+    $("#count-ok", body)?.addEventListener("click", () => { d.countOk = true; renderRoll(); });
     // 명단에 없는 이름: 처음 오는 아이 확인 / 명단에서 찾기 / 이름 고치기
     $$("[data-newok]", body).forEach((el) => el.addEventListener("click", () => {
       d.pick = { ...(d.pick || {}), [norm(d.names[+el.dataset.newok])]: NEW_DOG };
@@ -1564,8 +1599,7 @@ async function renderRoll() {
       const i = +el.dataset.edit2;
       const v = prompt("이름 고치기", d.names[i]);
       if (v === null) return;
-      if (!v.trim()) d.names.splice(i, 1);
-      else { d.unsure = d.unsure.filter((u) => u !== d.names[i]); d.names[i] = v.trim(); }
+      renameDraft(d, i, v.trim());
       renderRoll();
     }));
     $$("[data-find]", body).forEach((el) => el.addEventListener("click", () => {
@@ -1646,13 +1680,14 @@ async function renderRoll() {
       const u = d.names.findIndex((n) => unresolved(n, d));
       if (u < 0) return confirmRoll();
       const n = d.names[u], m = matchDog(n, d);
-      const target = plainNew(n, d) ? $(`[data-newok="${u}"]`, body)
+      const isU = (d.unsure || []).includes(n);
+      const target = isU ? $(`[data-uedit="${u}"]`, body) : plainNew(n, d) ? $(`[data-newok="${u}"]`, body)
         : m.similar || m.choices ? $(`.same-name [data-same="${u}"]`, body) || $(`[data-pick="${u}"]`, body) : $(`[data-hpick="${u}"]`, body);
       const el = target?.closest(".same-row") || target || body;
       el.scrollIntoView({ behavior: "smooth", block: "center" });
       el.classList.remove("flash"); void el.offsetWidth; el.classList.add("flash");
       if (target?.tagName === "SELECT") target.focus();
-      toast(plainNew(n, d) ? `'${n}'이(가) 처음 오는 아이인지 먼저 확인해 주세요` : `'${n}'이(가) 어느 아이인지 먼저 골라 주세요`);
+      toast(isU ? `'${n}' 글씨가 맞는지 먼저 확인해 주세요` : plainNew(n, d) ? `'${n}'이(가) 처음 오는 아이인지 먼저 확인해 주세요` : `'${n}'이(가) 어느 아이인지 먼저 골라 주세요`);
     });
     $("#roll-retake").addEventListener("click", () => $("#board-file").click());
     $("#roll-cancel").addEventListener("click", () => { state.draft = null; renderRoll(); });
@@ -1883,7 +1918,7 @@ $("#board-file").addEventListener("change", async (e) => {
       try { msg = (await error.context.json()).error || ""; } catch { /* 무시 */ }
       throw new Error(msg || (error.context?.status === 404 ? "이름 읽기 기능을 찾을 수 없어요" : "읽지 못했어요"));
     }
-    state.draft = { names: data.names || [], unsure: data.unsure || [], hotel: data.hotel || [], kinder: data.kinder || [], daycare: data.daycare || [], img: URL.createObjectURL(blobs[0]), more: blobs.length - 1 };
+    state.draft = { names: data.names || [], unsure: data.unsure || [], unsureOpts: data.unsure_opts || {}, boardCount: data.count || null, hotel: data.hotel || [], kinder: data.kinder || [], daycare: data.daycare || [], img: URL.createObjectURL(blobs[0]), more: blobs.length - 1 };
     if (!state.draft.names.length) toast("이름을 찾지 못했어요. 직접 추가해 주세요.");
     askHotelKids(state.draft);
     await suggestPicks(state.draft);

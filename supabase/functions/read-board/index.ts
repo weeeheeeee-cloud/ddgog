@@ -1,5 +1,5 @@
 // 출석 보드 사진에서 강아지 이름 읽기
-// body: { images: base64 JPEG[] (또는 image 하나), known: string[] }  →  { names, unsure, hotel(H 표시), kinder(K 표시 = 유치원생), daycare(항상 빈 값) }
+// body: { images: base64 JPEG[] (또는 image 하나), known: string[] }  →  { names, unsure, unsure_opts(애매한 이름 → 다른 후보), count(보드 아이 수, 다견 이름은 1마리), hotel(H 표시), kinder(K 표시 = 유치원생), daycare(항상 빈 값) }
 // 보드 오른쪽 호텔링 칸도 읽음. D 표시 아이는 명단에서 뺌. 같은 이름이 K 칸과 H 칸에 따로 있으면 다른 아이 → "라봉" + "라봉 호텔링"
 // 출석 보드 사진뿐 아니라 다이얼독 등 앱의 알림장·예약 목록 캡처도 읽음
 
@@ -47,9 +47,17 @@ Extract ONLY the dogs' names.
   those repeat dogs already listed; only read names from the name column of each section.
 List the entries in the order they are written on the board: the main section column by column
 (left column top to bottom, then the next column), then the hotel/daycare section top to bottom.
+- Some entries are TWO dogs (siblings) written as one joined name, usually four letters made of two 2-letter names
+  (e.g. "빵이뚱이", "코코지몽", "비비모모"). Keep such a name as ONE entry exactly as written: never split it.
+- Do NOT guess silently. If you cannot read a name confidently (messy handwriting, smudged, cut off, a letter you
+  cannot make out), still put your best reading in "entries" and ALSO list it in "unsure" with up to 3 other
+  possible readings (prefer known dog names that look alike). If something in a name column is unreadable,
+  write the letters you can read and use "?" for the rest (e.g. "?이"), and list it in "unsure". Never skip it.
+- "count": count the dog lines on the board yourself, line by line, as a check: every name line is 1 dog
+  (a sibling name like "빵이뚱이" counts as 1), across ALL sections, NOT counting lines marked "D".
 Reply with JSON only:
-{"entries":[{"name":"<이름>","breed":"<적힌 견종 또는 빈칸>","marks":["K"|"H"|"D", ...],"section":"main"|"hotel"}, ...],"unsure":["<읽기 애매한 이름>", ...]}
-"unsure" lists names (from entries) whose handwriting you were not sure about.`;
+{"entries":[{"name":"<이름>","breed":"<적힌 견종 또는 빈칸>","marks":["K"|"H"|"D", ...],"section":"main"|"hotel"}, ...],"unsure":[{"name":"<entries에 넣은 이름>","options":["<다르게 읽힐 수 있는 이름>", ...]}, ...],"count":<보드의 아이 줄 수>}
+"unsure" lists entries whose handwriting you were not sure about.`;
 
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") return new Response("ok", { headers: CORS });
@@ -96,13 +104,20 @@ Deno.serve(async (req) => {
   const out = await res.json();
   const text: string = (out.content ?? []).map((c: { text?: string }) => c.text ?? "").join("");
   const m = text.match(/\{[\s\S]*\}/);
-  let parsed: { names?: unknown; unsure?: unknown; hotel?: unknown; kinder?: unknown; entries?: unknown } = {};
+  let parsed: { names?: unknown; unsure?: unknown; hotel?: unknown; kinder?: unknown; entries?: unknown; count?: unknown } = {};
   try { parsed = m ? JSON.parse(m[0]) : {}; } catch { /* 아래에서 빈 값 */ }
   const clean = (a: unknown) =>
     [...new Set((Array.isArray(a) ? a : []).map((x) => String(x).trim()).filter(Boolean))];
   // 이름 앞뒤에 붙은 H·K 표시 떼기 ("H 콩이", "콩이(K)", "K H 콩이")
   const strip = (n: string) => { let x = n; for (let i = 0; i < 3; i++) x = x.replace(/\s*\(?\s*[HhKk]\s*\)?\s*$|^\s*\(?[HhKk]\)?\s+/g, "").trim(); return x; };
   const stripD = (n: string) => n.replace(/\s*\(?\s*[Dd]\s*\)?\s*$|^\s*\(?[Dd]\)?\s+/g, "").trim();
+  // 글씨가 애매한 이름: [{name, options}] (예전 형식 ["이름"]도 받음)
+  const unsureRaw = (Array.isArray(parsed.unsure) ? parsed.unsure : []).map((u) => {
+    const o = (typeof u === "string" ? { name: u } : (u ?? {})) as { name?: unknown; options?: unknown };
+    const opts = (Array.isArray(o.options) ? o.options : []).map((x) => strip(String(x).trim())).filter(Boolean);
+    return { name: stripD(strip(String(o.name ?? "").trim())), options: opts };
+  }).filter((u) => u.name);
+  const count = Number.isFinite(Number(parsed.count)) && Number(parsed.count) > 0 ? Math.round(Number(parsed.count)) : null;
   if (Array.isArray(parsed.entries)) {
     // 같은 이름이 K 칸과 H/D 칸에 따로 있으면 다른 아이: H/D 쪽 이름에 " 호텔링"/" 데이"를 붙여 따로 둠
     const ents = (parsed.entries as { name?: unknown; breed?: unknown; marks?: unknown }[]).map((e) => {
@@ -114,6 +129,8 @@ Deno.serve(async (req) => {
     const hasK = new Set(ents.filter((e) => e.marks.includes("K")).map((e) => keyOf(e.name)));
     const names: string[] = [], hotel: string[] = [], kinder: string[] = [], daycare: string[] = [];
     const seen = new Map<string, string[]>(); // 이름 → 이미 넣은 표시
+    const unsureByKey = new Map(unsureRaw.map((u) => [keyOf(u.name), u.options]));
+    const unsure: string[] = [], unsureOpts: Record<string, string[]> = {};
     const sigs = new Set<string>();
     for (const e of ents) {
       let name = e.name;
@@ -128,14 +145,18 @@ Deno.serve(async (req) => {
       else if (e.breed) name = `${name} ${e.breed}`; // "웰시 여름" → "여름 웰시" (사이트가 견종으로 어느 여름인지 고름)
       seen.set(key, e.marks);
       names.push(name);
+      if (unsureByKey.has(key) || name.includes("?")) {
+        unsure.push(name);
+        unsureOpts[name] = [...new Set((unsureByKey.get(key) ?? []).filter((o) => keyOf(o) !== keyOf(name)))].slice(0, 3);
+      }
       if (e.marks.includes("K")) kinder.push(name);
       if (e.marks.includes("H")) hotel.push(name);
       if (e.marks.includes("D")) daycare.push(name);
     }
-    return json({ names, unsure: clean(parsed.unsure).map(strip), hotel, kinder, daycare });
+    return json({ names, unsure, unsure_opts: unsureOpts, count, hotel, kinder, daycare });
   }
   const names = clean(parsed.names).map(strip).filter(Boolean);
   const hotel = clean(parsed.hotel).map(strip).filter(Boolean);
   const kinder = clean(parsed.kinder).map(strip).filter(Boolean);
-  return json({ names: [...new Set([...names, ...hotel, ...kinder])], unsure: clean(parsed.unsure), hotel: [...new Set(hotel)], kinder: [...new Set(kinder)], daycare: [] });
+  return json({ names: [...new Set([...names, ...hotel, ...kinder])], unsure: unsureRaw.map((u) => u.name), unsure_opts: {}, count, hotel: [...new Set(hotel)], kinder: [...new Set(kinder)], daycare: [] });
 });
