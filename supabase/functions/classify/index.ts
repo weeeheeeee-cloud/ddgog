@@ -44,7 +44,17 @@ nose colour (black vs brownish vs slightly PINK), tear stains (none / light / br
 head shape and size (huge round puffy "afro" head vs small or narrow head, long vs short muzzle),
 ear length and whether ears are hidden in the head fluff, cream/apricot tinge on ears or back,
 body size and leg length, tail plume. Compare these against each white candidate's 구분 and 부위별 특징.
-If two white candidates still fit equally, choose the one that matches the most specific points and set confidence "low".
+GENERIC TRAITS ARE NOT EVIDENCE: "white", "curly", "black nose", "round fluffy head", "fluffy boot legs", "pom-pom tail"
+fit almost every white dog here. Never pick a white dog because of these. Pick it only when at least one of ITS OWN
+specific points (from its 구분 / 부위별 특징: e.g. ears sticking out as separate puffs vs ears hidden, tear-stain colour
+and place, nose colour, grey face, leg thickness, size) is clearly visible and fits, AND no other white candidate fits as well.
+If two white candidates still fit equally, or the deciding point is not visible, do NOT put that dog in "sure".
+Some entries are TWO dogs under one name (siblings, e.g. "빵이뚱이" = 빵이 + 뚱이; the note then contains "+").
+Such an entry is NOT a catch-all for white dogs: match it only when the photo clearly shows one of those two
+specific dogs by its own points (for 빵이뚱이: a grey face/ears means 뚱이).
+CLOTHES vs TODAY'S LOOK: if a candidate has a "today's look" photo and the dog in the new photo wears clearly different
+clothes (different colour or type, or one wears clothes and the other none), you cannot be sure it is that dog:
+leave it out of "sure" unless its own specific body points are unmistakable.
 Many dogs come with "부위별 특징" (what the face, top of the head, back of the head, back, tail and legs look like).
 Staff photos often show only part of a dog (just the head from above, the back of the head, the back, the rear),
 so compare the visible part with that dog's matching body-part description and reference photos of the same view.
@@ -69,6 +79,8 @@ Keep "note" very short (under 30 Korean characters).
 - "dogs": the known dogs properly shown in the new photo (one or several; [] if none). When a dog plausibly fits
   one or more known dogs (same breed type, coat colour, size and build), give your best guess among them using
   reference photos, body-part features and today's look, and mark it low confidence if unsure.
+  (For WHITE dogs a guess that is not in "sure" is NOT sent to the owner: staff sort it by hand. So keep "sure"
+  honest — never put a white dog in "sure" on generic traits alone.)
   But NEVER force a dog onto a known dog that clearly does not match: if the breed type, coat colour or pattern,
   size, build, ear or tail shape, or today's clothes clearly differ from every candidate, leave it OUT of "dogs"
   (count it in "unknown_main", or set "new_dog"). A wrong owner getting the photo is worse than an unsorted photo.
@@ -85,6 +97,18 @@ Keep "note" very short (under 30 Korean characters).
   mostly hidden, or if two known dogs fit about equally for one of the dogs in the photo.`;
 
 const refCache = new Map<string, string>();
+
+// 흰색 계열 아이인지 (메모 → 견종 → AI 메모 순으로 털색 단서를 찾음). 유색·투톤·얼룩은 제외
+const COLOR = /(흰|화이트|순백|백색|아이보리|갈색|검|블랙|붉|황갈|살구|적갈|레드|초코|초콜|회색|회갈|은회|탄|크림|트라이|삼색|블루|골드|베이지|주황|애프리콧|세이블|흑백|밤색)/;
+const OTHER = /(갈색|검|블랙|붉|황갈|살구|적갈|레드|초코|초콜|회색|회갈|은회|탄|트라이|삼색|블루|골드|베이지|주황|애프리콧|세이블|흑백|밤색|투톤|무늬|얼룩|파이드)/;
+const WHITE = /(흰|화이트|순백|백색|아이보리)/;
+function isWhiteDog(d: { note?: string | null; breed?: string | null; tips_ai?: string | null }) {
+  const parts = String(d.note ?? "").split(/[,·]/).map((x) => x.trim()).filter(Boolean);
+  const c = parts.find((x) => COLOR.test(x))?.split("+")[0]; // "흰색 푸들(빵이)+은회색 푸들(뚱이)" → 흰 아이가 있으면 흰색
+  if (c) return WHITE.test(c) && !OTHER.test(c);
+  if (/(비숑|말티즈|말티푸|꼬똥|코똥|꼬숑)/.test(d.breed ?? "")) return true;
+  return WHITE.test(String(d.tips_ai ?? "").slice(0, 40));
+}
 
 function json(body: unknown, status = 200) {
   return new Response(JSON.stringify(body), {
@@ -415,10 +439,20 @@ Deno.serve(async (req) => {
     const note = typeof parsed.note === "string" ? parsed.note.slice(0, 200) : null;
 
     const nums: number[] = Array.isArray(parsed.dogs) ? parsed.dogs.map(Number) : [];
-    const ids = [...new Set(nums.filter((n) => n >= 1 && n <= refs.length).map((n) => refs[n - 1].id))];
+    let ids = [...new Set(nums.filter((n) => n >= 1 && n <= refs.length).map((n) => refs[n - 1].id))];
     // 아이별로 판단: 확신한 아이가 다 맞으면 끝. 다른 아이가 애매해도 확신한 아이 사진은 보냄
     const sureNums: number[] = Array.isArray(parsed.sure) ? parsed.sure.map(Number) : (parsed.confidence === "high" ? nums : []);
     const sureIds = new Set(sureNums.filter((n) => n >= 1 && n <= refs.length).map((n) => refs[n - 1].id));
+    // 흰 아이는 AI가 확신하지 못하면 넣지 않음 → '모르는 아이' 칸으로 (흰 비숑들이 빵이뚱이·뭉치 등으로 몰려 들어가던 문제)
+    //  미리보기·A/B 재확인·특정 아이 찾기는 직원이 바로 보는 곳이라 그대로 둠
+    let dropped: string[] = [];
+    if (!preview && !only && !find.length) {
+      const drop = ids.filter((id) => !sureIds.has(id) && (() => { const d = refs.find((x) => x.id === id); return !!d && !d.auto && isWhiteDog(d); })());
+      if (drop.length) {
+        dropped = drop.map((id) => refs.find((x) => x.id === id)!.name);
+        ids = ids.filter((id) => !drop.includes(id));
+      }
+    }
     // 닮은 후보가 있으면 가장 닮은 아이에게 넣고(확신 못 하면 confidence low → '확인' 표시), 명확히 아닌 아이에게는 넣지 않음
     const status = ids.length ? "done" : "review";
     const allSure = ids.length > 0 && ids.every((id) => sureIds.has(id));
@@ -450,10 +484,11 @@ Deno.serve(async (req) => {
     // 처음 보는 강아지: 새 그룹을 만들지 않고 '모르는 아이' 사진으로 둠 (화면에서 비슷한 사진끼리 묶어 보여줌)
     const isNew = !recheck && !ids.length && parsed.new_dog === true;
 
+    const dropNote = dropped.length ? `애매해서 안 넣음(후보: ${dropped.join(", ")})${note ? ` ${note}` : ""}` : null;
     await supa.from("photos").update({
       dog_ids: ids,
       confidence: allSure ? "high" : "low",
-      ai_note: isNew ? `처음 보는 아이${note ? `: ${note}` : ""}`.slice(0, 200) : note,
+      ai_note: (isNew ? `처음 보는 아이${note ? `: ${note}` : ""}` : (dropNote ?? note ?? "")).slice(0, 200) || null,
       status,
       claimed_at: null,
     }).eq("id", photoId).or("confidence.is.null,confidence.neq.manual");
