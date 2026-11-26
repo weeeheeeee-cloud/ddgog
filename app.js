@@ -1389,11 +1389,31 @@ function matchDog(n, draft = state.draft, usePick = true) {
   }
   return r;
 }
+// 보드에 견종을 이름 앞뒤에 붙여 쓴 경우: "말티즈로이"·"로이말티즈" → 이름 "로이" + 견종 "말티즈"
+const BREED_WORDS = ["비숑프리제", "포메라니안", "잭러셀", "요크셔", "닥스훈트", "리트리버", "슈나우저", "페키니즈", "사모예드",
+  "말티즈", "말티푸", "진돗개", "프렌치", "허스키", "폼피츠", "폼스키", "치와와",
+  "비숑", "포메", "푸들", "꼬똥", "코똥", "꼬숑", "웰시", "코기", "시츄", "요키", "닥스", "비글", "스피츠", "보더", "골든",
+  "진도", "시바", "불독", "페키", "퍼그", "토이", "미니", "잭"];
+function breedSplit(n) {
+  const s = norm(String(n || "").replace(/[()]/g, ""));
+  for (const w of BREED_WORDS) {
+    if (s.length <= w.length) continue;
+    if (s.startsWith(w)) return { name: s.slice(w.length), breed: w };
+    if (s.endsWith(w)) return { name: s.slice(0, -w.length), breed: w };
+  }
+  return null;
+}
 function matchDog0(n, draft = state.draft, usePick = true) {
   const pick = usePick && draft?.pick?.[norm(n)];
   if (pick === NEW_DOG) return { isNew: true };
   if (pick && dogById(pick)) return { dog: dogById(pick) };
   const named = state.dogs.filter((d) => !d.auto);
+  // "말티즈로이" → 이름이 로이이고 견종(또는 이름)에 말티즈가 들어간 아이가 하나뿐이면 그 아이 ("로이 말티즈")
+  const bs = breedSplit(n);
+  if (bs) {
+    const hits = named.filter((d) => d.active !== false && famSame(d.name, bs.name) && (norm(d.breed) + norm(d.name)).includes(bs.breed));
+    if (hits.length === 1) return { dog: hits[0] };
+  }
   // 같은 이름 아이가 여럿이면 무조건 모두와 대조해서 고르게 함 (보드에 "토리 비숑"처럼 정확히 쓴 경우만 바로 연결)
   const fam = familyOf(n);
   if (fam.length > 1) {
