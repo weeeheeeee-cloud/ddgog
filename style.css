@@ -522,6 +522,8 @@ body.practice #practice-reset{display:flex}
 .rc-foot{border-bottom:0;border-top:1px solid var(--line);justify-content:flex-end}
 .rc-body{overflow:auto;padding:12px 16px}
 .rc-group{margin-bottom:16px}
+.rc-sub{margin:6px 0 10px;padding:8px;border-radius:10px;background:rgba(0,59,137,.04)}
+.rc-shead{display:flex;align-items:center;justify-content:space-between;gap:8px;margin-bottom:6px}
 .rc-ghead{display:flex;gap:8px;align-items:center;margin-bottom:8px}
 .rc-ghead .avatar{width:32px;height:32px;border-radius:50%;object-fit:cover;background:var(--cream);display:inline-flex;align-items:center;justify-content:center;font-weight:700}
 .rc-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:8px}

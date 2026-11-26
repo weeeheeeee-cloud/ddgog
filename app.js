@@ -2535,6 +2535,7 @@ async function openReclassifyReview(results, failed) {
         <img src="${thumb(r.rep.thumb_path)}" class="rot${r.rep.rotation || 0}" alt="">
         <span class="rc-check">${r.keep ? "✓" : ""}</span>
         ${r.members.length > 1 ? `<span class="burst">+${r.members.length - 1}</span>` : ""}</button>`;
+    const keepScroll = ov.querySelector(".rc-body")?.scrollTop || 0;
     ov.innerHTML = `<div class="rc-box">
       <div class="rc-head"><div class="grow"><b>AI가 이렇게 넣으려고 해요</b>
         <small class="muted">아직 넣지 않았어요. 틀린 사진은 눌러서 체크를 빼면 그대로 남아요. 주황 점선은 AI가 확신하지 못한 사진이에요.</small></div>
@@ -2544,12 +2545,31 @@ async function openReclassifyReview(results, failed) {
         const ids = k.split(",");
         const d0 = dogById(ids[0]);
         const allOn = rs.every((r) => r.keep);
+        // 같은 아이로 가는 사진 중 서로 닮은 것끼리 묶음 → 묶음째 넣고 뺄 수 있게
+        const subs = new Map();
+        for (const r of rs) {
+          const c = clusterCache.map.get(r.rep.id);
+          const sk = c && c > 0 ? "c" + c : "single";
+          if (!subs.has(sk)) subs.set(sk, []);
+          subs.get(sk).push(r);
+        }
+        const subList = [...subs.entries()].sort((a, b) => (a[0] === "single") - (b[0] === "single") || b[1].length - a[1].length);
+        const hasUnsure = rs.some((r) => !r.manual && !r.ids.every((id) => r.sure.has(id)));
+        const subHtml = subList.length > 1 || (subList[0] && subList[0][0] !== "single" && subList[0][1].length < rs.length)
+          ? subList.map(([sk, sr], si) => {
+              const on = sr.every((r) => r.keep);
+              return `<div class="rc-sub"><div class="rc-shead"><span class="muted small">${sk === "single" ? "따로 찍힌 사진" : `비슷한 사진 묶음 ${si + 1}`} · ${cnt(sr)}장</span>
+                <button class="btn ghost mini" data-rc-sub="${k}|${sk}">${on ? "이 묶음 빼기" : "이 묶음 넣기"}</button></div>
+                <div class="rc-grid">${sr.map((r) => tile(r, results.indexOf(r))).join("")}</div></div>`;
+            }).join("")
+          : `<div class="rc-grid">${rs.map((r) => tile(r, results.indexOf(r))).join("")}</div>`;
         return `<div class="rc-group">
           <div class="rc-ghead">${d0?.ref_path ? `<img class="avatar" src="${refs(d0.ref_path)}" alt="">` : `<span class="avatar"></span>`}
             <b class="grow">→ ${esc(ids.map((id) => dogById(id)?.name || "?").join(" · "))} <span class="muted">${cnt(rs)}장</span></b>
+            ${hasUnsure ? `<button class="btn ghost mini" data-rc-sure="${k}">확실한 것만</button>` : ""}
             <button class="btn ghost mini" data-rc-all="${k}">${allOn ? "모두 빼기" : "모두 넣기"}</button>
             <button class="btn ghost mini" data-rc-move="${k}">다른 아이로</button></div>
-          <div class="rc-grid">${rs.map((r) => tile(r, results.indexOf(r))).join("")}</div></div>`;
+          ${subHtml}</div>`;
       }).join("")}
       ${none.length ? `<div class="rc-group none"><div class="rc-ghead"><span class="avatar q">?</span>
           <b class="grow">AI도 못 찾은 사진 <span class="muted">${cnt(none)}장 · 그대로 둬요</span></b></div>
@@ -2559,7 +2579,33 @@ async function openReclassifyReview(results, failed) {
       <div class="rc-foot"><button class="btn ghost sm" data-rc-act="close">넣지 않고 닫기</button>
         <button class="btn primary sm" data-rc-act="apply" ${picked ? "" : "disabled"}>체크한 ${picked}장 넣기</button></div>
     </div>`;
-    $$("[data-rc]", ov).forEach((b) => b.addEventListener("click", () => { const r = results[+b.dataset.rc]; r.keep = !r.keep; draw(); }));
+    const body = ov.querySelector(".rc-body");
+    if (body) body.scrollTop = keepScroll;
+    // 한 장 체크는 그 자리에서만 바꿈 (화면을 다시 그리지 않아 위치·사진이 그대로)
+    const refreshCounts = () => {
+      const n = cnt(found.filter((r) => r.keep));
+      const ap = ov.querySelector('[data-rc-act="apply"]');
+      if (ap) { ap.textContent = `체크한 ${n}장 넣기`; ap.disabled = !n; }
+      $$("[data-rc-all]", ov).forEach((b) => { const rs = byKey.get(b.dataset.rcAll); b.textContent = rs.every((r) => r.keep) ? "모두 빼기" : "모두 넣기"; });
+      $$("[data-rc-sub]", ov).forEach((b) => { const sr = subOf(b.dataset.rcSub); b.textContent = sr.every((r) => r.keep) ? "이 묶음 빼기" : "이 묶음 넣기"; });
+    };
+    const subOf = (key) => {
+      const [k, sk] = key.split("|");
+      return (byKey.get(k) || []).filter((r) => { const c = clusterCache.map.get(r.rep.id); return (c && c > 0 ? "c" + c : "single") === sk; });
+    };
+    $$("[data-rc]", ov).forEach((b) => b.addEventListener("click", () => {
+      const r = results[+b.dataset.rc]; r.keep = !r.keep;
+      b.classList.toggle("on", r.keep);
+      const ck = b.querySelector(".rc-check"); if (ck) ck.textContent = r.keep ? "✓" : "";
+      refreshCounts();
+    }));
+    $$("[data-rc-sub]", ov).forEach((b) => b.addEventListener("click", () => {
+      const sr = subOf(b.dataset.rcSub); const on = !sr.every((r) => r.keep);
+      sr.forEach((r) => (r.keep = on)); draw();
+    }));
+    $$("[data-rc-sure]", ov).forEach((b) => b.addEventListener("click", () => {
+      (byKey.get(b.dataset.rcSure) || []).forEach((r) => (r.keep = r.manual || r.ids.every((id) => r.sure.has(id)))); draw();
+    }));
     $$("[data-rc-all]", ov).forEach((b) => b.addEventListener("click", () => {
       const rs = byKey.get(b.dataset.rcAll); const on = !rs.every((r) => r.keep);
       rs.forEach((r) => (r.keep = on)); draw();
