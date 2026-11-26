@@ -1319,7 +1319,10 @@ function queueRescan() {
 async function rescanUnsorted() {
   if (state.busy) { rescanAgain = true; return; }
   // 직원이 뺀 사진(not_dogs)은 '아래로' 보낸 것이니 자동으로 다시 분류하지 않음
-  const ids = state.photos.filter((p) => (p.status === "review" || p.status === "error") && p.confidence !== "manual" && !(p.not_dogs || []).length).map((p) => p.id);
+  // AI가 이미 '애매해서 안 넣음'으로 판단한 흰 아이 사진은 다시 돌려도 같은 결과라 다시 분류하지 않음
+  //  (다시 돌리는 동안 '모르는 아이' 칸에서 사진이 사라졌다 나타나고, AI 비용만 듦)
+  const ids = state.photos.filter((p) => (p.status === "review" || p.status === "error") && p.confidence !== "manual" && !(p.not_dogs || []).length
+    && !(p.status === "review" && /^애매해서 안 넣음/.test(p.ai_note || ""))).map((p) => p.id);
   if (!ids.length) return;
   for (let i = 0; i < ids.length; i += 200) {
     await sb.from("photos").update({ status: "pending" }).in("id", ids.slice(i, i + 200)).in("status", ["review", "error"]);
