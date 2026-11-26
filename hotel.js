@@ -626,10 +626,33 @@ function drawSumWeek(wk, t) {
     const svc = [...x.ins, ...x.stays, ...x.outs].some((b) => svcText(b));
     return `<div class="ho-day ${d.slice(0, 7) !== hs.month ? "other" : ""} ${d === t ? "today" : ""} ${d === hs.sel ? "sel" : ""} ${dow(d) === 0 ? "sun" : dow(d) === 6 ? "sat" : ""}" data-day="${d}" style="grid-column:${i + 1}">
       <div class="ho-sum-top"><span class="ho-dn">${+d.slice(8)}</span>${svc ? `<i class="ho-bang">!</i>` : ""}</div>
-      <div class="ho-io">${x.ins.length ? `<span class="in">▸${x.ins.length}</span>` : ""}${x.outs.length ? `<span class="out">◂${x.outs.length}</span>` : ""}</div>
-      ${x.night ? `<em class="ho-occ" title="이날 밤 투숙 ${x.night}마리"><i>🏨 </i>${x.night}</em>` : ""}
+      <div class="ho-io">${x.ins.length ? `<span class="in" data-pop="in" data-pd="${d}">▸${x.ins.length}</span>` : ""}${x.outs.length ? `<span class="out" data-pop="out" data-pd="${d}">◂${x.outs.length}</span>` : ""}</div>
+      ${x.night ? `<em class="ho-occ" data-pop="night" data-pd="${d}" title="눌러서 이날 밤 투숙하는 아이 보기"><i>🏨 </i>${x.night}</em>` : ""}
       <span class="ho-add" data-add="${d}" title="이 날 입실로 예약 추가">+ 예약</span></div>`;
   }).join("")}</div>`;
+}
+// 캘린더 숫자 눌렀을 때 뜨는 이름 목록
+function showDayPop(d, kind, anchor) {
+  document.querySelector(".ho-pop")?.remove();
+  const x = dayInfo(d);
+  const list = kind === "in" ? x.ins : kind === "out" ? x.outs : x.live.filter((b) => d < b.check_out);
+  if (!list.length) return;
+  const title = { in: "입실", out: "퇴실", night: "밤 투숙" }[kind];
+  const total = list.reduce((n, b) => n + dogsIn(b.label), 0);
+  const pop = document.createElement("div");
+  pop.className = "ho-pop";
+  pop.innerHTML = `<div class="ho-pop-h"><b>${md(d)} ${title} ${total}마리</b><button class="ho-pop-x" aria-label="닫기">✕</button></div>
+    ${list.map((b) => `<button class="ho-pop-row" data-bk="${b.id}">${kindTag(b.kind)}<span class="grow">${esc(labelShow(b))}</span>
+      <small class="muted">${kind === "in" ? (b.in_time || "") : kind === "out" ? (b.out_time || "") : `${md(b.check_in).replace(/\(.\)/, "")}~${md(b.check_out).replace(/\(.\)/, "")}`}</small></button>`).join("")}`;
+  document.body.appendChild(pop);
+  const r = anchor.getBoundingClientRect(), w = pop.offsetWidth, h = pop.offsetHeight;
+  pop.style.left = `${Math.max(8, Math.min(innerWidth - w - 8, r.left + r.width / 2 - w / 2))}px`;
+  pop.style.top = `${r.bottom + 6 + h > innerHeight ? Math.max(8, r.top - h - 6) : r.bottom + 6}px`;
+  const close = () => { pop.remove(); document.removeEventListener("click", outside, true); removeEventListener("scroll", close, true); };
+  const outside = (e) => { if (!pop.contains(e.target)) close(); };
+  setTimeout(() => { document.addEventListener("click", outside, true); addEventListener("scroll", close, true); }, 0);
+  pop.querySelector(".ho-pop-x").addEventListener("click", close);
+  $$("[data-bk]", pop).forEach((b) => b.addEventListener("click", () => { close(); openBooking(hs.bookings.find((y) => y.id === b.dataset.bk)); }));
 }
 // 캘린더 밑 '그날 요약': 고른 날짜의 입실 · 퇴실 · 투숙 중
 function dayPanel(d) {
@@ -687,7 +710,7 @@ function drawCalendar() {
       if (hs.cal === "week") {
         const wk = Array.from({ length: 7 }, (_, i) => addDays(hs.week, i));
         return `<div class="ho-cal ho-cal-week">
-          ${wk.map((d, i) => { const x = dayInfo(d); return `<div class="ho-dow ${i === 0 ? "sun" : i === 6 ? "sat" : ""} ${d === t ? "today" : ""}">${DOW[i]} <small>${+d.slice(5, 7)}/${+d.slice(8)}</small>${x.night ? `<em class="ho-occ">🏨 ${x.night}</em>` : ""}</div>`; }).join("")}
+          ${wk.map((d, i) => { const x = dayInfo(d); return `<div class="ho-dow ${i === 0 ? "sun" : i === 6 ? "sat" : ""} ${d === t ? "today" : ""}">${DOW[i]} <small>${+d.slice(5, 7)}/${+d.slice(8)}</small>${x.night ? `<em class="ho-occ" data-pop="night" data-pd="${d}">🏨 ${x.night}</em>` : ""}</div>`; }).join("")}
           ${drawWeek(wk, t, "big")}
         </div>
         <p class="small muted">한 주를 크게 봐요 · 막대 하나가 입실(▸)부터 퇴실(◂)까지 · 🏨 그날 밤 투숙 마릿수 · 날짜를 누르면 밑에 그날 요약</p>
@@ -729,6 +752,8 @@ function drawCalendar() {
   }));
   $$("[data-st]", main).forEach((b) => b.addEventListener("click", () => openStatList(b.dataset.st, st[b.dataset.st])));
   $$("[data-bk]", main).forEach((b) => b.addEventListener("click", (e) => { e.stopPropagation(); openBooking(hs.bookings.find((x) => x.id === b.dataset.bk)); }));
+  // 숫자(▸입실 ◂퇴실 🏨투숙)를 누르면 그 아이들 이름을 바로 띄움
+  $$("[data-pop]", main).forEach((el) => el.addEventListener("click", (e) => { e.stopPropagation(); showDayPop(el.dataset.pd, el.dataset.pop, el); }));
   $$("[data-day]", main).forEach((c) => c.addEventListener("click", () => {
     hs.sel = c.dataset.day; drawCalendar();
     const p = $("#ho-daypanel");
