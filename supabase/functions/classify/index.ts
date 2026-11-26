@@ -173,9 +173,11 @@ Deno.serve(async (req) => {
   let recheck = false;
   let only: string[] | null = null; // 직원이 A→B로 고친 뒤, A 폴더의 다른 사진을 A·B 둘 중에서만 다시 판단
   let preview = false; // 미리보기: 어디 넣을지만 알려주고 저장하지 않음 (직원이 확인 후 넣음)
+  let today = false; // 재검수: DB 대표 사진 대신 그날 직원이 확인한 사진만 기준으로 (미리보기에서만)
   try {
-    ({ photo_id: photoId, recheck = false, only = null, preview = false } = await req.json());
+    ({ photo_id: photoId, recheck = false, only = null, preview = false, today = false } = await req.json());
     preview = preview === true;
+    today = today === true && preview;
     if (!Array.isArray(only) || !only.length) only = null;
   } catch {
     return json({ error: "bad request" }, 400);
@@ -233,6 +235,63 @@ Deno.serve(async (req) => {
     if (!paths.length && d.ref_path) paths.push(d.ref_path);
     return { ...d, paths };
   }).filter((d) => d.paths.length);
+  // ---- 재검수(today): DB 대표 사진은 쓰지 않고, 그날 직원이 확인한(또는 지문으로 확실한) 한 마리 사진을 기준으로
+  //  옷·미용이 그날 그대로라 가장 확실한 단서. 지문이 가장 비슷한 6마리 × 3장만 보내 비용은 평소와 비슷
+  if (today) {
+    const { data: tp } = await supa.from("photos")
+      .select("id, thumb_path, dog_ids, confidence, ai_note, vec, created_at").eq("day", photo.day).eq("status", "done")
+      .eq("practice", photo.practice === true).in("confidence", ["manual", "high"]).neq("id", photoId)
+      .order("created_at", { ascending: false }).limit(800);
+    const byDog = new Map<string, { path: string; v: number[] | null; manual: boolean }[]>();
+    const pv = (x: unknown): number[] | null => { if (!x) return null; if (Array.isArray(x)) return x as number[]; try { return JSON.parse(String(x)); } catch { return null; } };
+    for (const p of tp ?? []) {
+      if ((p.dog_ids ?? []).length !== 1) continue;
+      if (p.confidence !== "manual" && !/^지문: (?!같은 장면)/.test(p.ai_note ?? "")) continue;
+      const d = p.dog_ids[0];
+      if (!byDog.has(d)) byDog.set(d, []);
+      byDog.get(d)!.push({ path: p.thumb_path, v: pv(p.vec), manual: p.confidence === "manual" });
+    }
+    const qv = pv(photo.vec);
+    const cosv = (a: number[], b: number[]) => { let d = 0, x = 0, y = 0; for (let i = 0; i < a.length; i++) { d += a[i] * b[i]; x += a[i] * a[i]; y += b[i] * b[i]; } return d / (Math.sqrt(x * y) || 1); };
+    const cand = (dogs ?? []).filter((d) => !d.auto && byDog.has(d.id)).map((d) => {
+      const ps = byDog.get(d.id)!;
+      const sim = qv ? Math.max(...ps.map((p) => (p.v ? cosv(qv, p.v) : 0))) : 0;
+      // 확인한 사진 먼저, 그다음 지금 사진과 가장 닮은 순으로 3장
+      const pick = [...ps].sort((a, b) => (qv && b.v && a.v ? cosv(qv, b.v) - cosv(qv, a.v) : 0)).slice(0, 3).map((p) => "today:" + p.path);
+      return { ...d, paths: pick, sim };
+    }).sort((a, b) => b.sim - a.sim).slice(0, 6);
+    if (!cand.length) return json({ preview: true, dog_ids: [], sure: [], note: "오늘 확인된 사진이 있는 아이가 없어요", rotation: 0, new_dog: false });
+    await Promise.all(cand.flatMap((d) => d.paths).filter((k) => !refCache.has(k)).map(async (k) => {
+      try { refCache.set(k, encodeBase64(await download(supa, "photos", k.slice(6)))); } catch { /* 건너뜀 */ }
+    }));
+    const content: Record<string, unknown>[] = [{ type: "text", text:
+      "RE-CHECK MODE: the reference photos below were all taken TODAY and confirmed by staff, so each dog wears exactly the same " +
+      "clothes, harness and grooming as it does in the new photo. Here clothes and accessories ARE strong evidence, together with the body. " +
+      "These are the most similar dogs that have confirmed photos today; if none truly matches, reply \"dogs\": [].\nReference dogs (today):" }];
+    cand.forEach((d, i) => {
+      const tips = [d.tips, d.tips_ai].filter(Boolean).join(" / ");
+      content.push({ type: "text", text: `[${i + 1}] ${d.name}${d.breed ? ` (${d.breed})` : ""}${d.note ? ` — ${d.note}` : ""}${tips ? ` | 구분: ${tips}` : ""}` });
+      for (const k of d.paths) { const b64 = refCache.get(k); if (b64) content.push({ type: "image", source: { type: "base64", media_type: "image/jpeg", data: b64 } }); }
+    });
+    content.push({ type: "text", text: "New photo to classify:" });
+    content.push({ type: "image", source: { type: "base64", media_type: "image/jpeg", data: encodeBase64(await download(supa, "photos", photo.thumb_path)) } });
+    const res = await fetch("https://api.anthropic.com/v1/messages", {
+      method: "POST",
+      headers: { "x-api-key": ANTHROPIC_KEY, "anthropic-version": "2023-06-01", "content-type": "application/json" },
+      body: JSON.stringify({ model: MODEL, max_tokens: 3000, system: SYSTEM, messages: [{ role: "user", content }] }),
+    });
+    if (res.status === 429 || res.status === 529 || res.status >= 500) return json({ error: "busy", retryable: true }, 503);
+    if (!res.ok) return json({ error: `Claude API ${res.status}` }, 500);
+    const out = await res.json();
+    const parsed = parseReply((out.content ?? []).map((c: { text?: string }) => c.text ?? "").join(""));
+    const nums: number[] = Array.isArray(parsed.dogs) ? parsed.dogs.map(Number) : [];
+    const ids = [...new Set(nums.filter((n) => n >= 1 && n <= cand.length).map((n) => cand[n - 1].id))];
+    const sureNums: number[] = Array.isArray(parsed.sure) ? parsed.sure.map(Number) : (parsed.confidence === "high" ? nums : []);
+    const sure = [...new Set(sureNums.filter((n) => n >= 1 && n <= cand.length).map((n) => cand[n - 1].id))];
+    const rot = [0, 90, 180, 270].includes(Number(parsed.rotate)) ? Number(parsed.rotate) : 0;
+    return json({ preview: true, today: true, dog_ids: ids, sure, note: typeof parsed.note === "string" ? parsed.note.slice(0, 200) : null, rotation: rot, new_dog: parsed.new_dog === true });
+  }
+
   // 한 번에 보내는 대표 사진은 최대 MAX_REF_IMAGES장 (요금이 비싸지는 길이를 넘지 않도록).
   // 강아지 수로 나눠 강아지당 최대 10장, 사진이 더 많으면 고르게 골라 다양한 각도가 들어가게 함
   // 많이 보낼수록 느려짐: 명단 확정한 날(보통 20~30마리)은 아이당 4~6장, 명단 없으면 아이당 1장

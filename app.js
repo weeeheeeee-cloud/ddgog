@@ -751,7 +751,7 @@ async function renderPhotos() {
   (unsorted.length ? `<div class="dog-group unsorted" data-list="unsorted">
       <div class="dog-head"><span class="avatar q">?</span>
         <div class="grow"><b>모르는 아이·분류 안 된 사진 ${unsorted.length}장</b><small class="muted">처음 보는 아이, 뺀 사진, AI가 확신하지 못한 사진을 한곳에 모았어요. 비슷한 사진끼리 묶어 두었으니 묶음째 선택해서 한 번에 넣을 수 있어요</small></div>
-        ${selBtn("unsorted")}${state.busy ? "" : `<button id="reclassify" class="btn ghost sm">AI로 다시 분류</button>`}<button id="save-unsorted" class="btn ghost sm">📥 다운로드</button></div>
+        ${selBtn("unsorted")}${state.busy ? "" : `<button id="reclassify" class="btn ghost sm" title="DB 대표 사진 대신 오늘 직원이 확인한 사진(같은 옷·미용)과 비교해서 다시 분류해요">재검수 (오늘 사진 기준)</button>`}<button id="save-unsorted" class="btn ghost sm">📥 다운로드</button></div>
       <div class="tile-size">사진 크기
         ${[["s", "작게"], ["m", "보통"], ["l", "크게"], ["xl", "아주 크게"]].map(([k, t]) => `<button class="btn ${state.tileSize === k ? "primary" : "ghost"} mini" data-tile="${k}">${t}</button>`).join("")}
         <small class="muted">비슷하게 생긴 사진끼리 붙여서 보여줘요</small></div>
@@ -818,7 +818,7 @@ async function renderPhotos() {
   renderSelBar();
   // 그룹이 늘어난 뒤 다시 돌리면 대부분 자리를 찾아감
   // 바로 넣지 않고, 어디로 갈지 먼저 보여준 뒤 확인하고 넣음
-  $("#reclassify")?.addEventListener("click", () => previewReclassify(unsorted));
+  $("#reclassify")?.addEventListener("click", () => previewReclassify(unsorted, true));
   $("#save-unsorted")?.addEventListener("click", (e) => saveAll(e.currentTarget, true));
   $$("[data-rename]", box).forEach((b) => b.addEventListener("click", async () => {
     if (await renameDog(dogById(b.dataset.rename))) renderPhotos();
@@ -2474,10 +2474,10 @@ async function classifyPending() {
 }
 
 /* ---------- 다시 분류 미리보기: 어디 넣을지 보여주고 확인 후 넣기 ---------- */
-async function classifyPreview(photoId) {
+async function classifyPreview(photoId, today = false) {
   for (let attempt = 0; attempt < 4; attempt++) {
     const res = await Promise.race([
-      sb.functions.invoke("classify", { body: { photo_id: photoId, preview: true } }),
+      sb.functions.invoke("classify", { body: { photo_id: photoId, preview: true, today } }),
       sleep(120000).then(() => ({ error: { context: { status: 504 } } })),
     ]);
     if (!res.error && res.data?.preview) return res.data;
@@ -2487,7 +2487,8 @@ async function classifyPreview(photoId) {
   }
   return null;
 }
-async function previewReclassify(list) {
+// today: 재검수 — DB 대표 사진 대신 그날 직원이 확인한 사진만 기준으로 다시 봄 (옷·미용이 그날 그대로라 정확)
+async function previewReclassify(list, today = false) {
   if (state.busy || !list?.length) return;
   state.busy = true;
   await render();
@@ -2495,11 +2496,11 @@ async function previewReclassify(list) {
   const groups = burstGroups(list).map((g) => ({ rep: g.rep, members: g.members }));
   let done = 0, failed = 0;
   const total = groups.length;
-  const tick = () => progress("AI가 어디 넣을지 살펴보는 중… 아직 넣지 않아요", done, total, "다 보고 나면 어디로 갈지 보여드려요. 확인하고 넣으면 돼요.");
+  const tick = () => progress(today ? "오늘 확인한 사진과 비교하는 중… 아직 넣지 않아요" : "AI가 어디 넣을지 살펴보는 중… 아직 넣지 않아요", done, total, "다 보고 나면 어디로 갈지 보여드려요. 확인하고 넣으면 돼요.");
   tick();
   const results = [];
   await pool(groups, 6, async (g) => {
-    const r = await classifyPreview(g.rep.id);
+    const r = await classifyPreview(g.rep.id, today);
     if (r) results.push({ ...g, ids: r.dog_ids || [], aiIds: [...(r.dog_ids || [])], sure: new Set(r.sure || []), note: r.note || "", rotation: r.rotation, keep: true, manual: false });
     else failed++;
     done++;
