@@ -38,6 +38,10 @@ const payTag = (b) => (b.prepaid ? `<em class="ho-paid">선결제</em>` : "");
 const dueTag = (b) => b.prepaid
   ? `<span class="ho-due paid"><small>✓ 선결제 완료</small>${won(b.total || 0)}</span>`
   : `<span class="ho-due"><small>받을 금액</small>${won(b.total || 0)}</span>`;
+// 그날 요약의 입실·투숙 중 줄에 보이는 결제 금액 (선결제면 완료 표시)
+const amtTag = (b) => b.prepaid
+  ? `<span class="ho-due paid"><small>✓ 선결제 완료</small>${won(b.total || 0)}</span>`
+  : `<span class="ho-due pay"><small>결제 금액</small>${won(b.total || 0)}</span>`;
 const dueSum = (list) => list.filter((b) => !b.prepaid).reduce((a, b) => a + Number(b.total || 0), 0);
 const kindTag = (k) => `<b class="hk ${k === "K" ? "k" : "h"}">${k === "K" ? "K" : "H"}</b>`;
 function toast(m, ms) { C?.toast?.(m, ms); }
@@ -661,7 +665,7 @@ function dayPanel(d) {
     const c = custById(b.customer_id);
     const time = k === "in" ? b.in_time : k === "out" ? b.out_time : "";
     return `<button class="ho-bk ${b.status} ${k}" data-bk="${b.id}">${kindTag(b.kind)}<span class="grow"><b>${esc(labelShow(b))}</b> <small class="muted">${esc(c?.owner_name || "")}</small>
-      <br><small class="muted">${time ? `<b class="ho-tm">${esc(time)}</b> · ` : ""}${md(b.check_in)} → ${md(b.check_out)}${svcText(b) ? ` · <span class="ho-svc-t">${esc(svcText(b))}</span>` : ""}</small></span>${k === "out" ? dueTag(b) : ""}</button>`;
+      <br><small class="muted">${time ? `<b class="ho-tm">${esc(time)}</b> · ` : ""}${md(b.check_in)} → ${md(b.check_out)}${svcText(b) ? ` · <span class="ho-svc-t">${esc(svcText(b))}</span>` : ""}</small></span>${k === "out" ? dueTag(b) : amtTag(b)}</button>`;
   };
   const byTime = (k) => (a, b) => (a[k] || "99").localeCompare(b[k] || "99") || a.label.localeCompare(b.label, "ko");
   const ins = [...x.ins].sort(byTime("in_time")), outs = [...x.outs].sort(byTime("out_time"));
@@ -673,8 +677,8 @@ function dayPanel(d) {
     ${ins.length ? ins.map((b) => row(b, "in")).join("") : `<p class="muted small ho-dp-none">입실 없음</p>`}
     <h4 class="ho-dp-sub out">◂ 퇴실 <small>${outs.length}건</small>${outs.length ? ` <span class="ho-due-sum">받을 금액 ${won(dueSum(outs))}</span>` : ""}</h4>
     ${outs.length ? outs.map((b) => row(b, "out")).join("") : `<p class="muted small ho-dp-none">퇴실 없음</p>`}
-    ${x.stays.length ? `<h4 class="ho-dp-sub">투숙 중 <small>${x.stays.length}건</small></h4>
-      <div class="ho-dp-stays">${x.stays.map((b) => `<button class="ho-nm ${b.kind === "K" ? "k" : "h"}" data-bk="${b.id}">${esc(labelShow(b))} <small>~${md(b.check_out)}</small>${svcText(b) ? `<i class="ho-bang">!</i>` : ""}</button>`).join("")}</div>` : ""}
+    ${x.stays.length ? `<h4 class="ho-dp-sub stay">🏨 투숙 중 <small>${x.stays.length}건</small></h4>
+      ${[...x.stays].sort((a, b) => a.check_out.localeCompare(b.check_out) || a.label.localeCompare(b.label, "ko")).map((b) => row(b, "stay")).join("")}` : ""}
   </section>`;
 }
 function drawCalendar() {
