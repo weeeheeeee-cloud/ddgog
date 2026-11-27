@@ -755,7 +755,7 @@ async function renderPhotos() {
   (unsorted.length ? `<div class="dog-group unsorted" data-list="unsorted">
       <div class="dog-head"><span class="avatar q">?</span>
         <div class="grow"><b>모르는 아이·분류 안 된 사진 ${unsorted.length}장</b><small class="muted">처음 보는 아이, 뺀 사진, AI가 확신하지 못한 사진을 한곳에 모았어요. 비슷한 사진끼리 묶어 두었으니 묶음째 선택해서 한 번에 넣을 수 있어요</small></div>
-        ${selBtn("unsorted")}${state.busy ? "" : `<button id="redo-roll" class="btn ghost sm" title="명단에 아이를 추가한 뒤 누르면, 분류 안 된 사진을 지금 명단으로 처음부터 다시 분류해요">🔄 지금 명단으로 다시 분류</button>`}${state.busy ? "" : `<button id="reclassify" class="btn ghost sm" title="DB 대표 사진 대신 오늘 직원이 확인한 사진(같은 옷·미용)과 비교해서 다시 분류해요">재검수 (오늘 사진 기준)</button>`}<button id="save-unsorted" class="btn ghost sm">📥 다운로드</button></div>
+        ${selBtn("unsorted")}<button id="redo-roll" class="btn ghost sm" ${state.busy ? "disabled" : ""} title="${state.busy ? "지금 사진을 분류하는 중이에요. 끝나면 누를 수 있어요" : "명단에 아이를 추가한 뒤 누르면, 분류 안 된 사진을 지금 명단으로 처음부터 다시 분류해요"}">🔄 지금 명단으로 다시 분류</button><button id="reclassify" class="btn ghost sm" ${state.busy ? "disabled" : ""} title="${state.busy ? "지금 사진을 분류하는 중이에요. 끝나면 누를 수 있어요" : "DB 대표 사진 대신 오늘 직원이 확인한 사진(같은 옷·미용)과 비교해서 다시 분류해요"}">재검수 (오늘 사진 기준)${state.busy ? " · 분류 중…" : ""}</button><button id="save-unsorted" class="btn ghost sm">📥 다운로드</button></div>
       <div class="tile-size">사진 크기
         ${[["s", "작게"], ["m", "보통"], ["l", "크게"], ["xl", "아주 크게"]].map(([k, t]) => `<button class="btn ${state.tileSize === k ? "primary" : "ghost"} mini" data-tile="${k}">${t}</button>`).join("")}
         <small class="muted">비슷하게 생긴 사진끼리 붙여서 보여줘요</small></div>
