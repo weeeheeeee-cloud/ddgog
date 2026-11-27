@@ -1,7 +1,8 @@
 // 검수 끝난 사진으로 학습
 //  body: { day, dog_ids?: string[], final?: true, curate_all?: true }
 //  - 알림장 다운로드·다이얼독 저장 직후 (보통): 그날 그 아이 사진을 '직원 확인됨'으로 표시 + 많이 고친 아이는 새 모습을 조금 배움
-//  - final: 그날 알림장 전송이 다 끝난 뒤 그날 사진 전체를 다시 훑어 공부 (이미 배운 날도 다시)
+//  - final: 그날 알림장이 다 끝난 뒤(전체 다운로드) 그날 사진 전체로 DB 업데이트 (이미 배운 날도 다시)
+//     많이 고친 흰 아이는 지금처럼 많이(최대 8장), 나머지 모든 아이(유색·잘 맞히는 아이 포함)도 그날 새 모습을 최대 2장까지
 //  - curate_all: 모든 아이 대표 사진을 20장 이내로 정리만
 //  공부 대상: 그날 직원이 많이 고친(검수·수동 수정) 흰색 계열 아이만. 유색 아이·이미 잘 맞히는 아이는 새로 배우지 않음
 //   (고친 횟수 = 그날 그 아이가 맞는 답이거나 틀린 답이었던 수정 기록 수. 많이 고칠수록 더 많이 배움, 고쳤던 사진을 먼저 배움)
@@ -220,7 +221,8 @@ Deno.serve(async (req) => {
     const fix = fixCount.get(dogId) ?? 0;
     const white = isWhite(info?.note ?? null, info?.breed ?? null);
     const isFocus = focus.has(dogId);
-    if (!isFocus && (!white || fix < MIN_FIX)) {
+    const light = final && !isFocus && (!white || fix < MIN_FIX); // 마무리: 모든 아이 그날 모습 가볍게 업데이트
+    if (!isFocus && (!white || fix < MIN_FIX) && !light) {
       const r = await curate(dogId, [], 0);
       removed += r.removed;
       report[dogId] = { fix, added: 0, skip: !white ? "유색" : "잘 맞힘" };
@@ -239,9 +241,9 @@ Deno.serve(async (req) => {
       if (cands.some((c) => cos(c.v, p.v!) >= 0.96)) continue;
       cands.push(p as Cand);
     }
-    const r = await curate(dogId, cands, isFocus ? Math.max(newLimitOf(fix, final), final ? 8 : 4) : newLimitOf(fix, final));
+    const r = await curate(dogId, cands, light ? 2 : isFocus ? Math.max(newLimitOf(fix, final), final ? 8 : 4) : newLimitOf(fix, final));
     added += r.added; removed += r.removed;
-    report[dogId] = { fix, added: r.added, ...(isFocus ? { skip: "집중" } : {}) };
+    report[dogId] = { fix, added: r.added, ...(isFocus ? { skip: "집중" } : light ? { skip: !white ? "유색·가볍게" : "가볍게" } : {}) };
     const prev = final ? (await admin.from("learned_days").select("refs_added").eq("day", day).eq("dog_id", dogId).maybeSingle()).data?.refs_added ?? 0 : 0;
     await admin.from("learned_days").upsert({
       day, dog_id: dogId, refs_added: prev + r.added,

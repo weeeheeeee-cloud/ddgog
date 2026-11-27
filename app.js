@@ -3186,11 +3186,12 @@ function doneBanner(msg) {
 }
 
 // 다운로드·다이얼독 임시저장이 끝난 사진 = 검수 끝 → 그 아이들 새로 학습 (서버에서, 하루 아이당 한 번)
-function learnVerified(dogIds) {
+// final: 하루 전체 다운로드 = 그날 알림장 끝 → 그날 사진 전체로 DB(대표 사진) 업데이트
+function learnVerified(dogIds, final = false) {
   const ids = [...new Set(dogIds)].filter((id) => { const d = dogById(id); return d && !d.auto; });
   if (!ids.length || state.practice) return;
-  sb.functions.invoke("learn-verified", { body: { day: state.day, dog_ids: ids } })
-    .then(({ data }) => { if (data?.refs_added) toast(`검수 끝난 사진으로 ${ids.length}마리 학습했어요 (새 모습 ${data.refs_added}장)`); })
+  sb.functions.invoke("learn-verified", { body: final ? { day: state.day, final: true } : { day: state.day, dog_ids: ids } })
+    .then(({ data }) => { if (data?.refs_added) toast(final ? `오늘 사진으로 DB를 업데이트했어요 (${data.dogs}마리, 새 모습 ${data.refs_added}장)` : `검수 끝난 사진으로 ${ids.length}마리 학습했어요 (새 모습 ${data.refs_added}장)`); })
     .catch(() => {});
 }
 async function saveDogPhotos(dog, photos, btn, mode) {
@@ -3305,10 +3306,10 @@ async function saveAll(btn, onlyUnsorted = false) {
     }
     if (zip) {
       downloadBlob(await zip.generateAsync({ type: "blob" }), `${state.day}.zip`);
-      learnVerified([...groups.keys()].filter((id) => id !== UNSORTED_DIR.id));
+      learnVerified([...groups.keys()].filter((id) => id !== UNSORTED_DIR.id), !onlyUnsorted);
       doneBanner(`${state.day}.zip · ${onlyUnsorted ? "분류 안 된 사진" : `강아지 ${groups.size - (loose.length ? 1 : 0)}마리`}, ${total}장${loose.length && !onlyUnsorted ? ` (분류 안 됨 ${loose.length}장 포함)` : ""}`);
     } else {
-      learnVerified([...groups.keys()].filter((id) => id !== UNSORTED_DIR.id));
+      learnVerified([...groups.keys()].filter((id) => id !== UNSORTED_DIR.id), !onlyUnsorted);
       doneBanner(`'${window.__saveDirName || "다운로드"}/${state.day}' 폴더 · ${onlyUnsorted ? "'분류 안 됨' 폴더" : `강아지 ${groups.size - (loose.length ? 1 : 0)}마리${loose.length ? ` + '분류 안 됨' ${loose.length}장` : ""}`} · 새로 받은 사진 ${added}장${kept ? ` (이미 받은 ${kept}장은 건너뜀)` : ""}`);
     }
   } catch (err) {
