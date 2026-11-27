@@ -52,9 +52,12 @@ If two white candidates still fit equally, or the deciding point is not visible,
 Some entries are TWO dogs under one name (siblings, e.g. "빵이뚱이" = 빵이 + 뚱이; the note then contains "+").
 Such an entry is NOT a catch-all for white dogs: match it only when the photo clearly shows one of those two
 specific dogs by its own points (for 빵이뚱이: a grey face/ears means 뚱이).
-CLOTHES ARE ONLY A WEAK HINT: staff put clothes on and take them off during the day, so a different outfit (or no outfit)
-does NOT rule a dog out, and a matching outfit does NOT prove it. Always decide from the dog itself: face shape, eyes,
-muzzle length, nose colour, tear stains, ears, coat colour and texture, grooming cut, body size and build, legs, tail.
+CLOTHES ARE A REAL CLUE, BUT NOT THE FIRST ONE: a dog wears the clothes it came in that day, so the same outfit, harness,
+collar or hair clip as in a photo from TODAY clearly supports that dog. Staff sometimes take clothes off or put them on,
+so a different outfit or no outfit does NOT rule a dog out, and other dogs may wear similar clothes. Weigh clothes TOGETHER
+with the dog itself: face shape, eyes, muzzle length, nose colour, tear stains, ears, coat colour and texture, grooming cut,
+body size and build, legs and PAWS (size, shape, fur on the feet, colour), and TAIL (length, shape, how it is carried).
+When clothes and body point the same way, be confident. When they disagree, trust the body.
 Many dogs come with "부위별 특징" (what the face, top of the head, back of the head, back, tail and legs look like).
 Staff photos often show only part of a dog (just the head from above, the back of the head, the back, the rear),
 so compare the visible part with that dog's matching body-part description and reference photos of the same view.
@@ -235,15 +238,32 @@ Deno.serve(async (req) => {
     if (!paths.length && d.ref_path) paths.push(d.ref_path);
     return { ...d, paths };
   }).filter((d) => d.paths.length);
-  // ---- 재검수(today): DB 대표 사진은 쓰지 않고, 그날 직원이 확인한(또는 지문으로 확실한) 한 마리 사진을 기준으로
-  //  옷·미용이 그날 그대로라 가장 확실한 단서. 지문이 가장 비슷한 6마리 × 3장만 보내 비용은 평소와 비슷
+  // ---- 재검수(today): 오늘 출석 명단(유치원 명단 DB 정보 포함) 안에서, 그날 직원이 확인한(또는 지문으로 확실한) 사진을 먼저 기준으로
+  //  - 예전: 오늘 확인 사진이 있는 아이 중 '오늘 사진 지문'만으로 6마리 → 흰 아이가 많은 날 정답(예: 코코지몽)이 6마리 밖으로 밀려남,
+  //    오늘 확인 사진이 없는 아이(크림·뭉치 등)는 아예 후보가 못 됨
+  //  - 지금: 오늘 사진 지문 + DB 대표 사진 지문 중 더 닮은 쪽으로 8마리 × 3장 (보내는 사진 24장 = 평소와 같은 비용)
+  //    오늘 확인 사진이 없는 아이는 DB 대표 사진으로 대신, 유치원 명단의 견종·몸무게·나이·성별과 부위별 특징·구분·지난 실수도 함께 보냄
   if (today) {
-    const { data: tp } = await supa.from("photos")
-      .select("id, thumb_path, dog_ids, confidence, ai_note, vec, created_at").eq("day", photo.day).eq("status", "done")
-      .eq("practice", photo.practice === true).in("confidence", ["manual", "high"]).neq("id", photoId)
-      .order("created_at", { ascending: false }).limit(800);
-    const byDog = new Map<string, { path: string; v: number[] | null; manual: boolean }[]>();
     const pv = (x: unknown): number[] | null => { if (!x) return null; if (Array.isArray(x)) return x as number[]; try { return JSON.parse(String(x)); } catch { return null; } };
+    const cosv = (a: number[], b: number[]) => { let d = 0, x = 0, y = 0; for (let i = 0; i < a.length; i++) { d += a[i] * b[i]; x += a[i] * a[i]; y += b[i] * b[i]; } return d / (Math.sqrt(x * y) || 1); };
+    const qv = pv(photo.vec);
+    // 유치원 명단 DB: 휴면 아이는 (오늘 출석 명단에 없으면) 대조에서 뺌, 견종·몸무게·나이·성별은 구분 단서로
+    const named = (dogs ?? []).filter((d) => !d.auto);
+    const { data: kms } = named.length
+      ? await supa.from("kinder_members").select("dog_id, breed, weight, gender, birthday, dormant, active").in("dog_id", named.map((d) => d.id))
+      : { data: [] };
+    const km = new Map<string, { breed: string | null; weight: number | null; gender: string | null; birthday: string | null; dormant: boolean; active: boolean }>();
+    for (const k of kms ?? []) if (k.dog_id && !km.has(k.dog_id)) km.set(k.dog_id, k);
+    const onRoll = new Set((assigned ?? []).map((a) => a.dog_id));
+    const pool0 = named.filter((d) => { const k = km.get(d.id); return !(k?.dormant && !onRoll.has(d.id)); });
+    if (!pool0.length) return json({ preview: true, dog_ids: [], sure: [], note: "비교할 아이가 없어요", rotation: 0, new_dog: false });
+
+    // 오늘 확인한 한 마리 사진
+    const { data: tp } = await supa.from("photos")
+      .select("id, thumb_path, dog_ids, confidence, ai_note, vec").eq("day", photo.day).eq("status", "done")
+      .eq("practice", photo.practice === true).in("confidence", ["manual", "high"]).neq("id", photoId)
+      .order("created_at", { ascending: false }).limit(1000);
+    const byDog = new Map<string, { path: string; v: number[] | null; manual: boolean }[]>();
     for (const p of tp ?? []) {
       if ((p.dog_ids ?? []).length !== 1) continue;
       if (p.confidence !== "manual" && !/^지문: (?!같은 장면)/.test(p.ai_note ?? "")) continue;
@@ -251,31 +271,79 @@ Deno.serve(async (req) => {
       if (!byDog.has(d)) byDog.set(d, []);
       byDog.get(d)!.push({ path: p.thumb_path, v: pv(p.vec), manual: p.confidence === "manual" });
     }
-    const qv = pv(photo.vec);
-    const cosv = (a: number[], b: number[]) => { let d = 0, x = 0, y = 0; for (let i = 0; i < a.length; i++) { d += a[i] * b[i]; x += a[i] * a[i]; y += b[i] * b[i]; } return d / (Math.sqrt(x * y) || 1); };
-    const cand = (dogs ?? []).filter((d) => !d.auto && byDog.has(d.id)).map((d) => {
-      const ps = byDog.get(d.id)!;
-      const sim = qv ? Math.max(...ps.map((p) => (p.v ? cosv(qv, p.v) : 0))) : 0;
-      // 확인한 사진 먼저, 그다음 지금 사진과 가장 닮은 순으로 3장
-      const pick = [...ps].sort((a, b) => (qv && b.v && a.v ? cosv(qv, b.v) - cosv(qv, a.v) : 0)).slice(0, 3).map((p) => "today:" + p.path);
-      return { ...d, paths: pick, sim };
-    }).sort((a, b) => b.sim - a.sim).slice(0, 6);
-    if (!cand.length) return json({ preview: true, dog_ids: [], sure: [], note: "오늘 확인된 사진이 있는 아이가 없어요", rotation: 0, new_dog: false });
-    await Promise.all(cand.flatMap((d) => d.paths).filter((k) => !refCache.has(k)).map(async (k) => {
-      try { refCache.set(k, encodeBase64(await download(supa, "photos", k.slice(6)))); } catch { /* 건너뜀 */ }
-    }));
-    const content: Record<string, unknown>[] = [{ type: "text", text:
-      "RE-CHECK MODE: the reference photos below were all taken TODAY and confirmed by staff, so each dog has the same grooming, " +
-      "coat condition and size as in the new photo. Compare the WHOLE dog: face shape, eyes, muzzle, nose colour, tear stains, ears, " +
-      "coat colour and texture, body size and build, legs and tail. Clothes are only a small extra hint: dogs often put on or take off " +
-      "clothes during the day, so a different outfit or no outfit does NOT rule a dog out. " +
-      "These are the most similar dogs that have confirmed photos today; pick the one whose face and body match. " +
-      "If none truly matches, reply \"dogs\": [].\nReference dogs (today):" }];
-    cand.forEach((d, i) => {
-      const tips = [d.tips, d.tips_ai].filter(Boolean).join(" / ");
-      content.push({ type: "text", text: `[${i + 1}] ${d.name}${d.breed ? ` (${d.breed})` : ""}${d.note ? ` — ${d.note}` : ""}${tips ? ` | 구분: ${tips}` : ""}` });
-      for (const k of d.paths) { const b64 = refCache.get(k); if (b64) content.push({ type: "image", source: { type: "base64", media_type: "image/jpeg", data: b64 } }); }
+    // DB 대표 사진 + 최근 확인 사진 지문 (fp_match: 지난 실수로 닮았던 아이는 점수 깎음)
+    const fpSim = new Map<string, number>();
+    if (photo.vec) {
+      const { data: m } = await supa.rpc("fp_match", { q: photo.vec, dogs: pool0.map((d) => d.id), p_day: photo.day, p_photo: photoId });
+      for (const x of m ?? []) fpSim.set(x.dog_id, x.sim);
+    }
+    const todaySim = (id: string) => {
+      const ps = byDog.get(id); if (!qv || !ps?.length) return 0;
+      const s = ps.map((p) => (p.v ? cosv(qv, p.v) : 0)).sort((a, b) => b - a).slice(0, 2);
+      return s.reduce((a, b) => a + b, 0) / s.length;
+    };
+    const K = 8, PER = 3;
+    const ranked = pool0.map((d) => ({ d, sim: Math.max(todaySim(d.id), fpSim.get(d.id) ?? 0) }))
+      .filter((x) => byDog.has(x.d.id) || (x.d.dog_refs ?? []).length || x.d.ref_path)
+      .sort((a, b) => b.sim - a.sim).slice(0, K);
+    const cand = ranked.map(({ d, sim }) => {
+      const ps = [...(byDog.get(d.id) ?? [])].sort((a, b) => (qv && b.v && a.v ? cosv(qv, b.v) - cosv(qv, a.v) : 0));
+      const refPaths = (d.dog_refs ?? []).sort((a, b) => b.created_at.localeCompare(a.created_at)).map((r) => r.path);
+      if (!refPaths.length && d.ref_path) refPaths.push(d.ref_path);
+      // 오늘 사진 2장 + DB 대표 사진 1장 (오늘 사진이 없으면 DB 대표 사진 3장)
+      const todayPick = ps.slice(0, refPaths.length ? PER - 1 : PER).map((p) => "today:" + p.path);
+      const refPick = refPaths.slice(0, PER - todayPick.length);
+      return { ...d, paths: [...todayPick, ...refPick], hasToday: todayPick.length > 0, sim };
     });
+    const allKeys = cand.flatMap((d) => d.paths);
+    // 지난 실수 (후보 아이들 관련, 최근 4장)
+    const idx = new Map(cand.map((d, i) => [d.id, i + 1]));
+    const { data: les } = await supa.from("lessons").select("wrong_dog, right_dog, path, note")
+      .or(`wrong_dog.in.(${cand.map((d) => d.id).join(",")}),right_dog.in.(${cand.map((d) => d.id).join(",")})`)
+      .order("created_at", { ascending: false }).limit(4);
+    const lessons = (les ?? []).filter((l) => l.path && (idx.has(l.wrong_dog) || idx.has(l.right_dog)));
+    await Promise.all([...new Set([...allKeys, ...lessons.map((l) => l.path)])].filter((k) => !refCache.has(k)).map(async (k) => {
+      try {
+        refCache.set(k, encodeBase64(k.startsWith("today:") ? await download(supa, "photos", k.slice(6)) : await download(supa, "refs", k)));
+      } catch { /* 건너뜀 */ }
+    }));
+    const age = (b: string | null) => {
+      if (!b) return "";
+      const mo = Math.floor((new Date(photo.day).getTime() - new Date(b).getTime()) / (30.44 * 864e5));
+      return mo < 0 ? "" : mo < 24 ? `${mo}개월` : `${Math.floor(mo / 12)}살`;
+    };
+    const content: Record<string, unknown>[] = [{ type: "text", text:
+      "RE-CHECK MODE: these are dogs on TODAY's attendance list. Photos marked (today) were taken TODAY and confirmed by staff, " +
+      "so they show the same grooming, coat condition and size as the new photo; photos marked (older) are from the dog's reference album. " +
+      "Compare the WHOLE dog: face shape, eyes, muzzle, nose colour, tear stains, ears, coat colour and texture, body size and build, legs and PAWS (size, shape, fur on the feet), and TAIL (length, shape, how it is carried). " +
+      "The daycare roster gives each dog's breed, weight (kg), age and sex — use weight and age to compare SIZE (a 2 kg dog vs a 7 kg dog look clearly different). " +
+      "CLOTHES ARE A REAL CLUE: the (today) photos show what each dog is wearing TODAY (outfit, harness, collar, hair clip), so the same clothes in the new photo clearly support that dog. " +
+      "Clothes are not the first clue, though: staff sometimes take clothes off, and some dogs wear similar clothes, so no outfit or a different outfit does NOT rule a dog out. " +
+      "Decide from clothes + face + coat + paws + tail together; if the clothes match AND the body fits, be confident; if they disagree, trust the body. " +
+      "An entry with '+' or two names (e.g. 코코지몽, 빵이뚱이, 비비모모) is TWO sibling dogs under one name: match it when either sibling is shown. " +
+      "If none truly matches, reply \"dogs\": [].\nReference dogs (today's attendance):" }];
+    cand.forEach((d, i) => {
+      const k = km.get(d.id);
+      const roster = k ? [k.breed, k.weight ? `${k.weight}kg` : "", age(k.birthday), k.gender === "M" ? "수컷" : k.gender === "F" ? "암컷" : ""].filter(Boolean).join(", ") : "";
+      const tips = [d.tips, d.tips_ai].filter(Boolean).join(" / ");
+      content.push({ type: "text", text: `[${i + 1}] ${d.name}${d.breed ? ` (${d.breed})` : ""}${d.note ? ` — ${d.note}` : ""}${roster ? ` | 유치원 명단: ${roster}` : ""}${tips ? ` | 구분: ${tips}` : ""}` +
+        `${d.features ? `\n  부위별 특징:\n  ${d.features.replace(/\n/g, "\n  ")}` : ""}` });
+      for (const key of d.paths) {
+        const b64 = refCache.get(key);
+        if (!b64) continue;
+        content.push({ type: "text", text: key.startsWith("today:") ? "(today)" : "(older)" });
+        content.push({ type: "image", source: { type: "base64", media_type: "image/jpeg", data: b64 } });
+      }
+    });
+    if (lessons.length) {
+      content.push({ type: "text", text: "Past mistakes (learn from these):" });
+      const nm = (id: string | null) => { if (!id) return "none of them"; const n = idx.get(id); return n ? `[${n}] ${cand[n - 1].name}` : "another dog (not a candidate)"; };
+      for (const l of lessons) {
+        const b64 = refCache.get(l.path); if (!b64) continue;
+        content.push({ type: "text", text: (l.wrong_dog ? `Was wrongly matched to ${nm(l.wrong_dog)}; it is actually ${nm(l.right_dog)}.` : `Was missed before: this photo shows ${nm(l.right_dog)}.`) + (l.note ? ` ${l.note}` : "") });
+        content.push({ type: "image", source: { type: "base64", media_type: "image/jpeg", data: b64 } });
+      }
+    }
     content.push({ type: "text", text: "New photo to classify:" });
     content.push({ type: "image", source: { type: "base64", media_type: "image/jpeg", data: encodeBase64(await download(supa, "photos", photo.thumb_path)) } });
     const res = await fetch("https://api.anthropic.com/v1/messages", {
@@ -294,7 +362,6 @@ Deno.serve(async (req) => {
     const rot = [0, 90, 180, 270].includes(Number(parsed.rotate)) ? Number(parsed.rotate) : 0;
     return json({ preview: true, today: true, dog_ids: ids, sure, note: typeof parsed.note === "string" ? parsed.note.slice(0, 200) : null, rotation: rot, new_dog: parsed.new_dog === true });
   }
-
   // 한 번에 보내는 대표 사진은 최대 MAX_REF_IMAGES장 (요금이 비싸지는 길이를 넘지 않도록).
   // 강아지 수로 나눠 강아지당 최대 10장, 사진이 더 많으면 고르게 골라 다양한 각도가 들어가게 함
   // 많이 보낼수록 느려짐: 명단 확정한 날(보통 20~30마리)은 아이당 4~6장, 명단 없으면 아이당 1장
