@@ -4,6 +4,7 @@
 //  day_mode: 요일별 픽업만(p) / 드랍만(d), 없으면 픽업·드랍 둘 다
 //  action "vapid" {}                                       → { key }  폰 알림 공개 열쇠
 //  action "test"  {} (직원 로그인)                          → 내 폰들로 시험 알림
+//  action "board" { title, day } (직원 로그인)              → 보드에 새 할 일: 다른 선생님들 폰으로 알림
 //  action "group" {} (직원 로그인)                          → { key }  모든 보호자에게 보내는 단체 링크 열쇠
 //  action "find"  { g, phone }                             → { dogs: [{ name, token }] }  단체 링크: 보호자 전화번호로 우리 아이 찾기 (명단은 보여주지 않음)
 // 주가 시작된 뒤(그 주 월요일 0시 이후)에 바뀐 요일·메모는 표시해 두고, 선생님들 폰으로 알림을 보냄
@@ -92,7 +93,23 @@ Deno.serve(async (req) => {
 
     if (body.action === "test") {
       if (!staff) return json({ error: "로그인이 필요해요" }, 401);
-      const n = await pushAll(admin, { title: "🔔 알림이 켜졌어요", body: "픽드랍이 바뀌면 이렇게 알려 드릴게요.", url: SITE + "#pickup", tag: "pd-test" }, { onlyUser: staff.id });
+      const n = await pushAll(admin, { title: "🔔 알림이 켜졌어요", body: "보드에 새 할 일이 올라오거나 픽드랍이 바뀌면 이렇게 알려 드릴게요.", url: SITE, tag: "pd-test" }, { onlyUser: staff.id });
+      return json({ ok: true, sent: n });
+    }
+
+    // ---- 보드에 새 할 일 → 올린 사람 빼고 모든 선생님 폰으로
+    if (body.action === "board") {
+      if (!staff) return json({ error: "로그인이 필요해요" }, 401);
+      const title = String(body.title ?? "").trim().slice(0, 120);
+      if (!title) return json({ error: "내용이 없어요" }, 400);
+      const day = /^\d{4}-\d{2}-\d{2}$/.test(String(body.day ?? "")) ? String(body.day) : kstToday();
+      const { data: who } = await admin.from("staff_roles").select("name").eq("user_id", staff.id).maybeSingle();
+      const DW = ["일", "월", "화", "수", "목", "금", "토"];
+      const when = day === kstToday() ? "오늘" : `${+day.slice(5, 7)}/${+day.slice(8)}(${DW[new Date(day + "T00:00:00Z").getUTCDay()]})`;
+      const n = await pushAll(admin, {
+        title: `📋 ${when} 할 일 추가${who?.name ? ` · ${who.name}` : ""}`,
+        body: title, url: SITE + "#board", tag: `board-${Date.now()}`,
+      }, { exceptUser: staff.id });
       return json({ ok: true, sent: n });
     }
 

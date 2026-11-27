@@ -43,6 +43,48 @@ function autoItems(bookings) {
     .map((b) => ({ ref: `out:${b.id}`, icon: "🏨", title: `퇴실 · ${b.label}`, sub: "", money: won(b.total), cls: "out" }));
 }
 
+// ---- 폰 알림 (보드에 새 할 일이 올라오면 다른 선생님 폰으로). 픽드랍 탭 알림과 같은 등록을 씀
+const isIOS = () => /iPhone|iPad|iPod/.test(navigator.userAgent) || (navigator.platform === "MacIntel" && navigator.maxTouchPoints > 1);
+const standalone = () => matchMedia("(display-mode: standalone)").matches || navigator.standalone === true;
+const b64u = (s) => { const p = "=".repeat((4 - (s.length % 4)) % 4); const b = atob((s + p).replace(/-/g, "+").replace(/_/g, "/")); return Uint8Array.from(b, (c) => c.charCodeAt(0)); };
+async function pushState() {
+  if (!("serviceWorker" in navigator) || !("PushManager" in window) || !("Notification" in window)) return isIOS() && !standalone() ? "ios-browser" : "unsupported";
+  if (Notification.permission === "denied") return "denied";
+  const reg = await navigator.serviceWorker.getRegistration();
+  const sub = await reg?.pushManager.getSubscription();
+  return sub && Notification.permission === "granted" ? "on" : "off";
+}
+async function drawPush() {
+  const el = $("#tk-push", C.root);
+  if (!el) return;
+  const st = await pushState().catch(() => "unsupported");
+  // 켜져 있으면 버튼을 숨겨 화면을 깔끔하게. 꺼져 있을 때만 켜기 버튼
+  if (st === "on" || st === "unsupported") { el.innerHTML = ""; return; }
+  el.innerHTML = `<button class="btn ${st === "denied" ? "ghost" : "primary"} sm">🔔 새 할 일 폰 알림 켜기</button>`;
+  $("button", el).addEventListener("click", async () => {
+    if (st === "denied") return alert("이 폰에서 댕겨올개 알림이 꺼져 있어요.\n폰 설정 → 알림에서 댕겨올개(또는 브라우저) 알림을 허용한 뒤 다시 눌러 주세요.");
+    if (st === "ios-browser") return alert("아이폰은 홈 화면에 추가한 댕겨올개 앱에서만 알림을 받을 수 있어요.\n\nSafari 공유 버튼 → ‘홈 화면에 추가’ 후, 홈 화면 아이콘으로 열어서 다시 눌러 주세요.");
+    try {
+      const perm = await Notification.requestPermission();
+      if (perm !== "granted") { C.toast?.("알림을 허용해야 받을 수 있어요"); return drawPush(); }
+      const reg = (await navigator.serviceWorker.getRegistration()) || (await navigator.serviceWorker.register("sw.js", { type: "module" }));
+      await navigator.serviceWorker.ready;
+      const { data: v } = await C.sb.functions.invoke("pd", { body: { action: "vapid" } });
+      let sub = await reg.pushManager.getSubscription();
+      if (!sub) sub = await reg.pushManager.subscribe({ userVisibleOnly: true, applicationServerKey: b64u(v.key) });
+      const j = sub.toJSON();
+      const { error } = await C.sb.from("push_subs").upsert({ endpoint: j.endpoint, p256dh: j.keys.p256dh, auth: j.keys.auth }, { onConflict: "endpoint" });
+      if (error) { await sub.unsubscribe(); throw error; }
+      const { data } = await C.sb.functions.invoke("pd", { body: { action: "test" } });
+      C.toast?.(data?.sent ? "알림이 켜졌어요. 시험 알림을 확인해 보세요" : "알림 등록이 안 됐어요. 다시 눌러 주세요");
+    } catch (e) {
+      console.error(e);
+      C.toast?.("알림을 켜지 못했어요. 잠시 후 다시 눌러 주세요");
+    }
+    drawPush();
+  });
+}
+
 export async function renderTasks(ctx) {
   C = ctx;
   const root = C.root;
@@ -104,6 +146,7 @@ export async function renderTasks(ctx) {
     ${!isToday ? `<div class="tk-note ${isPast ? "past" : "future"}"><span>${isPast ? `지난 날 보드예요. 빠진 기록을 적거나 체크할 수 있어요.` : `미리 써 두는 보드예요. <b>${md(day)}</b>이 되면 첫 화면에 떠요.`}</span><button data-go="${t0}">오늘로 ›</button></div>` : ""}
     <div class="tk-top">
       <div><h2>${isToday ? "오늘 할 일" : `${md(day)} 할 일`}</h2><small class="muted">${md(day)}${isToday ? " · 오늘" : ""}</small></div>
+      <span id="tk-push"></span>
       <div class="tk-ring ${items.length && !left ? "all" : ""}">${items.length ? (left ? `<b>${left}</b><small>남음</small>` : `<b>🎉</b><small>모두 끝</small>`) : `<b>0</b><small>할 일</small>`}</div>
     </div>
     ${groups.map((g) => {
@@ -118,6 +161,7 @@ export async function renderTasks(ctx) {
     }).join("")}
     `;
 
+  drawPush();
   $$("[data-go]", root).forEach((b) => b.addEventListener("click", () => { boardDay = b.dataset.go; renderTasks(C); }));
   $$("[data-mv]", root).forEach((b) => b.addEventListener("click", () => { boardDay = addDays(boardDay, +b.dataset.mv); renderTasks(C); }));
   $("#tk-date", root)?.addEventListener("change", (e) => { if (e.target.value) { boardDay = e.target.value; renderTasks(C); } });
@@ -135,6 +179,7 @@ export async function renderTasks(ctx) {
     $("#tk-new", root).value = "";
     const { error } = await C.sb.from("daily_tasks").insert({ day, title: v, created_by: await whoAmI() });
     if (error) { C.toast?.("추가하지 못했어요"); return; }
+    C.sb.functions.invoke("pd", { body: { action: "board", title: v, day } }).catch(() => {}); // 다른 선생님 폰으로 알림
     renderTasks(C);
   });
 
