@@ -52,9 +52,9 @@ If two white candidates still fit equally, or the deciding point is not visible,
 Some entries are TWO dogs under one name (siblings, e.g. "빵이뚱이" = 빵이 + 뚱이; the note then contains "+").
 Such an entry is NOT a catch-all for white dogs: match it only when the photo clearly shows one of those two
 specific dogs by its own points (for 빵이뚱이: a grey face/ears means 뚱이).
-CLOTHES vs TODAY'S LOOK: if a candidate has a "today's look" photo and the dog in the new photo wears clearly different
-clothes (different colour or type, or one wears clothes and the other none), you cannot be sure it is that dog:
-leave it out of "sure" unless its own specific body points are unmistakable.
+CLOTHES ARE ONLY A WEAK HINT: staff put clothes on and take them off during the day, so a different outfit (or no outfit)
+does NOT rule a dog out, and a matching outfit does NOT prove it. Always decide from the dog itself: face shape, eyes,
+muzzle length, nose colour, tear stains, ears, coat colour and texture, grooming cut, body size and build, legs, tail.
 Many dogs come with "부위별 특징" (what the face, top of the head, back of the head, back, tail and legs look like).
 Staff photos often show only part of a dog (just the head from above, the back of the head, the back, the rear),
 so compare the visible part with that dog's matching body-part description and reference photos of the same view.
@@ -265,9 +265,12 @@ Deno.serve(async (req) => {
       try { refCache.set(k, encodeBase64(await download(supa, "photos", k.slice(6)))); } catch { /* 건너뜀 */ }
     }));
     const content: Record<string, unknown>[] = [{ type: "text", text:
-      "RE-CHECK MODE: the reference photos below were all taken TODAY and confirmed by staff, so each dog wears exactly the same " +
-      "clothes, harness and grooming as it does in the new photo. Here clothes and accessories ARE strong evidence, together with the body. " +
-      "These are the most similar dogs that have confirmed photos today; if none truly matches, reply \"dogs\": [].\nReference dogs (today):" }];
+      "RE-CHECK MODE: the reference photos below were all taken TODAY and confirmed by staff, so each dog has the same grooming, " +
+      "coat condition and size as in the new photo. Compare the WHOLE dog: face shape, eyes, muzzle, nose colour, tear stains, ears, " +
+      "coat colour and texture, body size and build, legs and tail. Clothes are only a small extra hint: dogs often put on or take off " +
+      "clothes during the day, so a different outfit or no outfit does NOT rule a dog out. " +
+      "These are the most similar dogs that have confirmed photos today; pick the one whose face and body match. " +
+      "If none truly matches, reply \"dogs\": [].\nReference dogs (today):" }];
     cand.forEach((d, i) => {
       const tips = [d.tips, d.tips_ai].filter(Boolean).join(" / ");
       content.push({ type: "text", text: `[${i + 1}] ${d.name}${d.breed ? ` (${d.breed})` : ""}${d.note ? ` — ${d.note}` : ""}${tips ? ` | 구분: ${tips}` : ""}` });
