@@ -42,6 +42,14 @@ const dueTag = (b) => b.prepaid
 const amtTag = (b) => b.prepaid
   ? `<span class="ho-due paid"><small>✓ 선결제 완료</small>${won(b.total || 0)}</span>`
   : `<span class="ho-due pay"><small>결제 금액</small>${won(b.total || 0)}</span>`;
+// 입실·퇴실 시간: 정시·30분만 고르는 목록 (어디를 눌러도 열림). 예전에 넣은 다른 시간도 그대로 보여줌
+const TIMES = Array.from({ length: 34 }, (_, i) => `${String(6 + Math.floor(i / 2)).padStart(2, "0")}:${i % 2 ? "30" : "00"}`); // 06:00~22:30
+const timeOpts = (v) => {
+  const cur = String(v || "").slice(0, 5);
+  const list = cur && !TIMES.includes(cur) ? [...TIMES, cur].sort() : TIMES;
+  const label = (t) => { const h = +t.slice(0, 2); return `${h < 12 ? "오전" : "오후"} ${h % 12 || 12}시${t.endsWith("30") ? " 30분" : t.endsWith("00") ? "" : ` ${+t.slice(3)}분`}`; };
+  return `<option value="">시간 미정</option>${list.map((t) => `<option value="${t}" ${t === cur ? "selected" : ""}>${label(t)}</option>`).join("")}`;
+};
 const dueSum = (list) => list.filter((b) => !b.prepaid).reduce((a, b) => a + Number(b.total || 0), 0);
 const kindTag = (k) => `<b class="hk ${k === "K" ? "k" : "h"}">${k === "K" ? "K" : "H"}</b>`;
 function toast(m, ms) { C?.toast?.(m, ms); }
@@ -825,9 +833,9 @@ function openBooking(bk, preset = {}) {
         <label class="q-hide">예약 상태<select id="bk-status">${Object.entries(STATUS).map(([k, n]) => `<option value="${k}" ${b.status === k ? "selected" : ""}>${n}</option>`).join("")}</select></label>
         <label class="full q-hide">강아지 이름 <small class="muted">다견은 슬래시로: 비비/모모</small><input id="bk-label" value="${esc(b.label)}"><small id="bk-dogs" class="muted"></small></label>
         <label>입실 날짜<input id="bk-in" type="date" value="${b.check_in}"></label>
-        <label>입실 시간<input id="bk-intime" type="time" value="${esc(b.in_time || "")}"></label>
+        <label>입실 시간<select id="bk-intime">${timeOpts(b.in_time)}</select></label>
         <label>퇴실 날짜<input id="bk-out" type="date" value="${b.check_out}"></label>
-        <label>퇴실 시간<input id="bk-outtime" type="time" value="${esc(b.out_time || "")}"></label>
+        <label>퇴실 시간<select id="bk-outtime">${timeOpts(b.out_time)}</select></label>
       </div>
       <h3>추가 서비스 <small class="muted">눌러서 켜고 꺼요</small></h3>
       <div class="ho-svc">${SVC.map(([k, ic, n]) => `<button type="button" data-svc="${k}"><span>${ic}</span>${n}</button>`).join("")}</div>
@@ -989,6 +997,7 @@ function openBooking(bk, preset = {}) {
     $("#bk-xtra", ov)?.addEventListener("change", (e) => { b.extra_cost = Math.round(Number(e.target.value) || 0); drawFee(); });
     $("#bk-disc", ov)?.addEventListener("change", (e) => { b.discount = Math.round(Number(e.target.value) || 0); drawFee(); });
   }
+  ["#bk-in", "#bk-out"].forEach((s) => $(s, ov).addEventListener("click", (e) => { try { e.target.showPicker?.(); } catch { /* 지원 안 하는 브라우저 */ } }));
   ["#bk-label", "#bk-in", "#bk-out", "#bk-intime", "#bk-outtime"].forEach((s) => $(s, ov).addEventListener(s === "#bk-label" ? "input" : "change", () => {
     if (s === "#bk-in" && $("#bk-out", ov).value < $("#bk-in", ov).value) $("#bk-out", ov).value = addDays($("#bk-in", ov).value, 1);
     drawFee();
