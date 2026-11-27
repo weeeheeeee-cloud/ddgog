@@ -818,7 +818,7 @@ function openBooking(bk, preset = {}) {
   const quick = !!preset.quick && !bk;
   const b = bk ? { ...bk, manual: { ...(bk.manual || {}) }, services: JSON.parse(JSON.stringify(bk.services || {})) } : {
     customer_id: preset.customer?.id || null, kind: qd ? "K" : preset.customer?.kind || "H",
-    label: qd ? baseName(qd.name) : preset.customer ? custLabel(preset.customer) : "", services: {},
+    label: qd ? baseName(qd.name) : preset.customer ? petsOf(preset.customer.id).map((p) => p.name).filter(Boolean).join("/") : "", services: {},
     check_in: preset.check_in || today(), check_out: preset.check_out || addDays(preset.check_in || today(), 1),
     in_time: preset.in_time || "", out_time: preset.out_time || "",
     pickup: false, drop_off: false, status: "booked", notes: "", manual: {}, extra_cost: 0, discount: 0,
@@ -1038,7 +1038,12 @@ function openBooking(bk, preset = {}) {
       if (!b.label) b.label = list.map((p) => p.name).join("/");
     }
     if (!b.customer_id) { toast("고객을 골라 주세요"); return; }
-    if (!b.label) { toast("강아지 이름을 적어 주세요"); return; }
+    // 이름 칸이 비어 있으면 고른 고객의 아이 이름으로 채움 (다견은 비비/모모)
+    if (!b.label) {
+      const names = petsOf(b.customer_id).map((p) => p.name).filter(Boolean).join("/");
+      if (names) { b.label = names; $("#bk-label", ov).value = names; drawFee(); }
+    }
+    if (!b.label) { toast("강아지 이름을 적어 주세요", 4000); $("#bk-label", ov)?.focus(); $("#bk-label", ov)?.scrollIntoView({ block: "center" }); return; }
     if (!b.check_in || !b.check_out || b.check_out < b.check_in) { toast("입실·퇴실 날짜를 확인해 주세요"); return; }
     const calc = fee();
     const s = settle(calc, b.manual, b.extra_cost, b.discount);

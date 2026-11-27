@@ -142,7 +142,7 @@ main { max-width: 760px; margin: 0 auto; padding: 16px; padding-bottom: 60px; }
 .notice { background: #fffbea; border: 1px solid #f5e3a0; border-radius: 10px; padding: 10px 12px; font-size: 13px; margin: 0 0 8px; }
 
 /* 토스트·뷰어 */
-.toast { position: fixed; left: 50%; bottom: 24px; transform: translateX(-50%); background: var(--ink); color: #fff; padding: 10px 16px; border-radius: 999px; font-size: 14px; z-index: 50; max-width: 90vw; }
+.toast { position: fixed; left: 50%; bottom: 24px; transform: translateX(-50%); background: var(--ink); color: #fff; padding: 10px 16px; border-radius: 999px; font-size: 14px; z-index: 100000; /* 예약 창 등 모든 창보다 위에 (안내가 창 뒤에 숨지 않게) */ max-width: 90vw; }
 .viewer { position: fixed; inset: 0; background: rgba(0,0,0,.92); z-index: 40; display: grid; place-items: center; }
 .viewer img { max-width: 100vw; max-height: 100vh; object-fit: contain; }
 .viewer .close { position: absolute; top: max(12px, env(safe-area-inset-top)); right: 12px; background: rgba(255,255,255,.2); color: #fff; border: 0; width: 40px; height: 40px; border-radius: 50%; font-size: 24px; cursor: pointer; }
