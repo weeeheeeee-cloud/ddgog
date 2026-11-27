@@ -684,11 +684,15 @@ async function renderPhotos() {
   $("#summary").innerHTML = P.length
     ? `<span><b>${P.length}</b>장</span>
        <span>분류 완료 <b>${done.length}</b></span>
-       ${unsorted.length ? `<span class="warn">분류 안 됨 <b>${unsorted.length}</b></span>` : ""}
+       ${unsorted.length ? `<button id="go-unsorted" class="btn sm warn-btn" title="분류 안 된 사진으로 바로 가기">⬇ 분류 안 된 사진 <b>${unsorted.length}</b>장 보기</button>` : ""}
        ${pending.length && !state.busy ? `<button id="resume" class="btn primary sm">남은 ${pending.length}장 분류하기</button>` : ""}
        ${done.length || unsorted.length ? `<button id="save-all" class="btn primary sm">📥 전체 다운로드</button>` : ""}
        ${done.length && state.day === kstToday() && !state.practice ? `<button id="dd-push" class="btn sm dd-push-btn">📮 다이얼독 알림장</button>` : ""}`
     : "";
+  $("#go-unsorted")?.addEventListener("click", () => {
+    const el = document.querySelector('.dog-group.unsorted');
+    if (el) el.scrollIntoView({ behavior: "smooth", block: "start" });
+  });
   $("#dd-push")?.addEventListener("click", () => {
     if (pending.length || unsorted.length) {
       if (!confirm(`아직 ${pending.length ? `분류 중인 사진 ${pending.length}장` : ""}${pending.length && unsorted.length ? ", " : ""}${unsorted.length ? `분류 안 된 사진 ${unsorted.length}장` : ""}이 있어요.\n지금 넣으면 그 사진은 빠져요. (나중에 다시 누르면 새로 분류된 사진만 따로 넣을 수 있어요)\n\n다이얼독을 열까요?`)) return;
@@ -751,7 +755,7 @@ async function renderPhotos() {
   (unsorted.length ? `<div class="dog-group unsorted" data-list="unsorted">
       <div class="dog-head"><span class="avatar q">?</span>
         <div class="grow"><b>모르는 아이·분류 안 된 사진 ${unsorted.length}장</b><small class="muted">처음 보는 아이, 뺀 사진, AI가 확신하지 못한 사진을 한곳에 모았어요. 비슷한 사진끼리 묶어 두었으니 묶음째 선택해서 한 번에 넣을 수 있어요</small></div>
-        ${selBtn("unsorted")}${state.busy ? "" : `<button id="reclassify" class="btn ghost sm" title="DB 대표 사진 대신 오늘 직원이 확인한 사진(같은 옷·미용)과 비교해서 다시 분류해요">재검수 (오늘 사진 기준)</button>`}<button id="save-unsorted" class="btn ghost sm">📥 다운로드</button></div>
+        ${selBtn("unsorted")}${state.busy ? "" : `<button id="redo-roll" class="btn ghost sm" title="명단에 아이를 추가한 뒤 누르면, 분류 안 된 사진을 지금 명단으로 처음부터 다시 분류해요">🔄 지금 명단으로 다시 분류</button>`}${state.busy ? "" : `<button id="reclassify" class="btn ghost sm" title="DB 대표 사진 대신 오늘 직원이 확인한 사진(같은 옷·미용)과 비교해서 다시 분류해요">재검수 (오늘 사진 기준)</button>`}<button id="save-unsorted" class="btn ghost sm">📥 다운로드</button></div>
       <div class="tile-size">사진 크기
         ${[["s", "작게"], ["m", "보통"], ["l", "크게"], ["xl", "아주 크게"]].map(([k, t]) => `<button class="btn ${state.tileSize === k ? "primary" : "ghost"} mini" data-tile="${k}">${t}</button>`).join("")}
         <small class="muted">비슷하게 생긴 사진끼리 붙여서 보여줘요</small></div>
@@ -819,6 +823,7 @@ async function renderPhotos() {
   // 그룹이 늘어난 뒤 다시 돌리면 대부분 자리를 찾아감
   // 바로 넣지 않고, 어디로 갈지 먼저 보여준 뒤 확인하고 넣음
   $("#reclassify")?.addEventListener("click", () => previewReclassify(unsorted, true));
+  $("#redo-roll")?.addEventListener("click", () => redoUnsortedWithRoll());
   $("#save-unsorted")?.addEventListener("click", (e) => saveAll(e.currentTarget, true));
   $$("[data-rename]", box).forEach((b) => b.addEventListener("click", async () => {
     if (await renameDog(dogById(b.dataset.rename))) renderPhotos();
@@ -1329,6 +1334,21 @@ async function rescanUnsorted() {
   }
   toast(`분류 안 된 사진 ${ids.length}장을 새로 배운 얼굴로 다시 살펴볼게요`);
   await loadPhotos();
+  classifyPending();
+}
+
+// 명단에 아이를 더한 뒤: 분류 안 된 사진(직원이 확인한 것 빼고)을 지금 명단으로 처음부터 다시 분류
+async function redoUnsortedWithRoll(ask = true) {
+  if (state.busy) { toast("분류가 끝난 뒤 다시 눌러 주세요"); return; }
+  const ids = state.photos.filter((p) => (p.status === "review" || p.status === "error") && p.confidence !== "manual").map((p) => p.id);
+  if (!ids.length) { toast("분류 안 된 사진이 없어요"); return; }
+  if (ask && !confirm(`분류 안 된 사진 ${ids.length}장을 지금 명단으로 다시 분류할까요?\n(명단에 새로 넣은 아이도 후보에 들어가요)`)) return;
+  for (let i = 0; i < ids.length; i += 200) {
+    await sb.from("photos").update({ status: "pending", claimed_at: null }).in("id", ids.slice(i, i + 200)).in("status", ["review", "error"]);
+  }
+  toast(`분류 안 된 사진 ${ids.length}장을 지금 명단으로 다시 분류할게요`);
+  await loadPhotos();
+  renderPhotos();
   classifyPending();
 }
 
@@ -2104,6 +2124,9 @@ async function confirmRoll() {
       if (ids.length && !confirm(`명단 없이 먼저 분류된 사진 ${ids.length}장이 있어요.\n명단 기준으로 다시 분류할까요?\n\n(취소하면 지금 분류 그대로 둬요. 직원이 고친 사진은 어느 쪽이든 그대로예요)`)) ids = [];
       for (let i = 0; i < ids.length; i += 200) await sb.from("photos").update({ status: "pending", dog_ids: [] }).in("id", ids.slice(i, i + 200));
       if (ids.length) toast(`명단 없이 분류됐던 사진 ${ids.length}장을 명단 기준으로 다시 분류할게요`);
+    } else {
+      const left = state.photos.filter((p) => (p.status === "review" || p.status === "error") && p.confidence !== "manual").length;
+      if (left && confirm(`명단이 바뀌었어요. 분류 안 된 사진 ${left}장을 새 명단으로 다시 분류할까요?`)) { await redoUnsortedWithRoll(false); return; }
     }
   } catch { /* 무시 */ }
   renderPhotos();

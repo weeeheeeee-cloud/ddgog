@@ -1492,3 +1492,7 @@ input, select, textarea { max-width: 100%; min-width: 0; }
 .ho-dp-sub.stay { color:var(--navy); }
 .ho-due.pay { color:var(--navy); }
 .ho-due.pay small { color:#64748b; }
+
+/* 요약 줄: 분류 안 된 사진으로 바로 가기 */
+.warn-btn{background:#fff1e6;color:#c2410c;border:1px solid #fdba74}
+.warn-btn b{font-weight:800}
