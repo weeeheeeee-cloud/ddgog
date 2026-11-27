@@ -241,12 +241,9 @@ Deno.serve(async (req) => {
   // ---- 재검수(today): 오늘 출석 명단(유치원 명단 DB 정보 포함) 안에서, 그날 직원이 확인한(또는 지문으로 확실한) 사진을 먼저 기준으로
   //  - 예전: 오늘 확인 사진이 있는 아이 중 '오늘 사진 지문'만으로 6마리 → 흰 아이가 많은 날 정답(예: 코코지몽)이 6마리 밖으로 밀려남,
   //    오늘 확인 사진이 없는 아이(크림·뭉치 등)는 아예 후보가 못 됨
-  //  - 지금: 오늘 사진 지문 + DB 대표 사진 지문 중 더 닮은 쪽으로 8마리 × 3장 (보내는 사진 24장 = 평소와 같은 비용)
+  //  - 지금: 오늘 사진 지문 + DB 대표 사진 지문 중 더 닮은 쪽으로 8마리 × 3장 (순위는 DB 함수 fp_today_rank) (보내는 사진 24장 = 평소와 같은 비용)
   //    오늘 확인 사진이 없는 아이는 DB 대표 사진으로 대신, 유치원 명단의 견종·몸무게·나이·성별과 부위별 특징·구분·지난 실수도 함께 보냄
   if (today) {
-    const pv = (x: unknown): number[] | null => { if (!x) return null; if (Array.isArray(x)) return x as number[]; try { return JSON.parse(String(x)); } catch { return null; } };
-    const cosv = (a: number[], b: number[]) => { let d = 0, x = 0, y = 0; for (let i = 0; i < a.length; i++) { d += a[i] * b[i]; x += a[i] * a[i]; y += b[i] * b[i]; } return d / (Math.sqrt(x * y) || 1); };
-    const qv = pv(photo.vec);
     // 유치원 명단 DB: 휴면 아이는 (오늘 출석 명단에 없으면) 대조에서 뺌, 견종·몸무게·나이·성별은 구분 단서로
     const named = (dogs ?? []).filter((d) => !d.auto);
     const { data: kms } = named.length
@@ -260,34 +257,31 @@ Deno.serve(async (req) => {
 
     // 오늘 확인한 한 마리 사진
     const { data: tp } = await supa.from("photos")
-      .select("id, thumb_path, dog_ids, confidence, ai_note, vec").eq("day", photo.day).eq("status", "done")
+      .select("id, thumb_path, dog_ids, confidence, ai_note").eq("day", photo.day).eq("status", "done")
       .eq("practice", photo.practice === true).in("confidence", ["manual", "high"]).neq("id", photoId)
       .order("created_at", { ascending: false }).limit(1000);
-    const byDog = new Map<string, { path: string; v: number[] | null; manual: boolean }[]>();
+    const byDog = new Map<string, { path: string; manual: boolean }[]>();
     for (const p of tp ?? []) {
       if ((p.dog_ids ?? []).length !== 1) continue;
       if (p.confidence !== "manual" && !/^지문: (?!같은 장면)/.test(p.ai_note ?? "")) continue;
       const d = p.dog_ids[0];
       if (!byDog.has(d)) byDog.set(d, []);
-      byDog.get(d)!.push({ path: p.thumb_path, v: pv(p.vec), manual: p.confidence === "manual" });
+      byDog.get(d)!.push({ path: p.thumb_path, manual: p.confidence === "manual" });
     }
-    // DB 대표 사진 + 최근 확인 사진 지문 (fp_match: 지난 실수로 닮았던 아이는 점수 깎음)
+    // 지문 순위: DB 대표 사진(상위 3장 평균)과 오늘 확인 사진(상위 2장 평균) 중 더 닮은 쪽 — DB에서 한 번에 계산 (fp_today_rank, 1초 안쪽)
+    //  (예전 fp_match 는 60일치 사진을 다 훑어서 사진 1장에 40초 넘게 걸렸음)
     const fpSim = new Map<string, number>();
     if (photo.vec) {
-      const { data: m } = await supa.rpc("fp_match", { q: photo.vec, dogs: pool0.map((d) => d.id), p_day: photo.day, p_photo: photoId });
-      for (const x of m ?? []) fpSim.set(x.dog_id, x.sim);
+      const { data: m } = await supa.rpc("fp_today_rank", { q: photo.vec, dogs: pool0.map((d) => d.id), p_day: photo.day, p_photo: photoId });
+      for (const x of m ?? []) fpSim.set(x.dog_id, Math.max(x.ref_sim ?? 0, x.today_sim ?? 0));
     }
-    const todaySim = (id: string) => {
-      const ps = byDog.get(id); if (!qv || !ps?.length) return 0;
-      const s = ps.map((p) => (p.v ? cosv(qv, p.v) : 0)).sort((a, b) => b - a).slice(0, 2);
-      return s.reduce((a, b) => a + b, 0) / s.length;
-    };
     const K = 8, PER = 3;
-    const ranked = pool0.map((d) => ({ d, sim: Math.max(todaySim(d.id), fpSim.get(d.id) ?? 0) }))
+    const ranked = pool0.map((d) => ({ d, sim: fpSim.get(d.id) ?? 0 }))
       .filter((x) => byDog.has(x.d.id) || (x.d.dog_refs ?? []).length || x.d.ref_path)
       .sort((a, b) => b.sim - a.sim).slice(0, K);
     const cand = ranked.map(({ d, sim }) => {
-      const ps = [...(byDog.get(d.id) ?? [])].sort((a, b) => (qv && b.v && a.v ? cosv(qv, b.v) - cosv(qv, a.v) : 0));
+      // 오늘 사진: 직원이 확인한 사진 먼저, 그다음 최근 순
+      const ps = [...(byDog.get(d.id) ?? [])].sort((a, b) => Number(b.manual) - Number(a.manual));
       const refPaths = (d.dog_refs ?? []).sort((a, b) => b.created_at.localeCompare(a.created_at)).map((r) => r.path);
       if (!refPaths.length && d.ref_path) refPaths.push(d.ref_path);
       // 오늘 사진 2장 + DB 대표 사진 1장 (오늘 사진이 없으면 DB 대표 사진 3장)
